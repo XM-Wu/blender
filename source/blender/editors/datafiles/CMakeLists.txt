@@ -107,6 +107,7 @@ set_property(GLOBAL PROPERTY ICON_GEOM_NAMES
   ops.mesh.extrude_region_shrink_fatten
   ops.mesh.inset
   ops.mesh.knife_tool
+  ops.mesh.target_weld
   ops.mesh.loopcut_slide
   ops.mesh.offset_edge_loops_slide
   ops.mesh.polybuild_hover

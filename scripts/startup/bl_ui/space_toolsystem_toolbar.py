@@ -1242,7 +1242,7 @@ class _defs_edit_mesh:
                 "Drag a vertex onto another vertex, or an edge onto another edge, to weld it. "
                 "The target keeps its position. Use Vertex or Edge select mode"
             ),
-            icon="AUTOMERGE_ON",
+            icon="ops.mesh.target_weld",
             widget="VIEW3D_GGT_target_weld",
             keymap=(),
         )

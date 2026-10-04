@@ -350,7 +350,9 @@ class _defs_transform:
 
     @ToolDef.from_fn
     def scale():
-        def draw_settings(context, layout, _tool):
+        def draw_settings(context, layout, tool):
+            props = tool.gizmo_group_properties("VIEW3D_GGT_xform_gizmo")
+            layout.prop(props, "use_clamp_negative")
             _defs_transform.draw_transform_sculpt_tool_settings(context, layout)
             _template_widget.VIEW3D_GGT_xform_gizmo.draw_settings_with_index(context, layout, 3)
         return dict(

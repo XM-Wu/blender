@@ -207,6 +207,9 @@ enum eTFlag {
    * rotation is reversed for some input calculation, which need to account for this.
    */
   T_VIEW_NEGATIVE = 1 << 28,
+
+  /** Scale factors are clamped to zero. Set by the Scale tool option. */
+  T_CLAMP_SCALE_NONNEGATIVE = 1 << 29,
 };
 ENUM_OPERATORS(eTFlag);
 

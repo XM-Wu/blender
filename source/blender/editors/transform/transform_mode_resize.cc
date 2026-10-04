@@ -14,6 +14,9 @@
 #include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector_c.hh"
 #include "BLI_task.hh"
+#include "BLI_utildefines.hh"
+
+#include "DNA_space_types.h"
 
 #include "BKE_context.hh"
 
@@ -25,6 +28,9 @@
 #include "ED_screen.hh"
 
 #include "RNA_access.hh"
+
+#include "WM_api.hh"
+#include "WM_toolsystem.hh"
 
 #include "UI_interface.hh"
 
@@ -190,6 +196,12 @@ static void applyResize(TransInfo *t)
     transform_snap_mixed_apply(t, t->values_final);
   }
 
+  if (t->flag & T_CLAMP_SCALE_NONNEGATIVE) {
+    for (int axis = 0; axis < 3; axis++) {
+      t->values_final[axis] = std::max(0.0f, t->values_final[axis]);
+    }
+  }
+
   size_to_mat3(mat, t->values_final);
   if (t->con.mode & CON_APPLY) {
     t->con.applySize(t, nullptr, nullptr, mat);
@@ -258,8 +270,34 @@ static void resize_transform_matrix_fn(TransInfo *t, float mat_xform[4][4])
   mul_m4_m4m4(mat_xform, mat4, mat_xform);
 }
 
+static bool resize_tool_clamps_negative(const bContext *C)
+{
+  const ScrArea *area = CTX_wm_area(C);
+  if (area == nullptr || area->spacetype != SPACE_VIEW3D) {
+    return false;
+  }
+
+  bToolRef *tref = WM_toolsystem_ref_from_context(C);
+  if (tref == nullptr || !STREQ(tref->idname, "builtin.scale")) {
+    return false;
+  }
+
+  wmGizmoGroupType *gzgt = WM_gizmogrouptype_find("VIEW3D_GGT_xform_gizmo", true);
+  if (gzgt == nullptr) {
+    return true;
+  }
+
+  PointerRNA gzg_ptr;
+  WM_toolsystem_ref_properties_ensure_from_gizmo_group(tref, gzgt, &gzg_ptr);
+  return RNA_boolean_get(&gzg_ptr, "use_clamp_negative");
+}
+
 static void initResize(TransInfo *t, wmOperator *op)
 {
+  if (resize_tool_clamps_negative(t->context)) {
+    t->flag |= T_CLAMP_SCALE_NONNEGATIVE;
+  }
+
   float mouse_dir_constraint[3];
   if (op) {
     PropertyRNA *prop = RNA_struct_find_property(op->ptr, "mouse_dir_constraint");

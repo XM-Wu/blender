@@ -2956,6 +2956,11 @@ void VIEW3D_GGT_xform_gizmo(wmGizmoGroupType *gzgt)
                V3D_GIZMO_SHOW_OBJECT_TRANSLATE,
                "Drag Action",
                "");
+  RNA_def_boolean(gzgt->srna,
+                  "use_clamp_negative",
+                  true,
+                  "Clamp Negative",
+                  "Clamp scale to zero instead of allowing negative values");
 
   g_GGT_xform_gizmo = gzgt;
 }

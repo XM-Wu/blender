@@ -1654,6 +1654,10 @@ def km_view3d(params):
         ])
 
     items.extend([
+        # Hold D to edit the transform gizmo pivot (Maya custom pivot). Pass through so annotate
+        # and other D bindings still run when this operator's poll fails or after the redraw.
+        ("view3d.gizmo_pivot_edit", {"type": 'D', "value": 'PRESS', "any": True}, None),
+        ("view3d.gizmo_pivot_edit", {"type": 'D', "value": 'RELEASE', "any": True}, None),
         # Visibility.
         ("view3d.localview", {"type": 'NUMPAD_SLASH', "value": 'PRESS'}, None),
         ("view3d.localview", {"type": 'SLASH', "value": 'PRESS'}, None),

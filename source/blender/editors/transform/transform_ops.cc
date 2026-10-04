@@ -872,7 +872,7 @@ static void TRANSFORM_OT_translate(wmOperatorType *ot)
   properties_register(ot,
                       P_ORIENT_MATRIX | P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_ALIGN_SNAP |
                           P_OPTIONS | P_GPENCIL_EDIT | P_CURSOR_EDIT | P_VIEW2D_EDGE_PAN |
-                          P_POST_TRANSFORM | P_TRANSLATE_ORIGIN);
+                          P_POST_TRANSFORM | P_TRANSLATE_ORIGIN | P_CENTER);
 }
 
 static void TRANSFORM_OT_resize(wmOperatorType *ot)
@@ -1425,6 +1425,51 @@ static void TRANSFORM_OT_rotate_normal(wmOperatorType *ot)
   properties_register(ot, P_ORIENT_AXIS | P_ORIENT_MATRIX | P_CONSTRAINT | P_MIRROR);
 }
 
+static wmOperatorStatus transform_gizmo_pivot_invoke(bContext *C,
+                                                      wmOperator *op,
+                                                      const wmEvent *event)
+{
+  /* Proportional editing and mirror would move more than the pivot point. */
+  RNA_boolean_set(op->ptr, "gizmo_pivot", true);
+  RNA_boolean_set(op->ptr, "use_proportional_edit", false);
+  RNA_boolean_set(op->ptr, "mirror", false);
+  return transform_invoke(C, op, event);
+}
+
+static void TRANSFORM_OT_gizmo_pivot(wmOperatorType *ot)
+{
+  /* Identifiers. */
+  ot->name = "Transform Pivot";
+  ot->description = "Move or rotate the 3D View transform pivot";
+  ot->idname = "TRANSFORM_OT_gizmo_pivot";
+  /* No undo step: the pivot is runtime-only and does not change IDs. */
+  ot->flag = OPTYPE_BLOCKING;
+
+  /* API callbacks. */
+  ot->invoke = transform_gizmo_pivot_invoke;
+  ot->exec = transform_exec;
+  ot->modal = transform_modal;
+  ot->cancel = transform_cancel;
+  ot->poll = ED_operator_region_view3d_active;
+  ot->poll_property = transform_poll_property;
+
+  PropertyRNA *prop = RNA_def_enum(
+      ot->srna, "mode", rna_enum_transform_mode_type_items, TFM_TRANSLATION, "Mode", "");
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+
+  prop = RNA_def_boolean(ot->srna, "gizmo_pivot", false, "Transform Pivot", "");
+  RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
+
+  RNA_def_float_vector(
+      ot->srna, "value", 4, nullptr, -FLT_MAX, FLT_MAX, "Values", "", -FLT_MAX, FLT_MAX);
+
+  WM_operatortype_props_advanced_begin(ot);
+
+  properties_register(ot,
+                      P_ORIENT_MATRIX | P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_ALIGN_SNAP |
+                          P_CENTER);
+}
+
 static void TRANSFORM_OT_transform(wmOperatorType *ot)
 {
   PropertyRNA *prop;
@@ -1521,6 +1566,7 @@ void transform_operatortypes()
   }
 
   WM_operatortype_append(TRANSFORM_OT_transform);
+  WM_operatortype_append(TRANSFORM_OT_gizmo_pivot);
 
   WM_operatortype_append(TRANSFORM_OT_select_orientation);
   WM_operatortype_append(TRANSFORM_OT_create_orientation);
@@ -1539,6 +1585,7 @@ void keymap_transform(wmKeyConfig *keyconf)
     WM_modalkeymap_assign(modalmap, tmode->idname);
   }
   WM_modalkeymap_assign(modalmap, "TRANSFORM_OT_transform");
+  WM_modalkeymap_assign(modalmap, "TRANSFORM_OT_gizmo_pivot");
 }
 
 }  // namespace ed::transform

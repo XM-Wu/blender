@@ -76,7 +76,7 @@ void transform_view_vector_calc(const TransInfo *t, const float focus[3], float 
 
 bool transdata_check_local_islands(TransInfo *t, short around)
 {
-  if (t->options & (CTX_CURSOR | CTX_TEXTURE_SPACE)) {
+  if (t->options & (CTX_CURSOR | CTX_TEXTURE_SPACE | CTX_GIZMO_PIVOT)) {
     return false;
   }
   return ((around == V3D_AROUND_LOCAL_ORIGINS) &&
@@ -2031,6 +2031,14 @@ bool initTransform(bContext *C, TransInfo *t, wmOperator *op, const wmEvent *eve
   {
     if (RNA_property_boolean_get(op->ptr, prop)) {
       options |= CTX_CURSOR;
+    }
+  }
+
+  if ((prop = RNA_struct_find_property(op->ptr, "gizmo_pivot")) &&
+      RNA_property_is_set(op->ptr, prop))
+  {
+    if (RNA_property_boolean_get(op->ptr, prop)) {
+      options |= CTX_GIZMO_PIVOT | CTX_NO_PET;
     }
   }
 

@@ -262,6 +262,7 @@ void transform_convert_pose_transflags_update(Object *ob, int mode, short around
 extern TransConvertTypeInfo TransConvertType_CursorImage;
 extern TransConvertTypeInfo TransConvertType_CursorSequencer;
 extern TransConvertTypeInfo TransConvertType_Cursor3D;
+extern TransConvertTypeInfo TransConvertType_GizmoPivot;
 
 /* `transform_convert_curve.cc` */
 

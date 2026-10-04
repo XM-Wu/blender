@@ -10,13 +10,20 @@
  * Used for 3D View
  */
 
+#include "MEM_guardedalloc.h"
+
 #include "BLI_array_utils_c.hh"
 #include "BLI_bounds.hh"
 #include "BLI_function_ref.hh"
 #include "BLI_listbase.hh"
+#include "BLI_map.hh"
 #include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
+#include "BLI_math_vector_c.hh"
+#include "BLI_string.hh"
 
+#include "DNA_action_types.h"
 #include "DNA_armature_types.h"
 #include "DNA_lattice_types.h"
 #include "DNA_meta_types.h"
@@ -39,6 +46,7 @@
 #include "BKE_pointcache.h"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
+#include "BKE_wm_runtime.hh"
 
 #include "WM_api.hh"
 #include "WM_message.hh"
@@ -166,6 +174,10 @@ struct GizmoGroup {
 
   /* Only for Rotate operator. */
   float rotation;
+
+  /** #twtype used for drawing. While D is held this is translate and rotate together. */
+  int twtype_draw;
+  bool pivot_editing_draw;
 
   wmGizmo *gizmos[MAN_AXIS_LAST];
 };
@@ -1712,6 +1724,595 @@ static GizmoGroup *gizmogroup_init(wmGizmoGroup *gzgroup)
   return ggd;
 }
 
+/* -------------------------------------------------------------------- */
+/** \name Custom Pivot
+ *
+ * Hold D in the Move, Rotate, Scale, or Transform tool to move or rotate the
+ * gizmo pivot, matching Maya's custom pivot. The pivot is runtime-only.
+ * \{ */
+
+struct GizmoCustomPivot {
+  bool valid = false;
+  bool orient_custom = false;
+  bool was_valid = false;
+  /** World-space location. Refreshed from #location_local when a reference exists. */
+  float location[3] = {0.0f, 0.0f, 0.0f};
+  float location_local[3] = {0.0f, 0.0f, 0.0f};
+  /** World-space orientation. Stays as set; it does not spin with the selection. */
+  float quat[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+  uint64_t selection_hash = 0;
+
+  /** Non-owning. Cleared when the object leaves the view layer. */
+  Object *reference = nullptr;
+  char pose_bone[64] = "";
+  bool use_pose_bone = false;
+
+  /**
+   * Edit-mesh translation follow. The vertex is only dereferenced after a pointer scan
+   * confirms it still belongs to the mesh.
+   */
+  BMVert *ref_vert = nullptr;
+  float ref_offset[3] = {0.0f, 0.0f, 0.0f};
+  float anchor_natural[3] = {0.0f, 0.0f, 0.0f};
+  bool track_edit_translation = false;
+};
+
+static Map<const View3D *, GizmoCustomPivot *> g_gizmo_pivots;
+
+static uint64_t gizmo_pivot_hash_mix(uint64_t hash, uint64_t value)
+{
+  return hash ^ (value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2));
+}
+
+bool gizmo_pivot_tool_active(const bContext *C)
+{
+  const ScrArea *area = CTX_wm_area(C);
+  const bToolRef *tref = area ? area->runtime.tool : nullptr;
+  if (tref == nullptr) {
+    return false;
+  }
+  return STREQ(tref->idname, "builtin.move") || STREQ(tref->idname, "builtin.rotate") ||
+         STREQ(tref->idname, "builtin.scale") || STREQ(tref->idname, "builtin.transform");
+}
+
+static bool gizmo_pivot_key_held(const bContext *C, const wmEvent *event)
+{
+  if (event != nullptr && event->keymodifier == EVT_DKEY) {
+    return true;
+  }
+  const wmWindow *win = CTX_wm_window(C);
+  return win && win->runtime && win->runtime->eventstate &&
+         win->runtime->eventstate->keymodifier == EVT_DKEY;
+}
+
+static GizmoCustomPivot *gizmo_pivot_find(const View3D *v3d)
+{
+  if (v3d == nullptr) {
+    return nullptr;
+  }
+  GizmoCustomPivot **found = g_gizmo_pivots.lookup_ptr(v3d);
+  return found ? *found : nullptr;
+}
+
+static GizmoCustomPivot *gizmo_pivot_ensure(const View3D *v3d)
+{
+  if (GizmoCustomPivot *existing = gizmo_pivot_find(v3d)) {
+    return existing;
+  }
+  GizmoCustomPivot *pivot = MEM_new<GizmoCustomPivot>(__func__);
+  g_gizmo_pivots.add(v3d, pivot);
+  return pivot;
+}
+
+void gizmo_pivot_clear(const View3D *v3d)
+{
+  std::optional<GizmoCustomPivot *> pivot = g_gizmo_pivots.pop_try(v3d);
+  if (pivot.has_value() && *pivot != nullptr) {
+    MEM_delete(*pivot);
+  }
+}
+
+static bool gizmo_pivot_vert_in_mesh(BMesh *bm, BMVert *vert)
+{
+  if (bm == nullptr || vert == nullptr) {
+    return false;
+  }
+  BMIter iter;
+  BMVert *eve;
+  BM_ITER_MESH (eve, &iter, bm, BM_VERTS_OF_MESH) {
+    if (eve == vert) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static uint64_t gizmo_pivot_selection_hash(const bContext *C)
+{
+  const Main *bmain = CTX_data_main(C);
+  Scene *scene = CTX_data_scene(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  View3D *v3d = CTX_wm_view3d(C);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
+
+  Object *obact = BKE_view_layer_active_object_get(view_layer);
+  uint64_t hash = gizmo_pivot_hash_mix(0, uintptr_t(obact));
+  hash = gizmo_pivot_hash_mix(hash, obact ? uint64_t(obact->mode) : 0);
+
+  if (obact && (obact->mode & OB_MODE_EDIT)) {
+    Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode(
+        *bmain, scene, view_layer, v3d);
+    for (Object *ob : objects) {
+      hash = gizmo_pivot_hash_mix(hash, uintptr_t(ob));
+      if (ob->type == OB_MESH) {
+        BMEditMesh *em = BKE_editmesh_from_object(ob);
+        if (em == nullptr || em->bm == nullptr) {
+          continue;
+        }
+        BMesh *bm = em->bm;
+        hash = gizmo_pivot_hash_mix(hash, uint64_t(bm->totvertsel));
+        hash = gizmo_pivot_hash_mix(hash, uintptr_t(BM_mesh_active_elem_get(bm)));
+        BMIter iter;
+        BMVert *vert;
+        BM_ITER_MESH (vert, &iter, bm, BM_VERTS_OF_MESH) {
+          if (BM_elem_flag_test(vert, BM_ELEM_SELECT)) {
+            hash = gizmo_pivot_hash_mix(hash, uintptr_t(vert));
+          }
+        }
+      }
+      else if (ob->type == OB_ARMATURE) {
+        bArmature *arm = id_cast<bArmature *>(ob->data);
+        if (arm->edbo != nullptr) {
+          for (EditBone &ebo : *arm->edbo) {
+            if (ebo.flag & (BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL)) {
+              hash = gizmo_pivot_hash_mix(hash, uintptr_t(&ebo));
+            }
+          }
+        }
+      }
+    }
+    return hash;
+  }
+
+  if (obact && (obact->mode & OB_MODE_POSE) && obact->pose) {
+    bArmature *arm = id_cast<bArmature *>(obact->data);
+    hash = gizmo_pivot_hash_mix(hash, uintptr_t(arm->act_bone));
+    for (bPoseChannel &pchan : obact->pose->chanbase) {
+      if (pchan.flag & POSE_SELECTED) {
+        hash = gizmo_pivot_hash_mix(hash, uintptr_t(&pchan));
+      }
+    }
+    return hash;
+  }
+
+  FOREACH_SELECTED_OBJECT_BEGIN (view_layer, v3d, ob) {
+    hash = gizmo_pivot_hash_mix(hash, uintptr_t(ob));
+  }
+  FOREACH_SELECTED_OBJECT_END;
+  return hash;
+}
+
+static bool gizmo_pivot_reference_alive(const bContext *C, const GizmoCustomPivot *pivot)
+{
+  if (pivot->reference == nullptr) {
+    return true;
+  }
+  const Main *bmain = CTX_data_main(C);
+  Scene *scene = CTX_data_scene(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
+  return BKE_view_layer_base_find(view_layer, pivot->reference) != nullptr;
+}
+
+static bool gizmo_pivot_space_valid(const GizmoCustomPivot *pivot)
+{
+  if (!pivot->use_pose_bone) {
+    return true;
+  }
+  if (pivot->reference == nullptr || pivot->reference->pose == nullptr) {
+    return false;
+  }
+  return BKE_pose_channel_find_name(pivot->reference->pose, pivot->pose_bone) != nullptr;
+}
+
+static void gizmo_pivot_set_reference(const bContext *C, GizmoCustomPivot *pivot)
+{
+  const Main *bmain = CTX_data_main(C);
+  Scene *scene = CTX_data_scene(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
+  Object *ob = BKE_view_layer_active_object_get(view_layer);
+
+  pivot->reference = ob;
+  pivot->use_pose_bone = false;
+  pivot->pose_bone[0] = '\0';
+  if (ob && (ob->mode & OB_MODE_POSE)) {
+    if (bPoseChannel *pchan = BKE_pose_channel_active(ob, false)) {
+      pivot->use_pose_bone = true;
+      BLI_strncpy(pivot->pose_bone, pchan->name, sizeof(pivot->pose_bone));
+    }
+  }
+}
+
+static void gizmo_pivot_storage_from_world(GizmoCustomPivot *pivot)
+{
+  if (pivot->use_pose_bone && pivot->reference && pivot->reference->pose) {
+    if (bPoseChannel *pchan = BKE_pose_channel_find_name(pivot->reference->pose, pivot->pose_bone))
+    {
+      float imat[4][4];
+      if (invert_m4_m4(imat, pchan->pose_mat)) {
+        mul_v3_m4v3(pivot->location_local, imat, pivot->location);
+        return;
+      }
+    }
+  }
+  if (pivot->reference) {
+    invert_m4_m4(pivot->reference->runtime->world_to_object.ptr(),
+                 pivot->reference->object_to_world().ptr());
+    mul_v3_m4v3(
+        pivot->location_local, pivot->reference->world_to_object().ptr(), pivot->location);
+    return;
+  }
+  copy_v3_v3(pivot->location_local, pivot->location);
+}
+
+static void gizmo_pivot_world_from_storage(GizmoCustomPivot *pivot, const float natural[3])
+{
+  float world[3];
+  if (pivot->use_pose_bone && pivot->reference && pivot->reference->pose) {
+    bPoseChannel *pchan = BKE_pose_channel_find_name(pivot->reference->pose, pivot->pose_bone);
+    if (pchan) {
+      mul_v3_m4v3(world, pchan->pose_mat, pivot->location_local);
+    }
+    else {
+      copy_v3_v3(world, pivot->location);
+    }
+  }
+  else if (pivot->reference) {
+    mul_v3_m4v3(world, pivot->reference->object_to_world().ptr(), pivot->location_local);
+  }
+  else {
+    copy_v3_v3(world, pivot->location_local);
+  }
+
+  if (pivot->track_edit_translation && pivot->reference && pivot->reference->type == OB_MESH &&
+      (pivot->reference->mode & OB_MODE_EDIT))
+  {
+    BMesh *bm = BKE_editmesh_bmesh_get_for_write(pivot->reference);
+    if (gizmo_pivot_vert_in_mesh(bm, pivot->ref_vert)) {
+      float ref_world[3];
+      mul_v3_m4v3(ref_world, pivot->reference->object_to_world().ptr(), pivot->ref_vert->co);
+      float new_offset[3];
+      sub_v3_v3v3(new_offset, ref_world, natural);
+      if (compare_v3v3(new_offset, pivot->ref_offset, 1.0e-4f)) {
+        float delta[3];
+        sub_v3_v3v3(delta, natural, pivot->anchor_natural);
+        if (len_squared_v3(delta) > 1.0e-12f) {
+          add_v3_v3(world, delta);
+          copy_v3_v3(pivot->location, world);
+          gizmo_pivot_storage_from_world(pivot);
+        }
+      }
+      else {
+        copy_v3_v3(pivot->ref_offset, new_offset);
+      }
+      copy_v3_v3(pivot->anchor_natural, natural);
+    }
+    else {
+      pivot->track_edit_translation = false;
+      pivot->ref_vert = nullptr;
+    }
+  }
+
+  copy_v3_v3(pivot->location, world);
+}
+
+static void gizmo_pivot_capture_edit_anchor(const bContext *C, GizmoCustomPivot *pivot)
+{
+  pivot->track_edit_translation = false;
+  pivot->ref_vert = nullptr;
+
+  Object *ob = pivot->reference;
+  if (ob == nullptr || ob->type != OB_MESH || (ob->mode & OB_MODE_EDIT) == 0) {
+    return;
+  }
+  BMEditMesh *em = BKE_editmesh_from_object(ob);
+  if (em == nullptr || em->bm == nullptr) {
+    return;
+  }
+
+  BMVert *ref = nullptr;
+  BMIter iter;
+  BMVert *vert;
+  BM_ITER_MESH (vert, &iter, em->bm, BM_VERTS_OF_MESH) {
+    if (BM_elem_flag_test(vert, BM_ELEM_SELECT) && !BM_elem_flag_test(vert, BM_ELEM_HIDDEN)) {
+      ref = vert;
+      break;
+    }
+  }
+  if (ref == nullptr) {
+    return;
+  }
+
+  ARegion *region = CTX_wm_region(C);
+  RegionView3D *rv3d = region ? static_cast<RegionView3D *>(region->regiondata) : nullptr;
+  TransformBounds tbounds;
+  TransformCalcParams calc_params{};
+  calc_params.use_only_center = true;
+  if (calc_gizmo_stats(C, &calc_params, &tbounds, rv3d) == 0) {
+    return;
+  }
+
+  Scene *scene = CTX_data_scene(C);
+  float natural[3];
+  if (!gizmo_3d_calc_pos(C, scene, &tbounds, scene->toolsettings->transform_pivot_point, natural))
+  {
+    copy_v3_v3(natural, tbounds.center);
+  }
+
+  float ref_world[3];
+  mul_v3_m4v3(ref_world, ob->object_to_world().ptr(), ref->co);
+  sub_v3_v3v3(pivot->ref_offset, ref_world, natural);
+  copy_v3_v3(pivot->anchor_natural, natural);
+  pivot->ref_vert = ref;
+  pivot->track_edit_translation = true;
+}
+
+static void gizmo_pivot_prepare_for_edit(const bContext *C, RegionView3D *rv3d)
+{
+  View3D *v3d = CTX_wm_view3d(C);
+  GizmoCustomPivot *pivot = gizmo_pivot_ensure(v3d);
+  const uint64_t hash = gizmo_pivot_selection_hash(C);
+  if (!pivot->valid || pivot->selection_hash != hash) {
+    pivot->valid = false;
+    pivot->orient_custom = false;
+    pivot->track_edit_translation = false;
+    pivot->ref_vert = nullptr;
+    copy_v3_v3(pivot->location, rv3d->twmat[3]);
+    mat4_to_quat(pivot->quat, rv3d->twmat);
+    normalize_qt(pivot->quat);
+    gizmo_pivot_set_reference(C, pivot);
+    gizmo_pivot_storage_from_world(pivot);
+    pivot->selection_hash = hash;
+  }
+  else if (!pivot->orient_custom) {
+    mat4_to_quat(pivot->quat, rv3d->twmat);
+    normalize_qt(pivot->quat);
+    copy_v3_v3(pivot->location, rv3d->twmat[3]);
+  }
+  pivot->was_valid = pivot->valid;
+}
+
+static void gizmo_pivot_apply_to_twmat(const bContext *C, float twmat[4][4])
+{
+  GizmoCustomPivot *pivot = gizmo_pivot_find(CTX_wm_view3d(C));
+  if (pivot == nullptr || !pivot->valid) {
+    return;
+  }
+  if (!gizmo_pivot_reference_alive(C, pivot) || !gizmo_pivot_space_valid(pivot) ||
+      pivot->selection_hash != gizmo_pivot_selection_hash(C))
+  {
+    pivot->valid = false;
+    pivot->orient_custom = false;
+    pivot->track_edit_translation = false;
+    pivot->ref_vert = nullptr;
+    return;
+  }
+
+  float natural[3];
+  copy_v3_v3(natural, twmat[3]);
+  gizmo_pivot_world_from_storage(pivot, natural);
+  if (pivot->orient_custom) {
+    quat_to_mat4(twmat, pivot->quat);
+  }
+  copy_v3_v3(twmat[3], pivot->location);
+}
+
+static void gizmo_pivot_bind_operator(const bContext *C,
+                                      wmGizmoGroup *gzgroup,
+                                      wmGizmo *gz,
+                                      const wmEvent *event)
+{
+  GizmoGroup *ggd = static_cast<GizmoGroup *>(gzgroup->customdata);
+  const int axis_idx = BLI_array_findindex(ggd->gizmos, ARRAY_SIZE(ggd->gizmos), &gz);
+  if (axis_idx < 0 || axis_idx >= MAN_AXIS_LAST) {
+    return;
+  }
+
+  const short axis_type = gizmo_get_axis_type(axis_idx);
+  const bool pivot_edit = gizmo_pivot_tool_active(C) && gizmo_pivot_key_held(C, event) &&
+                          ELEM(axis_type, MAN_AXES_TRANSLATE, MAN_AXES_ROTATE);
+
+  wmOperatorType *ot = nullptr;
+  int mode = TFM_TRANSLATION;
+  if (pivot_edit) {
+    ARegion *region = CTX_wm_region(C);
+    RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
+    gizmo_pivot_prepare_for_edit(C, rv3d);
+    ot = WM_operatortype_find("TRANSFORM_OT_gizmo_pivot", true);
+    if (axis_type == MAN_AXES_ROTATE) {
+      mode = (axis_idx == MAN_AXIS_ROT_T) ? TFM_TRACKBALL : TFM_ROTATION;
+    }
+  }
+  else if (axis_type == MAN_AXES_TRANSLATE) {
+    ot = WM_operatortype_find("TRANSFORM_OT_translate", true);
+  }
+  else if (axis_type == MAN_AXES_ROTATE) {
+    ot = WM_operatortype_find(
+        (axis_idx == MAN_AXIS_ROT_T) ? "TRANSFORM_OT_trackball" : "TRANSFORM_OT_rotate", true);
+  }
+  else {
+    ot = WM_operatortype_find("TRANSFORM_OT_resize", true);
+  }
+
+  PointerRNA *ptr = WM_gizmo_operator_set(gz, 0, ot, nullptr);
+  if (pivot_edit) {
+    RNA_enum_set(ptr, "mode", mode);
+    RNA_boolean_set(ptr, "gizmo_pivot", true);
+    RNA_boolean_set(ptr, "use_proportional_edit", false);
+    RNA_boolean_set(ptr, "mirror", false);
+  }
+
+  bool constraint_axis[3] = {false, false, false};
+  gizmo_get_axis_constraint(axis_idx, constraint_axis);
+  if (ELEM(true, UNPACK3(constraint_axis))) {
+    if (PropertyRNA *prop = RNA_struct_find_property(ptr, "constraint_axis")) {
+      RNA_property_boolean_set_array(ptr, prop, constraint_axis);
+    }
+  }
+  RNA_boolean_set(ptr, "release_confirm", true);
+}
+
+static void gizmo_pivot_invoke_apply(const bContext *C, wmGizmoGroup *gzgroup, wmGizmo *gz)
+{
+  wmGizmoOpElem *gzop = WM_gizmo_operator_get(gz, 0);
+  if (gzop == nullptr || gzop->ptr.data == nullptr) {
+    return;
+  }
+
+  GizmoCustomPivot *pivot = gizmo_pivot_find(CTX_wm_view3d(C));
+  if (pivot == nullptr) {
+    return;
+  }
+
+  const bool pivot_edit = gzop->type && STREQ(gzop->type->idname, "TRANSFORM_OT_gizmo_pivot");
+  if (!pivot_edit && !pivot->valid) {
+    return;
+  }
+  if (!pivot_edit && (pivot->selection_hash != gizmo_pivot_selection_hash(C) ||
+                      !gizmo_pivot_reference_alive(C, pivot)))
+  {
+    pivot->valid = false;
+    pivot->orient_custom = false;
+    return;
+  }
+
+  PointerRNA *ptr = &gzop->ptr;
+  if (PropertyRNA *prop_center = RNA_struct_find_property(ptr, "center_override")) {
+    RNA_property_float_set_array(ptr, prop_center, pivot->location);
+  }
+
+  if (!pivot->orient_custom) {
+    return;
+  }
+
+  GizmoGroup *ggd = static_cast<GizmoGroup *>(gzgroup->customdata);
+  const int axis_idx = BLI_array_findindex(ggd->gizmos, ARRAY_SIZE(ggd->gizmos), &gz);
+  /* View dial and trackball keep a view axis. */
+  if (ELEM(axis_idx, MAN_AXIS_ROT_C, MAN_AXIS_ROT_T)) {
+    return;
+  }
+
+  PropertyRNA *prop_orient_type = RNA_struct_find_property(ptr, "orient_type");
+  PropertyRNA *prop_orient_matrix = RNA_struct_find_property(ptr, "orient_matrix");
+  PropertyRNA *prop_orient_matrix_type = RNA_struct_find_property(ptr, "orient_matrix_type");
+  if (prop_orient_type == nullptr || prop_orient_matrix == nullptr ||
+      prop_orient_matrix_type == nullptr)
+  {
+    return;
+  }
+
+  /* The default orientation slot leaves orient_type unset. Pin it to that slot so
+   * orient_matrix_type can match and the custom pivot axes are actually used. */
+  Scene *scene = CTX_data_scene(C);
+  const TransformOrientationSlot *orient_slot = BKE_scene_orientation_slot_get_from_flag(
+      scene, ggd->twtype_init);
+  int orient_index = RNA_property_is_set(ptr, prop_orient_type) ?
+                         RNA_property_enum_get(ptr, prop_orient_type) :
+                         BKE_scene_orientation_slot_get_index(orient_slot);
+  RNA_property_enum_set(ptr, prop_orient_type, orient_index);
+
+  float mat[3][3];
+  quat_to_mat3(mat, pivot->quat);
+  RNA_property_float_set_array(ptr, prop_orient_matrix, &mat[0][0]);
+  RNA_property_enum_set(ptr, prop_orient_matrix_type, orient_index);
+}
+
+static bool gizmo_pivot_quat_differs(const float a[4], const float b[4])
+{
+  return fabsf(a[0] - b[0]) > 1.0e-6f || fabsf(a[1] - b[1]) > 1.0e-6f ||
+         fabsf(a[2] - b[2]) > 1.0e-6f || fabsf(a[3] - b[3]) > 1.0e-6f;
+}
+
+static void createTransGizmoPivot(bContext * /*C*/, TransInfo *t)
+{
+  if (t->area == nullptr || t->area->spacetype != SPACE_VIEW3D) {
+    return;
+  }
+  View3D *v3d = t->area->spacedata.first_as<View3D>();
+  GizmoCustomPivot *pivot = gizmo_pivot_ensure(v3d);
+  pivot->was_valid = pivot->valid;
+
+  BLI_assert(t->data_container_len == 1);
+  TransDataContainer *tc = t->data_container;
+  tc->data_len = 1;
+  TransData *td = tc->data = MEM_new_zeroed<TransData>(__func__);
+  TransDataExtension *td_ext = tc->data_ext = MEM_new_zeroed<TransDataExtension>(__func__);
+
+  td->flag = TD_SELECTED;
+  td->factor = 1.0f;
+  copy_v3_v3(td->center, pivot->location);
+  copy_v3_v3(td->iloc, pivot->location);
+  td->loc = pivot->location;
+
+  unit_m3(td->mtx);
+  unit_m3(td->smtx);
+  quat_to_mat3(td->axismtx, pivot->quat);
+  normalize_m3(td->axismtx);
+
+  td_ext->quat = pivot->quat;
+  copy_qt_qt(td_ext->iquat, pivot->quat);
+  td_ext->rotOrder = ROT_MODE_QUAT;
+}
+
+static void recalcData_gizmo_pivot(TransInfo *t)
+{
+  if (t->region) {
+    ED_region_tag_redraw_editor_overlays(t->region);
+  }
+}
+
+static void special_aftertrans_update_gizmo_pivot(bContext *C, TransInfo *t)
+{
+  if (t->area == nullptr || t->area->spacetype != SPACE_VIEW3D) {
+    return;
+  }
+  View3D *v3d = t->area->spacedata.first_as<View3D>();
+  GizmoCustomPivot *pivot = gizmo_pivot_find(v3d);
+  if (pivot == nullptr || t->data_container == nullptr || t->data_container->data_ext == nullptr) {
+    return;
+  }
+
+  if (t->state == TRANS_CANCEL) {
+    if (!pivot->was_valid) {
+      pivot->valid = false;
+      pivot->orient_custom = false;
+      pivot->track_edit_translation = false;
+      pivot->ref_vert = nullptr;
+    }
+    return;
+  }
+
+  const float *iquat = t->data_container->data_ext->iquat;
+  if (ELEM(t->mode, TFM_ROTATION, TFM_TRACKBALL) || gizmo_pivot_quat_differs(pivot->quat, iquat)) {
+    pivot->orient_custom = true;
+  }
+  normalize_qt(pivot->quat);
+  pivot->valid = true;
+  pivot->selection_hash = gizmo_pivot_selection_hash(C);
+  gizmo_pivot_storage_from_world(pivot);
+  gizmo_pivot_capture_edit_anchor(C, pivot);
+}
+
+TransConvertTypeInfo TransConvertType_GizmoPivot = {
+    /*flags*/ 0,
+    /*create_trans_data*/ createTransGizmoPivot,
+    /*recalc_data*/ recalcData_gizmo_pivot,
+    /*special_aftertrans_update*/ special_aftertrans_update_gizmo_pivot,
+};
+
+/** \} */
+
 /**
  * Custom handler for gizmo widgets
  */
@@ -1899,6 +2500,7 @@ static void WIDGETGROUP_gizmo_setup(const bContext *C, wmGizmoGroup *gzgroup)
     }
     BLI_assert(ggd->twtype != 0);
     ggd->twtype_init = ggd->twtype;
+    ggd->twtype_draw = ggd->twtype;
   }
 
   /* *** set properties for axes *** */
@@ -2021,6 +2623,8 @@ static void WIDGETGROUP_gizmo_refresh(const bContext *C, wmGizmoGroup *gzgroup)
   gizmo_3d_calc_pos(
       C, scene, &tbounds, scene->toolsettings->transform_pivot_point, rv3d->twmat[3]);
 
+  gizmo_pivot_apply_to_twmat(C, rv3d->twmat);
+
   gizmogroup_refresh_from_matrix(gzgroup, rv3d->twmat, nullptr, false);
 }
 
@@ -2058,6 +2662,21 @@ static void WIDGETGROUP_gizmo_draw_prepare(const bContext *C, wmGizmoGroup *gzgr
   /* Re-calculate hidden unless modal. */
   const bool is_modal = WM_gizmo_group_is_modal(gzgroup);
 
+  int twtype_vis = ggd->twtype_draw != 0 ? ggd->twtype_draw : ggd->twtype;
+  if (!is_modal) {
+    const bool pivot_edit = gizmo_pivot_tool_active(C) && gizmo_pivot_key_held(C, nullptr);
+    twtype_vis = pivot_edit ? (V3D_GIZMO_SHOW_OBJECT_TRANSLATE | V3D_GIZMO_SHOW_OBJECT_ROTATE) :
+                              ggd->twtype;
+    if (pivot_edit != ggd->pivot_editing_draw || twtype_vis != ggd->twtype_draw) {
+      ggd->pivot_editing_draw = pivot_edit;
+      ggd->twtype_draw = twtype_vis;
+      MAN_ITER_AXES_BEGIN (axis, axis_idx) {
+        gizmo_3d_setup_draw_from_twtype(axis, axis_idx, twtype_vis);
+      }
+      MAN_ITER_AXES_END;
+    }
+  }
+
   /* When looking through a selected camera, the gizmo can be at the
    * exact same position as the view, skip so we don't break selection. */
   if (ggd->all_hidden || fabsf(ED_view3d_pixel_size(rv3d, rv3d->twmat[3])) < 5e-7f) {
@@ -2077,7 +2696,7 @@ static void WIDGETGROUP_gizmo_draw_prepare(const bContext *C, wmGizmoGroup *gzgr
     }
     else {
       const short axis_type = gizmo_get_axis_type(axis_idx);
-      if (gizmo_is_axis_visible(rv3d, ggd->twtype, idot, axis_type, axis_idx)) {
+      if (gizmo_is_axis_visible(rv3d, twtype_vis, idot, axis_type, axis_idx)) {
         /* XXX maybe unset _HIDDEN flag on redraw? */
         WM_gizmo_set_flag(axis, WM_GIZMO_HIDDEN, false);
       }
@@ -2132,17 +2751,18 @@ static void gizmo_3d_draw_invoke(wmGizmoGroup *gzgroup,
   wmGizmo *axis_active = ggd->gizmos[axis_idx_active];
 
   const short axis_active_type = gizmo_get_axis_type(axis_idx_active);
+  const int twtype_vis = ggd->twtype_draw != 0 ? ggd->twtype_draw : ggd->twtype;
 
   /* Display only the active gizmo. */
   gizmogroup_hide_all(ggd);
   WM_gizmo_set_flag(axis_active, WM_GIZMO_HIDDEN, false);
-  gizmo_refresh_from_matrix(axis_active, axis_idx_active, ggd->twtype, rv3d->twmat, nullptr);
+  gizmo_refresh_from_matrix(axis_active, axis_idx_active, twtype_vis, rv3d->twmat, nullptr);
 
   if (ELEM(axis_idx_active, MAN_AXIS_TRANS_C, MAN_AXIS_SCALE_C, MAN_AXIS_ROT_C, MAN_AXIS_ROT_T)) {
     WM_gizmo_set_matrix_rotation_from_z_axis(axis_active, rv3d->viewinv[2]);
   }
 
-  gizmo_3d_setup_draw_modal(axis_active, axis_idx_active, ggd->twtype);
+  gizmo_3d_setup_draw_modal(axis_active, axis_idx_active, twtype_vis);
 
   if (axis_active_type == MAN_AXES_TRANSLATE) {
     /* Arrows are used for visual reference, so keep all visible. */
@@ -2152,9 +2772,9 @@ static void gizmo_3d_draw_invoke(wmGizmoGroup *gzgroup,
       }
       wmGizmo *axis = ggd->gizmos[axis_idx];
       WM_gizmo_set_flag(axis, WM_GIZMO_HIDDEN, false);
-      gizmo_refresh_from_matrix(axis, axis_idx, ggd->twtype, rv3d->twmat, nullptr);
+      gizmo_refresh_from_matrix(axis, axis_idx, twtype_vis, rv3d->twmat, nullptr);
       gizmo_3d_setup_draw_default(axis, axis_idx);
-      gizmo_3d_setup_draw_from_twtype(axis, axis_idx, ggd->twtype);
+      gizmo_3d_setup_draw_from_twtype(axis, axis_idx, twtype_vis);
       RNA_enum_set(axis->ptr, "draw_options", ED_GIZMO_ARROW_DRAW_FLAG_STEM);
     }
   }
@@ -2178,6 +2798,8 @@ static void WIDGETGROUP_gizmo_invoke_prepare(const bContext *C,
 {
   GizmoGroup *ggd = static_cast<GizmoGroup *>(gzgroup->customdata);
   const int axis_idx = BLI_array_findindex(ggd->gizmos, ARRAY_SIZE(ggd->gizmos), &gz);
+
+  gizmo_pivot_bind_operator(C, gzgroup, gz, event);
 
   const float mval[2] = {float(event->mval[0]), float(event->mval[1])};
   gizmo_3d_draw_invoke(gzgroup, CTX_wm_region(C), axis_idx, mval);
@@ -2240,6 +2862,8 @@ static void WIDGETGROUP_gizmo_invoke_prepare(const bContext *C,
       }
     }
   }
+
+  gizmo_pivot_invoke_apply(C, gzgroup, gz);
 }
 
 static bool WIDGETGROUP_gizmo_poll_generic(View3D *v3d)

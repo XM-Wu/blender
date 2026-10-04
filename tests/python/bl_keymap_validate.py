@@ -63,7 +63,9 @@ PRESET_PREFS = {
 # Don't report duplicates for these presets.
 ALLOW_DUPLICATES = {
     # This key-map manipulates the default key-map, making it difficult to avoid duplicates entirely.
-    "Industry_Compatible"
+    "Industry_Compatible",
+    # Same data as Industry Compatible, with the Annotate tool shortcut removed.
+    "Industry_Compatible_Custom_Pivot",
 }
 
 # -----------------------------------------------------------------------------

@@ -183,6 +183,39 @@ static void VIEW3D_OT_pastebuffer(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Transform Pivot
+ * \{ */
+
+static bool view3d_gizmo_pivot_edit_poll(bContext *C)
+{
+  return ed::transform::gizmo_pivot_tool_active(C);
+}
+
+static wmOperatorStatus view3d_gizmo_pivot_edit_invoke(bContext *C,
+                                                       wmOperator * /*op*/,
+                                                       const wmEvent * /*event*/)
+{
+  if (ARegion *region = CTX_wm_region(C)) {
+    ED_region_tag_redraw_editor_overlays(region);
+  }
+  return OPERATOR_PASS_THROUGH;
+}
+
+static void VIEW3D_OT_gizmo_pivot_edit(wmOperatorType *ot)
+{
+  ot->name = "Edit Transform Pivot";
+  ot->description =
+      "Redraw the transform gizmo while D is held so its pivot can be moved or rotated";
+  ot->idname = "VIEW3D_OT_gizmo_pivot_edit";
+  ot->flag = OPTYPE_INTERNAL;
+
+  ot->poll = view3d_gizmo_pivot_edit_poll;
+  ot->invoke = view3d_gizmo_pivot_edit_invoke;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Registration
  * \{ */
 
@@ -265,6 +298,8 @@ void view3d_operatortypes()
 #endif
 
   ed::transform::transform_operatortypes();
+
+  WM_operatortype_append(VIEW3D_OT_gizmo_pivot_edit);
 }
 
 void view3d_keymap(wmKeyConfig *keyconf)

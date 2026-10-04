@@ -155,7 +155,7 @@ void initTransInfo(bContext *C, TransInfo *t, wmOperator *op, const wmEvent *eve
 
   t->flag = eTFlag(0);
 
-  if (obact && !(t->options & (CTX_CURSOR | CTX_TEXTURE_SPACE)) &&
+  if (obact && !(t->options & (CTX_CURSOR | CTX_TEXTURE_SPACE | CTX_GIZMO_PIVOT)) &&
       ELEM(object_mode, OB_MODE_EDIT, OB_MODE_PAINT_GREASE_PENCIL, OB_MODE_EDIT_GPENCIL_LEGACY))
   {
     t->obedit_type = obact->type;

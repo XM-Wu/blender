@@ -34,6 +34,11 @@ namespace ed::transform {
 void keymap_transform(wmKeyConfig *keyconf);
 void transform_operatortypes();
 
+/** Drop the custom gizmo pivot stored for this 3D View. */
+void gizmo_pivot_clear(const View3D *v3d);
+/** Move, Rotate, Scale, and Transform tools, where holding D edits the gizmo pivot. */
+bool gizmo_pivot_tool_active(const bContext *C);
+
 /* ******************** Macros & Prototypes *********************** */
 
 /* MODE AND NUMINPUT FLAGS */

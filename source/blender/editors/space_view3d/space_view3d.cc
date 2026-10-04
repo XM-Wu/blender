@@ -287,6 +287,8 @@ static void view3d_free(SpaceLink *sl)
   }
 
   BKE_viewer_path_clear(&vd->viewer_path);
+
+  ed::transform::gizmo_pivot_clear(vd);
 }
 
 /* spacetype; init callback */

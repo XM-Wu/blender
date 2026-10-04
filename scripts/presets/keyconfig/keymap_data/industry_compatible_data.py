@@ -12,6 +12,7 @@ class Params:
         "action_mouse",
         "tool_mouse",
         "use_mouse_emulate_3_button",
+        "use_annotate_tool",
 
     )
 
@@ -19,12 +20,16 @@ class Params:
             self,
             *,
             use_mouse_emulate_3_button=False,
+            use_annotate_tool=True,
     ):
         self.tool_mouse = 'LEFTMOUSE'
         self.select_mouse = 'LEFTMOUSE'
         self.select_mouse_value = 'CLICK'
         self.action_mouse = 'RIGHTMOUSE'
         self.use_mouse_emulate_3_button = use_mouse_emulate_3_button
+        # D activates the Annotate tool in the industry keymap and conflicts with
+        # holding D to edit the transform gizmo pivot.
+        self.use_annotate_tool = use_annotate_tool
 
 
 # ------------------------------------------------------------------------------
@@ -112,14 +117,22 @@ def _template_items_gizmo_tweak_value_drag():
 
 # Tool System Templates
 
-def _template_items_basic_tools(*, connected=False):
+def _template_items_annotate_tool(params):
+    if not params.use_annotate_tool:
+        return []
+    return [
+        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+    ]
+
+
+def _template_items_basic_tools(params, *, connected=False):
     return [
         op_tool_cycle("builtin.select_box", {"type": 'Q', "value": 'PRESS'}),
         op_tool_cycle("builtin.move", {"type": 'W', "value": 'PRESS'}),
         op_tool_cycle("builtin.rotate", {"type": 'E', "value": 'PRESS'}),
         op_tool_cycle("builtin.scale", {"type": 'R', "value": 'PRESS'}),
         op_tool_cycle("builtin.transform", {"type": 'T', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_tool_cycle("builtin.measure", {"type": 'M', "value": 'PRESS'}),
         op_tool_cycle("builtin.cursor", {"type": 'C', "value": 'PRESS'}),
     ]
@@ -642,7 +655,7 @@ def km_uv_editor(params):
         op_tool_cycle("builtin.scale", {"type": 'R', "value": 'PRESS'}),
         op_tool_cycle("builtin.transform", {"type": 'T', "value": 'PRESS'}),
         op_tool_cycle("builtin.cursor", {"type": 'C', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
     ])
 
     return keymap
@@ -679,6 +692,8 @@ def km_view3d(params):
     )
 
     items.extend([
+        ("view3d.gizmo_pivot_edit", {"type": 'D', "value": 'PRESS', "any": True}, None),
+        ("view3d.gizmo_pivot_edit", {"type": 'D', "value": 'RELEASE', "any": True}, None),
         op_panel("TOPBAR_PT_name", {"type": 'RET', "value": 'PRESS'}, [("keep_open", False)]),
         ("wm.search_menu", {"type": 'TAB', "value": 'PRESS'}, None),
         # 3D Cursor
@@ -1106,7 +1121,7 @@ def km_image(params):
         op_tool_cycle("builtin.transform", {"type": 'E', "value": 'PRESS'}),
         op_tool_cycle("builtin.transform", {"type": 'R', "value": 'PRESS'}),
         op_tool_cycle("builtin.cursor", {"type": 'C', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_tool_cycle("builtin.sample", {"type": 'I', "value": 'PRESS'}),
 
     ])
@@ -2610,7 +2625,7 @@ def km_object_mode(params):
         ("object.hide_view_set", {"type": 'H', "value": 'PRESS', "shift": True},
          {"properties": [("unselected", True)]}),
 
-        *_template_items_basic_tools(),
+        *_template_items_basic_tools(params),
 
         # Selection Modes
         ("object.mode_set_with_submode", {"type": 'ONE', "value": 'PRESS'},
@@ -2691,7 +2706,7 @@ def km_curve(params):
         ("wm.context_toggle", {"type": 'B', "value": 'PRESS'},
          {"properties": [("data_path", "tool_settings.use_proportional_edit")]}),
         # Tools
-        *_template_items_basic_tools(),
+        *_template_items_basic_tools(params),
         op_tool_cycle("builtin.extrude", {"type": 'E', "value": 'PRESS', "ctrl": True}),
         op_tool_cycle("builtin.tilt", {"type": 'Y', "value": 'PRESS'}),
         op_tool_cycle("builtin.radius", {"type": 'U', "value": 'PRESS'}),
@@ -2825,7 +2840,7 @@ def km_image_paint(params):
         ),
         # Tools
         op_tool_cycle("builtin.select_box", {"type": 'Q', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_asset_shelf_popup("VIEW3D_AST_brush_texture_paint", {"type": 'B', "value": 'PRESS'}),
         op_asset_shelf_popup("IMAGE_AST_brush_paint", {"type": 'B', "value": 'PRESS'}),
     ])
@@ -2887,7 +2902,7 @@ def km_vertex_paint(params):
         op_menu_pie("VIEW3D_MT_mesh_paint_automasking_pie", {"type": 'A', "alt": True, "value": 'PRESS'}),
         # Tools
         op_tool_cycle("builtin.select_box", {"type": 'Q', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_asset_shelf_popup("VIEW3D_AST_brush_vertex_paint", {"type": 'B', "value": 'PRESS'}),
     ])
 
@@ -2943,7 +2958,7 @@ def km_weight_paint(params):
         # Tools
         op_tool_cycle("builtin.cursor", {"type": 'C', "value": 'PRESS'}),
         op_tool_cycle("builtin.select_box", {"type": 'Q', "value": 'PRESS'}),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_asset_shelf_popup("VIEW3D_AST_brush_weight_paint", {"type": 'B', "value": 'PRESS'}),
     ])
 
@@ -3138,7 +3153,7 @@ def km_mesh(params):
         # Menus.
         *_template_items_context_menu("VIEW3D_MT_edit_mesh_context_menu", {"type": 'RIGHTMOUSE', "value": 'PRESS'}),
         # Tools
-        *_template_items_basic_tools(),
+        *_template_items_basic_tools(params),
         op_tool_cycle("builtin.bevel", {"type": 'B', "value": 'PRESS', "ctrl": True}),
         op_tool_cycle("builtin.inset_faces", {"type": 'I', "value": 'PRESS'}),
         op_tool_cycle("builtin.extrude_region", {"type": 'E', "value": 'PRESS', "ctrl": True}),
@@ -3202,7 +3217,7 @@ def km_armature(params):
         # Menus.
         *_template_items_context_menu("VIEW3D_MT_armature_context_menu", {"type": 'RIGHTMOUSE', "value": 'PRESS'}),
         # Tools.
-        *_template_items_basic_tools(),
+        *_template_items_basic_tools(params),
         op_tool_cycle("builtin.roll", {"type": 'Y', "value": 'PRESS'}),
         op_tool_cycle("builtin.extrude", {"type": 'E', "value": 'PRESS', "ctrl": True}),
 
@@ -3238,7 +3253,7 @@ def km_metaball(params):
         ("wm.context_toggle", {"type": 'B', "value": 'PRESS'},
          {"properties": [("data_path", "tool_settings.use_proportional_edit")]}),
         # Tools
-        *_template_items_basic_tools(),
+        *_template_items_basic_tools(params),
     ])
 
     return keymap
@@ -3444,8 +3459,8 @@ def km_curves(params):
         ("wm.context_toggle", {"type": 'B', "value": 'PRESS'},
          {"properties": [("data_path", "tool_settings.use_proportional_edit")]}),
         # Tools
-        *_template_items_basic_tools(),
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_basic_tools(params),
+        *_template_items_annotate_tool(params),
     ])
 
     return keymap
@@ -3485,7 +3500,7 @@ def km_sculpt_curves(params):
         # Density
         ("sculpt_curves.min_distance_edit", {"type": 'D', "value": 'PRESS', "ctrl": True}, {}),
         # Tools
-        op_tool_cycle("builtin.annotate", {"type": 'D', "value": 'PRESS'}),
+        *_template_items_annotate_tool(params),
         op_asset_shelf_popup("VIEW3D_AST_brush_sculpt_curves", {"type": 'B', "value": 'PRESS'}),
     ])
 

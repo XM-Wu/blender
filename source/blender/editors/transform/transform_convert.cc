@@ -657,6 +657,10 @@ void special_aftertrans_update(bContext *C, TransInfo *t)
 
 int special_transform_moving(TransInfo *t)
 {
+  if (t->options & CTX_GIZMO_PIVOT) {
+    /* Keep the transform gizmo visible and interactive while the pivot is edited. */
+    return 0;
+  }
   if (t->options & CTX_CURSOR) {
     return G_TRANSFORM_CURSOR;
   }
@@ -898,6 +902,9 @@ static TransConvertTypeInfo *convert_type_get(const TransInfo *t, Object **r_obj
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
   /* If tests must match recalc_data for correct updates. */
+  if (t->options & CTX_GIZMO_PIVOT) {
+    return &TransConvertType_GizmoPivot;
+  }
   if (t->options & CTX_CURSOR) {
     if (t->spacetype == SPACE_IMAGE) {
       return &TransConvertType_CursorImage;

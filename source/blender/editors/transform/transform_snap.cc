@@ -807,7 +807,9 @@ static eSnapTargetOP snap_target_select_from_spacetype_and_tool_settings(TransIn
     if (base_act && (base_act->object->mode & OB_MODE_PARTICLE_EDIT)) {
       /* Particles edit mode. */
     }
-    else if (t->options & (CTX_GPENCIL_STROKES | CTX_CURSOR | CTX_OBMODE_XFORM_OBDATA)) {
+    else if (t->options &
+             (CTX_GPENCIL_STROKES | CTX_CURSOR | CTX_GIZMO_PIVOT | CTX_OBMODE_XFORM_OBDATA))
+    {
       /* In "Edit Strokes" mode,
        * snap tool can perform snap to selected or active objects (see #49632)
        * TODO: perform self snap in gpencil_strokes.

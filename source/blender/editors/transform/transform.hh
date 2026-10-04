@@ -122,6 +122,11 @@ enum eTContext {
   CTX_OBMODE_XFORM_SKIP_CHILDREN = (1 << 14),
   /** Enable edge scrolling in 2D views. */
   CTX_VIEW2D_EDGE_PAN = (1 << 15),
+  /**
+   * Transform the 3D view gizmo pivot itself (location and orientation),
+   * not the selection. Snap targets stay available, as with #CTX_CURSOR.
+   */
+  CTX_GIZMO_PIVOT = (1 << 16),
 };
 ENUM_OPERATORS(eTContext)
 

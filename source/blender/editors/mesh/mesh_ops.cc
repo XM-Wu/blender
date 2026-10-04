@@ -181,6 +181,7 @@ void ED_operatortypes_mesh()
 #endif
 
   WM_operatortype_append(MESH_OT_bisect);
+  WM_operatortype_append(MESH_OT_target_weld);
   WM_operatortype_append(MESH_OT_symmetrize);
   WM_operatortype_append(MESH_OT_symmetry_snap);
 

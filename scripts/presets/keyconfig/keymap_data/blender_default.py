@@ -7963,6 +7963,16 @@ def km_3d_view_tool_edit_mesh_knife(params):
     )
 
 
+def km_3d_view_tool_edit_mesh_target_weld(params):
+    return (
+        "3D View Tool: Edit Mesh, Target Weld",
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            ("mesh.target_weld", {"type": params.tool_mouse, "value": 'PRESS'}, None),
+        ]},
+    )
+
+
 def km_3d_view_tool_edit_mesh_bisect(params):
     return (
         "3D View Tool: Edit Mesh, Bisect",
@@ -9266,6 +9276,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_edit_mesh_offset_edge_loop_cut(params),
         km_3d_view_tool_edit_mesh_knife(params),
         km_3d_view_tool_edit_mesh_bisect(params),
+        km_3d_view_tool_edit_mesh_target_weld(params),
         km_3d_view_tool_edit_mesh_poly_build(params),
         km_3d_view_tool_edit_mesh_spin(params),
         km_3d_view_tool_edit_mesh_spin_duplicate(params),

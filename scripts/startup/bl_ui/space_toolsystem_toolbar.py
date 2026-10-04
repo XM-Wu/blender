@@ -1234,6 +1234,20 @@ class _defs_edit_mesh:
         )
 
     @ToolDef.from_fn
+    def target_weld():
+        return dict(
+            idname="builtin.target_weld",
+            label="Target Weld",
+            description=(
+                "Drag a vertex onto another vertex, or an edge onto another edge, to weld it. "
+                "The target keeps its position. Use Vertex or Edge select mode"
+            ),
+            icon="AUTOMERGE_ON",
+            widget="VIEW3D_GGT_target_weld",
+            keymap=(),
+        )
+
+    @ToolDef.from_fn
     def bisect():
         def draw_settings(_context, layout, tool):
             props = tool.operator_properties("mesh.bisect")
@@ -3970,6 +3984,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
                 _defs_edit_mesh.knife,
                 _defs_edit_mesh.bisect,
             ),
+            _defs_edit_mesh.target_weld,
             _defs_edit_mesh.poly_build,
             _defs_edit_mesh.spin,
             (

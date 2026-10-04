@@ -142,6 +142,7 @@ wmKeyMap *bevel_modal_keymap(wmKeyConfig *keyconf);
 /* *** `editmesh_bisect.cc` *** */
 
 void MESH_OT_bisect(wmOperatorType *ot);
+void MESH_OT_target_weld(wmOperatorType *ot);
 
 /* *** `editmesh_circularize.cc` *** */
 

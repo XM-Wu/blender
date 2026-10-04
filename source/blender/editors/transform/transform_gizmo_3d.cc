@@ -25,6 +25,7 @@
 
 #include "DNA_action_types.h"
 #include "DNA_armature_types.h"
+#include "DNA_userdef_types.h"
 #include "DNA_lattice_types.h"
 #include "DNA_meta_types.h"
 #include "DNA_pointcloud_types.h"
@@ -2108,6 +2109,24 @@ static void gizmo_pivot_apply_to_twmat(const bContext *C, float twmat[4][4])
   copy_v3_v3(twmat[3], pivot->location);
 }
 
+/** Maya-style: Ctrl+Shift dragging the Move gizmo slides vertices instead of translating. */
+static bool gizmo_move_vert_slide(const bContext *C, const wmEvent *event)
+{
+  if (event == nullptr || !STREQ(U.keyconfigstr, "XM_KeyMapping")) {
+    return false;
+  }
+  if ((event->modifier & KM_CTRL) == 0 || (event->modifier & KM_SHIFT) == 0) {
+    return false;
+  }
+  const ScrArea *area = CTX_wm_area(C);
+  const bToolRef *tref = area ? area->runtime.tool : nullptr;
+  if (tref == nullptr || !STREQ(tref->idname, "builtin.move")) {
+    return false;
+  }
+  const Object *obedit = CTX_data_edit_object(C);
+  return obedit != nullptr && obedit->type == OB_MESH;
+}
+
 static void gizmo_pivot_bind_operator(const bContext *C,
                                       wmGizmoGroup *gzgroup,
                                       wmGizmo *gz,
@@ -2133,6 +2152,9 @@ static void gizmo_pivot_bind_operator(const bContext *C,
     if (axis_type == MAN_AXES_ROTATE) {
       mode = (axis_idx == MAN_AXIS_ROT_T) ? TFM_TRACKBALL : TFM_ROTATION;
     }
+  }
+  else if (axis_type == MAN_AXES_TRANSLATE && gizmo_move_vert_slide(C, event)) {
+    ot = WM_operatortype_find("TRANSFORM_OT_vert_slide", true);
   }
   else if (axis_type == MAN_AXES_TRANSLATE) {
     ot = WM_operatortype_find("TRANSFORM_OT_translate", true);
@@ -2812,17 +2834,19 @@ static void WIDGETGROUP_gizmo_invoke_prepare(const bContext *C,
     PropertyRNA *prop_orient_type = RNA_struct_find_property(ptr, "orient_type");
     const TransformOrientationSlot *orient_slot = BKE_scene_orientation_slot_get_from_flag(
         scene, ggd->twtype_init);
-    if ((gz == ggd->gizmos[MAN_AXIS_ROT_C]) ||
-        (orient_slot == &scene->orientation_slots[SCE_ORIENT_DEFAULT]))
-    {
-      /* #MAN_AXIS_ROT_C always uses the #V3D_ORIENT_VIEW orientation,
-       * optionally we could set this orientation instead of unset the property. */
-      RNA_property_unset(ptr, prop_orient_type);
-    }
-    else {
-      /* TODO: API function. */
-      int index = BKE_scene_orientation_slot_get_index(orient_slot);
-      RNA_property_enum_set(ptr, prop_orient_type, index);
+    if (prop_orient_type != nullptr) {
+      if ((gz == ggd->gizmos[MAN_AXIS_ROT_C]) ||
+          (orient_slot == &scene->orientation_slots[SCE_ORIENT_DEFAULT]))
+      {
+        /* #MAN_AXIS_ROT_C always uses the #V3D_ORIENT_VIEW orientation,
+         * optionally we could set this orientation instead of unset the property. */
+        RNA_property_unset(ptr, prop_orient_type);
+      }
+      else {
+        /* TODO: API function. */
+        int index = BKE_scene_orientation_slot_get_index(orient_slot);
+        RNA_property_enum_set(ptr, prop_orient_type, index);
+      }
     }
   }
 
@@ -2841,7 +2865,10 @@ static void WIDGETGROUP_gizmo_invoke_prepare(const bContext *C,
       break;
   }
 
-  if (axis != -1) {
+  wmGizmoOpElem *gzop_active = WM_gizmo_operator_get(gz, 0);
+  const bool vert_slide = gzop_active && gzop_active->type &&
+                          STREQ(gzop_active->type->idname, "TRANSFORM_OT_vert_slide");
+  if (axis != -1 && !vert_slide) {
     /* Swap single axis for two-axis constraint. */
     const bool flip = (event->modifier & KM_SHIFT) != 0;
     BLI_assert(axis_idx != -1);

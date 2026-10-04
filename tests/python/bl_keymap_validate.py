@@ -64,8 +64,8 @@ PRESET_PREFS = {
 ALLOW_DUPLICATES = {
     # This key-map manipulates the default key-map, making it difficult to avoid duplicates entirely.
     "Industry_Compatible",
-    # Same data as Industry Compatible, with the Annotate tool shortcut removed.
-    "Industry_Compatible_Custom_Pivot",
+    # Industry Compatible, plus the fork's pivot, vertex-slide, and shrink/fatten bindings.
+    "XM_KeyMapping",
 }
 
 # -----------------------------------------------------------------------------

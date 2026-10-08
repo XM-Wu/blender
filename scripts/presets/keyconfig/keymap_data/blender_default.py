@@ -5666,8 +5666,8 @@ def km_edit_mesh(params):
         ("mesh.normals_make_consistent", {"type": 'N', "value": 'PRESS', "shift": True, "ctrl": True},
          {"properties": [("inside", True)]}),
         op_tool_optional(
-            ("view3d.edit_mesh_extrude_move_normal", {"type": 'E', "value": 'PRESS'}, None),
-            (op_tool_cycle, "builtin.extrude_region"), params),
+            ("mesh.omni_outset", {"type": 'E', "value": 'PRESS'}, None),
+            (op_tool_cycle, "builtin.extrude_outset"), params),
         op_menu("VIEW3D_MT_edit_mesh_extrude", {"type": 'E', "value": 'PRESS', "alt": True}),
         ("transform.edge_crease", {"type": 'E', "value": 'PRESS', "shift": True}, None),
         ("mesh.fill", {"type": 'F', "value": 'PRESS', "alt": True}, None),
@@ -7838,6 +7838,16 @@ def km_3d_view_tool_interactive_add(params):
 # ------------------------------------------------------------------------------
 # Tool System (3D View, Edit Mesh)
 
+def km_3d_view_tool_edit_mesh_extrude_outset(params):
+    return (
+        "3D View Tool: Edit Mesh, Extrude",
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            ("mesh.omni_outset", {**params.tool_maybe_tweak_event, **params.tool_modifier}, None),
+        ]},
+    )
+
+
 def km_3d_view_tool_edit_mesh_extrude_region(params):
     return (
         "3D View Tool: Edit Mesh, Extrude Region",
@@ -9265,6 +9275,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_edit_armature_bone_envelope(params),
         km_3d_view_tool_edit_armature_extrude(params),
         km_3d_view_tool_edit_armature_extrude_to_cursor(params),
+        km_3d_view_tool_edit_mesh_extrude_outset(params),
         km_3d_view_tool_edit_mesh_extrude_region(params),
         km_3d_view_tool_edit_mesh_extrude_manifold(params),
         km_3d_view_tool_edit_mesh_extrude_along_normals(params),

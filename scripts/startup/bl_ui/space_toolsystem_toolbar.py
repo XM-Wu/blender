@@ -1034,6 +1034,29 @@ class _defs_edit_mesh:
         )
 
     @ToolDef.from_fn
+    def extrude_outset():
+        def draw_settings(context, layout, _tool):
+            settings = context.window_manager.omni_outset
+            layout.prop(settings, "use_adaptive_drag_scale")
+            layout.prop(settings, "show_hud")
+            if settings.show_hud:
+                layout.prop(settings, "hud_font_size")
+
+        return dict(
+            idname="builtin.extrude_outset",
+            label="Extrude",
+            description=(
+                "Extrude faces along their normals with uniform side walls, "
+                "or edges equidistantly outward"
+            ),
+            icon="ops.mesh.extrude_region_move",
+            widget=None,
+            operator="mesh.omni_outset",
+            keymap=(),
+            draw_settings=draw_settings,
+        )
+
+    @ToolDef.from_fn
     def extrude():
         return dict(
             idname="builtin.extrude_region",
@@ -1044,7 +1067,6 @@ class _defs_edit_mesh:
             ),
             icon="ops.mesh.extrude_region_move",
             widget="VIEW3D_GGT_xform_extrude",
-            # Important to use same operator as 'E' key.
             operator="view3d.edit_mesh_extrude_move_normal",
             keymap=(),
             draw_settings=_template_widget.VIEW3D_GGT_xform_extrude.draw_settings,
@@ -1240,7 +1262,8 @@ class _defs_edit_mesh:
             label="Target Weld",
             description=(
                 "Drag a vertex onto another vertex, or an edge onto another edge, to weld it. "
-                "The target keeps its position. Use Vertex or Edge select mode"
+                "Click to select. Shift-click toggles the vertex or edge. "
+                "The target keeps its position"
             ),
             icon="ops.mesh.target_weld",
             widget="VIEW3D_GGT_target_weld",
@@ -3968,6 +3991,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             _tools_view3d_add,
             None,
             (
+                _defs_edit_mesh.extrude_outset,
                 _defs_edit_mesh.extrude,
                 _defs_edit_mesh.extrude_manifold,
                 _defs_edit_mesh.extrude_normals,

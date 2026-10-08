@@ -26,6 +26,7 @@ _modules = [
     "image",
     "image_as_planes",
     "mesh",
+    "mesh_omni_outset",
     "node",
     "object",
     "object_align",
@@ -64,6 +65,7 @@ def register():
     from . import (
         bone_selection_sets,
         copy_global_transform,
+        mesh_omni_outset,
     )
 
     for mod in _modules_loaded:
@@ -72,6 +74,7 @@ def register():
 
     bone_selection_sets.register()
     copy_global_transform.register()
+    mesh_omni_outset.register()
     project.register()
 
 
@@ -80,10 +83,12 @@ def unregister():
     from . import (
         bone_selection_sets,
         copy_global_transform,
+        mesh_omni_outset,
     )
 
     bone_selection_sets.unregister()
     copy_global_transform.unregister()
+    mesh_omni_outset.unregister()
     project.unregister()
 
     for mod in reversed(_modules_loaded):

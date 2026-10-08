@@ -1304,6 +1304,7 @@ void gizmo_xform_message_subscribe(wmGizmoGroup *gzgroup,
   if (ELEM(type_fn, VIEW3D_GGT_xform_gizmo, VIEW3D_GGT_xform_shear)) {
     const PropertyRNA *props[] = {
         &rna_ToolSettings_transform_pivot_point,
+        &rna_ToolSettings_use_gizmo_object_center,
     };
     for (int i = 0; i < ARRAY_SIZE(props); i++) {
       WM_msg_subscribe_rna(
@@ -2610,6 +2611,59 @@ static void gizmogroup_refresh_from_matrix(wmGizmoGroup *gzgroup,
   MAN_ITER_AXES_END;
 }
 
+static bool gizmo_use_object_center(const bContext *C)
+{
+  const Scene *scene = CTX_data_scene(C);
+  if ((scene->toolsettings->transform_flag & SCE_XFORM_GIZMO_OBJECT_CENTER) == 0) {
+    return false;
+  }
+  const Main *bmain = CTX_data_main(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
+  const Object *ob = BKE_view_layer_active_object_get(view_layer);
+  return ob != nullptr && ob->mode == OB_MODE_OBJECT;
+}
+
+/** World-space center of the selected objects' geometry bounds. Origins fill in when an object has
+ * no bounds. */
+static bool gizmo_selection_bounds_center(const bContext *C, float r_center[3])
+{
+  const Main *bmain = CTX_data_main(C);
+  Scene *scene = CTX_data_scene(C);
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  View3D *v3d = CTX_wm_view3d(C);
+  if (v3d == nullptr) {
+    return false;
+  }
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
+
+  float min[3], max[3];
+  INIT_MINMAX(min, max);
+  bool any = false;
+  for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
+    if (!BASE_SELECTED_EDITABLE(v3d, &base)) {
+      continue;
+    }
+    Object *ob = base.object;
+    if (const std::optional<Bounds<float3>> bounds = BKE_object_boundbox_get(ob)) {
+      for (const float3 &corner : bounds::corners(*bounds)) {
+        float world[3];
+        mul_v3_m4v3(world, ob->object_to_world().ptr(), corner);
+        minmax_v3v3_v3(min, max, world);
+      }
+    }
+    else {
+      minmax_v3v3_v3(min, max, ob->object_to_world().location());
+    }
+    any = true;
+  }
+  if (!any) {
+    return false;
+  }
+  mid_v3_v3v3(r_center, min, max);
+  return true;
+}
+
 static void WIDGETGROUP_gizmo_refresh(const bContext *C, wmGizmoGroup *gzgroup)
 {
   if (WM_gizmo_group_is_modal(gzgroup)) {
@@ -2644,6 +2698,13 @@ static void WIDGETGROUP_gizmo_refresh(const bContext *C, wmGizmoGroup *gzgroup)
 
   gizmo_3d_calc_pos(
       C, scene, &tbounds, scene->toolsettings->transform_pivot_point, rv3d->twmat[3]);
+
+  if (gizmo_use_object_center(C)) {
+    float center[3];
+    if (gizmo_selection_bounds_center(C, center)) {
+      copy_v3_v3(rv3d->twmat[3], center);
+    }
+  }
 
   gizmo_pivot_apply_to_twmat(C, rv3d->twmat);
 
@@ -2891,6 +2952,26 @@ static void WIDGETGROUP_gizmo_invoke_prepare(const bContext *C,
   }
 
   gizmo_pivot_invoke_apply(C, gzgroup, gz);
+
+  /* Match the drawn gizmo: rotate and scale around the geometry center. A custom pivot, or an
+   * in-progress pivot edit, keeps its own center. */
+  if (gizmo_use_object_center(C)) {
+    wmGizmoOpElem *gzop = WM_gizmo_operator_get(gz, 0);
+    const bool pivot_edit = gzop && gzop->type &&
+                            STREQ(gzop->type->idname, "TRANSFORM_OT_gizmo_pivot");
+    GizmoCustomPivot *pivot = gizmo_pivot_find(CTX_wm_view3d(C));
+    const bool custom_pivot = pivot && pivot->valid &&
+                              pivot->selection_hash == gizmo_pivot_selection_hash(C) &&
+                              gizmo_pivot_reference_alive(C, pivot);
+    if (!pivot_edit && !custom_pivot && gzop && gzop->ptr.data != nullptr) {
+      float center[3];
+      if (gizmo_selection_bounds_center(C, center)) {
+        if (PropertyRNA *prop_center = RNA_struct_find_property(&gzop->ptr, "center_override")) {
+          RNA_property_float_set_array(&gzop->ptr, prop_center, center);
+        }
+      }
+    }
+  }
 }
 
 static bool WIDGETGROUP_gizmo_poll_generic(View3D *v3d)

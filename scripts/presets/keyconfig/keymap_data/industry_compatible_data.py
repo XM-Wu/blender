@@ -3156,7 +3156,7 @@ def km_mesh(params):
         *_template_items_basic_tools(params),
         op_tool_cycle("builtin.bevel", {"type": 'B', "value": 'PRESS', "ctrl": True}),
         op_tool_cycle("builtin.inset_faces", {"type": 'I', "value": 'PRESS'}),
-        op_tool_cycle("builtin.extrude_region", {"type": 'E', "value": 'PRESS', "ctrl": True}),
+        op_tool_cycle("builtin.extrude_outset", {"type": 'E', "value": 'PRESS', "ctrl": True}),
         op_tool_cycle("builtin.knife", {"type": 'K', "value": 'PRESS'}),
         op_tool_cycle("builtin.loop_cut", {"type": 'C', "value": 'PRESS', "alt": True}),
 

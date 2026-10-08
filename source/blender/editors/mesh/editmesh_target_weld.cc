@@ -42,6 +42,7 @@
 #include "ED_gizmo_utils.hh"
 #include "ED_mesh.hh"
 #include "ED_screen.hh"
+#include "ED_select_utils.hh"
 #include "ED_space_api.hh"
 #include "ED_view3d.hh"
 
@@ -86,6 +87,9 @@ struct TargetWeldOp {
   BMVert *dst_vert = nullptr;
   BMEdge *dst_edge = nullptr;
   TargetWeldEdgePlan plan;
+  int press_xy[2] = {0, 0};
+  int press_mval[2] = {0, 0};
+  bool dragging = false;
 };
 
 struct TargetWeldGizmo {
@@ -392,7 +396,10 @@ static void target_weld_exit(bContext *C, wmOperator *op)
   if (data->region != nullptr) {
     ED_region_tag_redraw(data->region);
   }
-  WM_cursor_modal_restore(CTX_wm_window(C));
+  /* The crosshair is only grabbed once a weld drag starts. */
+  if (data->dragging && (data->src_vert != nullptr || data->src_edge != nullptr)) {
+    WM_cursor_modal_restore(CTX_wm_window(C));
+  }
   MEM_delete(data);
   op->customdata = nullptr;
 }
@@ -478,6 +485,36 @@ static void target_weld_update_target(bContext *C, TargetWeldOp *data, const int
   }
 }
 
+/** Click uses the same rules as the selection tool: replace, or Shift to toggle. */
+static bool target_weld_click_select(bContext *C, const wmEvent *event, const int mval[2])
+{
+  SelectPick_Params params;
+  if ((event->modifier & KM_SHIFT) != 0) {
+    params.sel_op = SEL_OP_XOR;
+  }
+  else {
+    params.sel_op = SEL_OP_SET;
+    params.deselect_all = true;
+  }
+  view3d_operator_needs_gpu(C);
+  return EDBM_select_pick(C, mval, params);
+}
+
+static void target_weld_begin_drag(bContext *C, TargetWeldOp *data)
+{
+  data->dragging = true;
+  g_target_weld_modal = true;
+  if (data->region != nullptr && data->region->runtime->type && data->draw_handle == nullptr) {
+    data->draw_handle = ED_region_draw_cb_activate(
+        data->region->runtime->type, target_weld_op_draw, data, REGION_DRAW_POST_VIEW);
+  }
+  WM_cursor_modal_set(CTX_wm_window(C), WM_CURSOR_CROSS);
+  target_weld_status(C, data);
+  if (data->region != nullptr) {
+    ED_region_tag_redraw(data->region);
+  }
+}
+
 static wmOperatorStatus target_weld_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   TargetWeldOp *data = static_cast<TargetWeldOp *>(op->customdata);
@@ -491,6 +528,17 @@ static wmOperatorStatus target_weld_modal(bContext *C, wmOperator *op, const wmE
   }
 
   if (event->type == MOUSEMOVE) {
+    if (!data->dragging) {
+      if (!WM_event_drag_test(event, data->press_xy)) {
+        return OPERATOR_RUNNING_MODAL;
+      }
+      if (data->src_vert == nullptr && data->src_edge == nullptr) {
+        /* Dragging off empty space is not a weld. Keep the press from becoming a click. */
+        data->dragging = true;
+        return OPERATOR_RUNNING_MODAL;
+      }
+      target_weld_begin_drag(C, data);
+    }
     target_weld_update_target(C, data, event->mval);
     target_weld_status(C, data);
     ED_region_tag_redraw(data->region);
@@ -498,6 +546,15 @@ static wmOperatorStatus target_weld_modal(bContext *C, wmOperator *op, const wmE
   }
 
   if (event->type == data->press_type && event->val == KM_RELEASE) {
+    if (!data->dragging) {
+      const bool changed = target_weld_click_select(C, event, data->press_mval);
+      target_weld_exit(C, op);
+      return changed ? OPERATOR_FINISHED : OPERATOR_CANCELLED;
+    }
+    if (data->src_vert == nullptr && data->src_edge == nullptr) {
+      target_weld_exit(C, op);
+      return OPERATOR_CANCELLED;
+    }
     target_weld_update_target(C, data, event->mval);
     Object *ob = data->ob;
     BMVert *src_verts[2];
@@ -536,22 +593,18 @@ static wmOperatorStatus target_weld_modal(bContext *C, wmOperator *op, const wmE
 
 static wmOperatorStatus target_weld_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
-  bool want_vert = false;
-  bool want_edge = false;
-  target_weld_select_flags(CTX_data_scene(C), &want_vert, &want_edge);
-  if (!want_vert && !want_edge) {
-    BKE_report(op->reports, RPT_WARNING, "Target Weld requires vertex or edge select mode");
-    return OPERATOR_CANCELLED;
-  }
-
   ARegion *region = CTX_wm_region(C);
   if (region == nullptr) {
     return OPERATOR_CANCELLED;
   }
 
-  TargetWeldPick pick = target_weld_pick(C, event->mval, nullptr, nullptr);
-  if (pick.ob == nullptr || (pick.vert == nullptr && pick.edge == nullptr)) {
-    return OPERATOR_CANCELLED;
+  bool want_vert = false;
+  bool want_edge = false;
+  target_weld_select_flags(CTX_data_scene(C), &want_vert, &want_edge);
+
+  TargetWeldPick pick;
+  if (want_vert || want_edge) {
+    pick = target_weld_pick(C, event->mval, nullptr, nullptr);
   }
 
   TargetWeldOp *data = MEM_new<TargetWeldOp>(__func__);
@@ -560,17 +613,10 @@ static wmOperatorStatus target_weld_invoke(bContext *C, wmOperator *op, const wm
   data->press_type = event->type;
   data->src_vert = pick.vert;
   data->src_edge = pick.edge;
+  copy_v2_v2_int(data->press_xy, event->xy);
+  copy_v2_v2_int(data->press_mval, event->mval);
   op->customdata = data;
-  g_target_weld_modal = true;
 
-  if (region->runtime->type) {
-    data->draw_handle = ED_region_draw_cb_activate(
-        region->runtime->type, target_weld_op_draw, data, REGION_DRAW_POST_VIEW);
-  }
-
-  WM_cursor_modal_set(CTX_wm_window(C), WM_CURSOR_CROSS);
-  target_weld_status(C, data);
-  ED_region_tag_redraw(region);
   WM_event_add_modal_handler(C, op);
   return OPERATOR_RUNNING_MODAL;
 }
@@ -589,7 +635,9 @@ void MESH_OT_target_weld(wmOperatorType *ot)
 {
   ot->name = "Target Weld";
   ot->idname = "MESH_OT_target_weld";
-  ot->description = "Drag a vertex or edge onto another to weld it. The target keeps its position";
+  ot->description =
+      "Drag a vertex or edge onto another to weld it. Click to select, "
+      "Shift-click to toggle selection. The weld target keeps its position";
 
   ot->invoke = target_weld_invoke;
   ot->modal = target_weld_modal;

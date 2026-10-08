@@ -1867,6 +1867,8 @@ enum eTool_TransformFlag : int {
   SCE_XFORM_DATA_ORIGIN = (1 << 1),
   SCE_XFORM_SKIP_CHILDREN = (1 << 2),
   SCE_XFORM_SCULPT_PIVOT = (1 << 3),
+  /** Object Mode: draw transform gizmos at the selection bounds center. */
+  SCE_XFORM_GIZMO_OBJECT_CENTER = (1 << 4),
 };
 ENUM_OPERATORS(eTool_TransformFlag)
 

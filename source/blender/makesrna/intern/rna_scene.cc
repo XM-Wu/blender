@@ -3813,6 +3813,15 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Transform Pivot Point", "Pivot center for rotation/scaling");
   RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
 
+  prop = RNA_def_property(srna, "use_gizmo_object_center", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "transform_flag", SCE_XFORM_GIZMO_OBJECT_CENTER);
+  RNA_def_property_flag(prop, PROP_DEG_SYNC_ONLY);
+  RNA_def_property_ui_text(prop,
+                           "Gizmo at Object Center",
+                           "In Object Mode, place transform gizmos at the geometry center of the "
+                           "selection. Shortcut transforms still use the pivot point");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
   prop = RNA_def_property(srna, "use_transform_pivot_point_align", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "transform_flag", SCE_XFORM_AXIS_ALIGN);
   RNA_def_property_flag(prop, PROP_DEG_SYNC_ONLY);

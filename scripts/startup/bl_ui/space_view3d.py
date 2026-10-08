@@ -775,7 +775,18 @@ class VIEW3D_HT_header(Header):
 
         # Pivot
         if has_pose_mode or object_mode in {'OBJECT', 'EDIT', 'EDIT_GPENCIL', 'SCULPT_GREASE_PENCIL'}:
-            layout.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
+            if object_mode == 'OBJECT':
+                row = layout.row(align=True)
+                row.prop(
+                    tool_settings,
+                    "use_gizmo_object_center",
+                    text="",
+                    icon='PIVOT_BOUNDBOX',
+                    toggle=True,
+                )
+                row.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
+            else:
+                layout.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
 
         # Snap
         show_snap = False
@@ -4777,6 +4788,7 @@ class VIEW3D_MT_edit_mesh_context_menu(Menu):
 
             col.separator()
 
+            col.operator("mesh.omni_outset_edge", text="Extrude")
             col.operator("mesh.extrude_edges_move", text="Extrude Edges")
             col.operator("mesh.bevel", text="Bevel Edges").affect = 'EDGES'
             if selected_edges_len >= 2:
@@ -4847,6 +4859,7 @@ class VIEW3D_MT_edit_mesh_context_menu(Menu):
 
             col.separator()
 
+            col.operator("mesh.omni_outset_face", text="Extrude")
             col.operator("view3d.edit_mesh_extrude_move_normal", text="Extrude Faces")
             col.operator("view3d.edit_mesh_extrude_move_shrink_fatten", text="Extrude Faces Along Normals")
             col.operator("mesh.extrude_faces_move", text="Extrude Individual Faces")
@@ -4908,6 +4921,9 @@ class VIEW3D_MT_edit_mesh_extrude(Menu):
         select_mode = tool_settings.mesh_select_mode
         ob = context.object
         mesh = ob.data
+
+        layout.operator("mesh.omni_outset", text="Extrude")
+        layout.separator()
 
         if mesh.total_face_sel:
             layout.operator("view3d.edit_mesh_extrude_move_normal", text="Extrude Faces")
@@ -4992,6 +5008,7 @@ class VIEW3D_MT_edit_mesh_edges(Menu):
 
         layout.operator_context = 'INVOKE_REGION_WIN'
 
+        layout.operator("mesh.omni_outset_edge", text="Extrude")
         layout.operator("mesh.extrude_edges_move", text="Extrude Edges")
         layout.operator("mesh.bevel", text="Bevel Edges").affect = 'EDGES'
         layout.operator("mesh.bridge_edge_loops")
@@ -5084,6 +5101,7 @@ class VIEW3D_MT_edit_mesh_faces(Menu):
 
         layout.operator_context = 'INVOKE_REGION_WIN'
 
+        layout.operator("mesh.omni_outset_face", text="Extrude")
         layout.operator("view3d.edit_mesh_extrude_move_normal", text="Extrude Faces")
         layout.operator("view3d.edit_mesh_extrude_move_shrink_fatten", text="Extrude Faces Along Normals")
         layout.operator("mesh.extrude_faces_move", text="Extrude Individual Faces")

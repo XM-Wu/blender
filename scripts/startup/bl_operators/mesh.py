@@ -55,7 +55,30 @@ class MeshSelectPrev(Operator):
         return {'FINISHED'}
 
 
+class MeshVertEdgeSlide(Operator):
+    """Slide an edge loop, or vertices when edge slide is not possible"""
+    bl_idname = "mesh.vert_edge_slide"
+    bl_label = "Vertex/Edge Slide"
+    bl_options = set()
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def invoke(self, _context, _event):
+        import bpy
+
+        result = bpy.ops.transform.edge_slide('INVOKE_DEFAULT')
+        if 'RUNNING_MODAL' in result or 'FINISHED' in result:
+            return {'FINISHED'}
+        result = bpy.ops.transform.vert_slide('INVOKE_DEFAULT')
+        if 'RUNNING_MODAL' in result:
+            return {'FINISHED'}
+        return result
+
+
 classes = (
     MeshSelectNext,
     MeshSelectPrev,
+    MeshVertEdgeSlide,
 )

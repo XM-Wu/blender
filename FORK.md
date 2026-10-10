@@ -37,7 +37,8 @@
 - 顶点和边选择同时打开时，离光标更近的那种元素作为拖动对象。拖动开始后只在同一种元素里找目标。
 - 单击和选择工具相同：普通单击替换选择，点空白处取消全部选择；**Shift+单击**切换该顶点或边。只开面选择时单击仍然能选面，但拖动不会焊接。
 - 按下后先进入模态。拖过拖动阈值才算焊接；没点中顶点或边时，拖动不会被当成单击。Esc 或右键取消。一次成功的焊接是一步撤销，单击改选择也是一步撤销。
-- 拖动开始后才换十字光标并画引导线，单击不会闪一下焊接光标。拖动中源是橙色，目标是绿色。
+- 拖动开始后才换十字光标并画引导线，单击不会闪一下焊接光标。拖动中源是橙色，目标是绿色，引导线是浅蓝色。顶点只画点，不把一个点和它的镜像连成边。边则分别画出源边、目标边，以及各自的镜像边。
+- 网格对称打开时，焊一侧会连同镜像顶点、镜像边一起焊。X、Y、Z 可同时开，后开的轴会再镜像前面已经生成的配对，所以斜向那一份也会焊上。拓扑镜像打开时同样生效。落在镜像平面上的点是它自己的镜像，不会被焊两次。把点直接焊到它的镜像点上时只保留这一次，不会再反向焊回来。两侧可以焊到同一个中心点。单击选择不跟着镜像。
 
 边的两端这样配对：已经共用的顶点保持不动；否则取两端位移平方和更小的那一种，避免大致平行的边拧过去。然后把每个源顶点焊到配对的目标顶点上，源边塌到目标边上。
 
@@ -102,6 +103,7 @@
 - XM KeyMapping 给 Generic Gizmo 的拖拽补了 Ctrl+Shift+左键，否则 gizmo 键位不认修饰键，拖不到手柄上。`gizmo_move_vert_slide` 只在这套键位、`builtin.move`、网格编辑、拖的是移动手柄时，把操作符换成 `TRANSFORM_OT_vert_slide`。按住 D 编辑枢轴优先。
 - **Shift+V** 走 `mesh.vert_edge_slide`。包装操作符的 `bl_options` 为空，撤销记在它调用的 slide 上。它先 `transform.edge_slide`，失败再 `transform.vert_slide`。变换模态映射里的 `VERT_EDGE_SLIDE` 也改成 Shift+V，并删掉原来的那条。
 - 目标焊接的拾取走 `em_setup_viewcontext`。`ED_view3d_viewcontext_init` 不填 `em`，最近元素查询会直接空返回。操作符事件也没有 GL 上下文，查询前要调用 `view3d_operator_needs_gpu`，否则选中缓冲读不到。边焊接用 bmesh `weld_verts` 的 `targetmap`，目标顶点留在原地；`pointmerge` 会把参与的顶点收到同一个点，不能用来焊边。单击选择用 `EDBM_select_pick`：Shift 是 `SEL_OP_XOR`，否则 `SEL_OP_SET` 并 `deselect_all`。用 `WM_event_drag_test` 区分单击和拖动，光标和绘制回调只在拖动开始后装上。
+- 镜像在拖动开始时按每个打开的轴调用 `EDBM_verts_mirror_cache_begin`（含自身、不限选择、尊重隐藏，拓扑镜像看 `ME_EDIT_MIRROR_TOPO`），把结果存成顶点下标，鼠标移动时不再重建 KD 树。松开时先展开配对再退出模态，因为退出会释放操作符数据。`weld_verts` 的 map 不能让一个顶点既是源又是目标；多个源可以共用一个目标。预览的边线只画真实的边，不能把点列表的前两个点连起来，否则会把顶点画成它和镜像之间的一条边。
 - 默认挤出是工具组元组的第一项 `builtin.extrude_outset`。`mesh.omni_outset` 只做分流，`bl_options` 为空，子操作符还在模态时父级返回 `FINISHED`，避免挤出进 Adjust Last Operation。源码按 GPL-3.0-or-later 放在 `bl_operators/mesh_omni_outset.py`，HUD 和翻译分文件。
 - 物体中心 gizmo 在 `gizmo_3d_calc_pos` 之后、自定义枢轴之前写入 `twmat[3]`。拖动 gizmo 时给 `center_override` 写同一个包围盒中心，自定义枢轴有效时不覆盖。
 

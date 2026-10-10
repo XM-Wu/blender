@@ -15,6 +15,9 @@
  * total travel is used. That avoids twisting the edge when the two are roughly
  * parallel. Each source vertex is then welded onto its paired target vertex, so
  * the source edge collapses onto the target edge and the target edge stays.
+ *
+ * When mesh symmetry is enabled, the mirrored vertices and edges are welded the
+ * same way. A vertex on the mirror plane is its own mirror and is not welded twice.
  */
 
 #include "MEM_guardedalloc.h"
@@ -27,6 +30,8 @@
 #include "BLI_math_base_c.hh"
 #include "BLI_math_matrix_c.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_span.hh"
+#include "BLI_vector.hh"
 
 #include "BKE_context.hh"
 #include "BKE_editmesh.hh"
@@ -77,6 +82,11 @@ struct TargetWeldEdgePlan {
   int count = 0;
 };
 
+struct TargetWeldPair {
+  BMVert *src = nullptr;
+  BMVert *dst = nullptr;
+};
+
 struct TargetWeldOp {
   void *draw_handle = nullptr;
   ARegion *region = nullptr;
@@ -90,6 +100,9 @@ struct TargetWeldOp {
   int press_xy[2] = {0, 0};
   int press_mval[2] = {0, 0};
   bool dragging = false;
+  /** Mirror vert indices, one array per enabled symmetry axis. Filled when a drag starts. */
+  int mirror_axis_count = 0;
+  Vector<int> mirror_of[3];
 };
 
 struct TargetWeldGizmo {
@@ -253,7 +266,11 @@ static void target_weld_draw_elements(const float matrix[4][4],
                                       const float (*target)[3],
                                       const int target_len,
                                       const float (*guides)[2][3],
-                                      const int guide_len)
+                                      const int guide_len,
+                                      const float (*source_edges)[2][3],
+                                      const int source_edge_len,
+                                      const float (*target_edges)[2][3],
+                                      const int target_edge_len)
 {
   if (source_len <= 0 && target_len <= 0 && guide_len <= 0) {
     return;
@@ -280,19 +297,22 @@ static void target_weld_draw_elements(const float matrix[4][4],
     immEnd();
   }
 
-  auto draw_line = [&](const float (*points)[3], const int len, const float color[4], float width) {
-    if (len < 2) {
+  auto draw_edges = [&](const float (*edges)[2][3], const int len, const float color[4], float width) {
+    if (edges == nullptr || len <= 0) {
       return;
     }
     GPU_line_width(width);
     immUniformColor4fv(color);
-    immBegin(GPU_PRIM_LINES, 2);
-    immVertex3fv(pos, points[0]);
-    immVertex3fv(pos, points[1]);
+    immBegin(GPU_PRIM_LINES, len * 2);
+    for (int i = 0; i < len; i++) {
+      immVertex3fv(pos, edges[i][0]);
+      immVertex3fv(pos, edges[i][1]);
+    }
     immEnd();
   };
-  draw_line(source, source_len, source_color, 3.0f * px);
-  draw_line(target, target_len, g_target_weld_col_target, 4.0f * px);
+  /* Edge lines are real edges only. A mirrored vertex is not joined to its partner. */
+  draw_edges(source_edges, source_edge_len, source_color, 3.0f * px);
+  draw_edges(target_edges, target_edge_len, g_target_weld_col_target, 4.0f * px);
   immUnbindProgram();
 
   auto draw_points = [&](const float (*points)[3], const int len, const float color[4], float size) {
@@ -317,6 +337,15 @@ static void target_weld_draw_elements(const float matrix[4][4],
   GPU_depth_test(GPU_DEPTH_LESS_EQUAL);
 }
 
+static void target_weld_expand_mirrors(BMesh *bm,
+                                       const TargetWeldOp *data,
+                                       Vector<TargetWeldPair> &pairs);
+static void target_weld_collect_mirror_edges(BMesh *bm,
+                                             const TargetWeldOp *data,
+                                             BMVert *v1,
+                                             BMVert *v2,
+                                             Vector<TargetWeldPair> &mirror_edges);
+
 static void target_weld_op_draw(const bContext * /*C*/, ARegion * /*region*/, void *arg)
 {
   const TargetWeldOp *data = static_cast<const TargetWeldOp *>(arg);
@@ -324,37 +353,94 @@ static void target_weld_op_draw(const bContext * /*C*/, ARegion * /*region*/, vo
     return;
   }
 
-  float source[2][3];
-  float target[2][3];
-  float guides[2][2][3];
+  constexpr int PREVIEW_MAX = 16;
+  float source[PREVIEW_MAX][3];
+  float target[PREVIEW_MAX][3];
+  float guides[PREVIEW_MAX][2][3];
+  float source_edges[8][2][3];
+  float target_edges[8][2][3];
   int source_len = 0;
   int target_len = 0;
   int guide_len = 0;
+  int source_edge_len = 0;
+  int target_edge_len = 0;
 
+  auto push_point = [](float (*points)[3], int *len, const float co[3]) {
+    if (*len >= PREVIEW_MAX) {
+      return;
+    }
+    copy_v3_v3(points[*len], co);
+    (*len)++;
+  };
+  auto push_guide = [&](const float a[3], const float b[3]) {
+    if (guide_len >= PREVIEW_MAX) {
+      return;
+    }
+    copy_v3_v3(guides[guide_len][0], a);
+    copy_v3_v3(guides[guide_len][1], b);
+    guide_len++;
+  };
+  auto push_edge = [](float (*edges)[2][3], int *len, BMVert *v1, BMVert *v2) {
+    if (v1 == nullptr || v2 == nullptr || v1 == v2 || *len >= 8) {
+      return;
+    }
+    copy_v3_v3(edges[*len][0], v1->co);
+    copy_v3_v3(edges[*len][1], v2->co);
+    (*len)++;
+  };
+
+  Vector<TargetWeldPair> pairs;
   if (data->src_vert != nullptr) {
-    copy_v3_v3(source[0], data->src_vert->co);
-    source_len = 1;
+    push_point(source, &source_len, data->src_vert->co);
     if (data->dst_vert != nullptr) {
-      copy_v3_v3(target[0], data->dst_vert->co);
-      target_len = 1;
-      copy_v3_v3(guides[0][0], data->src_vert->co);
-      copy_v3_v3(guides[0][1], data->dst_vert->co);
-      guide_len = 1;
+      push_point(target, &target_len, data->dst_vert->co);
+      push_guide(data->src_vert->co, data->dst_vert->co);
+      pairs.append({data->src_vert, data->dst_vert});
     }
   }
   else if (data->src_edge != nullptr) {
-    copy_v3_v3(source[0], data->src_edge->v1->co);
-    copy_v3_v3(source[1], data->src_edge->v2->co);
-    source_len = 2;
+    push_point(source, &source_len, data->src_edge->v1->co);
+    push_point(source, &source_len, data->src_edge->v2->co);
+    push_edge(source_edges, &source_edge_len, data->src_edge->v1, data->src_edge->v2);
     if (data->dst_edge != nullptr && data->plan.count > 0) {
-      copy_v3_v3(target[0], data->dst_edge->v1->co);
-      copy_v3_v3(target[1], data->dst_edge->v2->co);
-      target_len = 2;
+      push_point(target, &target_len, data->dst_edge->v1->co);
+      push_point(target, &target_len, data->dst_edge->v2->co);
+      push_edge(target_edges, &target_edge_len, data->dst_edge->v1, data->dst_edge->v2);
       for (int i = 0; i < data->plan.count; i++) {
-        copy_v3_v3(guides[i][0], data->plan.src[i]->co);
-        copy_v3_v3(guides[i][1], data->plan.dst[i]->co);
+        push_guide(data->plan.src[i]->co, data->plan.dst[i]->co);
+        pairs.append({data->plan.src[i], data->plan.dst[i]});
       }
-      guide_len = data->plan.count;
+    }
+  }
+
+  BMEditMesh *em = BKE_editmesh_from_object(data->ob);
+  BMesh *bm = (em != nullptr) ? em->bm : nullptr;
+  if (bm != nullptr && data->mirror_axis_count > 0 && !pairs.is_empty()) {
+    const int direct_count = pairs.size();
+    target_weld_expand_mirrors(bm, data, pairs);
+    for (int i = direct_count; i < pairs.size(); i++) {
+      if (pairs[i].src == nullptr || pairs[i].dst == nullptr) {
+        continue;
+      }
+      push_point(source, &source_len, pairs[i].src->co);
+      push_point(target, &target_len, pairs[i].dst->co);
+      push_guide(pairs[i].src->co, pairs[i].dst->co);
+    }
+    if (data->src_edge != nullptr) {
+      Vector<TargetWeldPair> mirror_edges;
+      target_weld_collect_mirror_edges(
+          bm, data, data->src_edge->v1, data->src_edge->v2, mirror_edges);
+      for (const TargetWeldPair &edge : mirror_edges) {
+        push_edge(source_edges, &source_edge_len, edge.src, edge.dst);
+      }
+      if (data->dst_edge != nullptr) {
+        mirror_edges.clear();
+        target_weld_collect_mirror_edges(
+            bm, data, data->dst_edge->v1, data->dst_edge->v2, mirror_edges);
+        for (const TargetWeldPair &edge : mirror_edges) {
+          push_edge(target_edges, &target_edge_len, edge.src, edge.dst);
+        }
+      }
     }
   }
 
@@ -365,19 +451,32 @@ static void target_weld_op_draw(const bContext * /*C*/, ARegion * /*region*/, vo
                             target,
                             target_len,
                             guides,
-                            guide_len);
+                            guide_len,
+                            source_edges,
+                            source_edge_len,
+                            target_edges,
+                            target_edge_len);
 }
 
 static void target_weld_status(bContext *C, const TargetWeldOp *data)
 {
+  const bool mirror = data->mirror_axis_count > 0;
   const char *text = TIP_("Drag onto a vertex or edge");
   if (data->src_vert != nullptr) {
-    text = (data->dst_vert != nullptr) ? TIP_("Release to weld vertex") :
-                                         TIP_("Drag onto a vertex");
+    if (data->dst_vert != nullptr) {
+      text = mirror ? TIP_("Release to weld vertex and its mirror") : TIP_("Release to weld vertex");
+    }
+    else {
+      text = TIP_("Drag onto a vertex");
+    }
   }
   else if (data->src_edge != nullptr) {
-    text = (data->dst_edge != nullptr && data->plan.count > 0) ? TIP_("Release to weld edge") :
-                                                                 TIP_("Drag onto an edge");
+    if (data->dst_edge != nullptr && data->plan.count > 0) {
+      text = mirror ? TIP_("Release to weld edge and its mirror") : TIP_("Release to weld edge");
+    }
+    else {
+      text = TIP_("Drag onto an edge");
+    }
   }
   ED_workspace_status_text(C, text);
 }
@@ -404,15 +503,149 @@ static void target_weld_exit(bContext *C, wmOperator *op)
   op->customdata = nullptr;
 }
 
+static void target_weld_mirror_cache_build(TargetWeldOp *data)
+{
+  data->mirror_axis_count = 0;
+  if (data->ob == nullptr || data->ob->type != OB_MESH) {
+    return;
+  }
+
+  Mesh *mesh = id_cast<Mesh *>(data->ob->data);
+  BMEditMesh *em = BKE_editmesh_from_object(data->ob);
+  if (em == nullptr || em->bm == nullptr) {
+    return;
+  }
+  BMesh *bm = em->bm;
+  const bool use_topology = (mesh->editflag & ME_EDIT_MIRROR_TOPO) != 0;
+  const int candidate_axes[3] = {
+      (mesh->symmetry & ME_SYMMETRY_X) ? 0 : -1,
+      (mesh->symmetry & ME_SYMMETRY_Y) ? 1 : -1,
+      (mesh->symmetry & ME_SYMMETRY_Z) ? 2 : -1,
+  };
+
+  BM_mesh_elem_index_ensure(bm, BM_VERT);
+  for (const int axis : candidate_axes) {
+    if (axis < 0) {
+      continue;
+    }
+    const int slot = data->mirror_axis_count;
+    data->mirror_of[slot].resize(bm->totvert, -1);
+    EDBM_verts_mirror_cache_begin(em, bm, axis, true, false, true, use_topology);
+    BMIter iter;
+    BMVert *vert;
+    int index;
+    BM_ITER_MESH_INDEX (vert, &iter, bm, BM_VERTS_OF_MESH, index) {
+      if (BM_elem_flag_test(vert, BM_ELEM_HIDDEN)) {
+        continue;
+      }
+      if (BMVert *mirror = EDBM_verts_mirror_get(em, bm, vert)) {
+        data->mirror_of[slot][index] = BM_elem_index_get(mirror);
+      }
+    }
+    EDBM_verts_mirror_cache_end(em);
+    data->mirror_axis_count++;
+  }
+}
+
+static BMVert *target_weld_cached_mirror(BMesh *bm, const Vector<int> &mirror_of, BMVert *vert)
+{
+  if (vert == nullptr || mirror_of.is_empty()) {
+    return nullptr;
+  }
+  const int index = BM_elem_index_get(vert);
+  if (index < 0 || index >= mirror_of.size()) {
+    return nullptr;
+  }
+  const int mirror_index = mirror_of[index];
+  if (mirror_index < 0 || mirror_index >= bm->totvert) {
+    return nullptr;
+  }
+  BM_mesh_elem_table_ensure(bm, BM_VERT);
+  return BM_vert_at_index(bm, mirror_index);
+}
+
+static bool target_weld_same_verts(BMVert *a1, BMVert *a2, BMVert *b1, BMVert *b2)
+{
+  return (a1 == b1 && a2 == b2) || (a1 == b2 && a2 == b1);
+}
+
+/**
+ * Edges whose endpoints are the mirrors of the welded target edge.
+ * Later axes also mirror edges added by earlier axes, so X+Y includes the diagonal copy.
+ */
+static void target_weld_collect_mirror_edges(BMesh *bm,
+                                             const TargetWeldOp *data,
+                                             BMVert *v1,
+                                             BMVert *v2,
+                                             Vector<TargetWeldPair> &mirror_edges)
+{
+  if (v1 == nullptr || v2 == nullptr || data->mirror_axis_count == 0) {
+    return;
+  }
+
+  Vector<TargetWeldPair> edges;
+  edges.append({v1, v2});
+  for (int slot = 0; slot < data->mirror_axis_count; slot++) {
+    const int existing = edges.size();
+    for (int i = 0; i < existing; i++) {
+      BMVert *m1 = target_weld_cached_mirror(bm, data->mirror_of[slot], edges[i].src);
+      BMVert *m2 = target_weld_cached_mirror(bm, data->mirror_of[slot], edges[i].dst);
+      if (m1 == nullptr || m2 == nullptr || m1 == m2) {
+        continue;
+      }
+      bool already = false;
+      for (const TargetWeldPair &edge : edges) {
+        if (target_weld_same_verts(edge.src, edge.dst, m1, m2)) {
+          already = true;
+          break;
+        }
+      }
+      if (!already) {
+        edges.append({m1, m2});
+      }
+    }
+  }
+  for (int i = 1; i < edges.size(); i++) {
+    mirror_edges.append(edges[i]);
+  }
+}
+
+/** Skip pairs that would delete a survivor or weld a vertex that is already in the map. */
+static void target_weld_append_pair(Vector<TargetWeldPair> &pairs, BMVert *src, BMVert *dst)
+{
+  if (src == nullptr || dst == nullptr || src == dst) {
+    return;
+  }
+  for (const TargetWeldPair &pair : pairs) {
+    if (pair.src == src || pair.dst == src || pair.src == dst) {
+      return;
+    }
+  }
+  pairs.append({src, dst});
+}
+
+static void target_weld_expand_mirrors(BMesh *bm,
+                                       const TargetWeldOp *data,
+                                       Vector<TargetWeldPair> &pairs)
+{
+  for (int slot = 0; slot < data->mirror_axis_count; slot++) {
+    const int existing = pairs.size();
+    for (int i = 0; i < existing; i++) {
+      BMVert *src_mirror = target_weld_cached_mirror(bm, data->mirror_of[slot], pairs[i].src);
+      BMVert *dst_mirror = target_weld_cached_mirror(bm, data->mirror_of[slot], pairs[i].dst);
+      target_weld_append_pair(pairs, src_mirror, dst_mirror);
+    }
+  }
+}
+
 static bool target_weld_apply(Object *ob,
-                              BMVert **src,
-                              BMVert **dst,
-                              int count,
+                              const Span<TargetWeldPair> pairs,
                               BMVert *edge_v1,
                               BMVert *edge_v2,
+                              Span<TargetWeldPair> mirror_edges,
                               wmOperator *op)
 {
-  if (ob == nullptr || count <= 0) {
+  if (ob == nullptr || pairs.is_empty()) {
     return false;
   }
 
@@ -424,11 +657,11 @@ static bool target_weld_apply(Object *ob,
 
   BMOpSlot *slot = BMO_slot_get(bmop.slots_in, "targetmap");
   int mapped = 0;
-  for (int i = 0; i < count; i++) {
-    if (src[i] == nullptr || dst[i] == nullptr || src[i] == dst[i]) {
+  for (const TargetWeldPair &pair : pairs) {
+    if (pair.src == nullptr || pair.dst == nullptr || pair.src == pair.dst) {
       continue;
     }
-    BMO_slot_map_elem_insert(&bmop, slot, src[i], dst[i]);
+    BMO_slot_map_elem_insert(&bmop, slot, pair.src, pair.dst);
     mapped++;
   }
   if (mapped == 0) {
@@ -441,15 +674,22 @@ static bool target_weld_apply(Object *ob,
     return false;
   }
 
-  for (int i = 0; i < count; i++) {
-    if (dst[i] != nullptr) {
-      BM_elem_flag_enable(dst[i], BM_ELEM_SELECT);
+  for (const TargetWeldPair &pair : pairs) {
+    if (pair.dst != nullptr) {
+      BM_elem_flag_enable(pair.dst, BM_ELEM_SELECT);
     }
   }
-  if (edge_v1 != nullptr && edge_v2 != nullptr) {
-    if (BMEdge *surviving = BM_edge_exists(edge_v1, edge_v2)) {
+  auto select_edge = [](BMVert *v1, BMVert *v2) {
+    if (v1 == nullptr || v2 == nullptr || v1 == v2) {
+      return;
+    }
+    if (BMEdge *surviving = BM_edge_exists(v1, v2)) {
       BM_elem_flag_enable(surviving, BM_ELEM_SELECT);
     }
+  };
+  select_edge(edge_v1, edge_v2);
+  for (const TargetWeldPair &edge : mirror_edges) {
+    select_edge(edge.src, edge.dst);
   }
   BM_mesh_select_mode_flush(bm);
 
@@ -502,6 +742,7 @@ static bool target_weld_click_select(bContext *C, const wmEvent *event, const in
 
 static void target_weld_begin_drag(bContext *C, TargetWeldOp *data)
 {
+  target_weld_mirror_cache_build(data);
   data->dragging = true;
   g_target_weld_modal = true;
   if (data->region != nullptr && data->region->runtime->type && data->draw_handle == nullptr) {
@@ -557,32 +798,33 @@ static wmOperatorStatus target_weld_modal(bContext *C, wmOperator *op, const wmE
     }
     target_weld_update_target(C, data, event->mval);
     Object *ob = data->ob;
-    BMVert *src_verts[2];
-    BMVert *dst_verts[2];
-    int count = 0;
+    BMEditMesh *em = (ob != nullptr) ? BKE_editmesh_from_object(ob) : nullptr;
+    BMesh *bm = (em != nullptr) ? em->bm : nullptr;
+    Vector<TargetWeldPair> pairs;
+    Vector<TargetWeldPair> mirror_edges;
     BMVert *edge_ends[2] = {nullptr, nullptr};
 
     if (data->src_vert != nullptr && data->dst_vert != nullptr) {
-      src_verts[0] = data->src_vert;
-      dst_verts[0] = data->dst_vert;
-      count = 1;
+      target_weld_append_pair(pairs, data->src_vert, data->dst_vert);
     }
     else if (data->src_edge != nullptr && data->dst_edge != nullptr && data->plan.count > 0) {
       edge_ends[0] = data->dst_edge->v1;
       edge_ends[1] = data->dst_edge->v2;
-      count = data->plan.count;
-      for (int i = 0; i < count; i++) {
-        src_verts[i] = data->plan.src[i];
-        dst_verts[i] = data->plan.dst[i];
+      for (int i = 0; i < data->plan.count; i++) {
+        target_weld_append_pair(pairs, data->plan.src[i], data->plan.dst[i]);
       }
+    }
+    if (bm != nullptr) {
+      target_weld_expand_mirrors(bm, data, pairs);
+      target_weld_collect_mirror_edges(bm, data, edge_ends[0], edge_ends[1], mirror_edges);
     }
 
     target_weld_exit(C, op);
 
-    if (count == 0) {
+    if (pairs.is_empty()) {
       return OPERATOR_CANCELLED;
     }
-    if (!target_weld_apply(ob, src_verts, dst_verts, count, edge_ends[0], edge_ends[1], op)) {
+    if (!target_weld_apply(ob, pairs, edge_ends[0], edge_ends[1], mirror_edges, op)) {
       return OPERATOR_CANCELLED;
     }
     return OPERATOR_FINISHED;
@@ -637,7 +879,8 @@ void MESH_OT_target_weld(wmOperatorType *ot)
   ot->idname = "MESH_OT_target_weld";
   ot->description =
       "Drag a vertex or edge onto another to weld it. Click to select, "
-      "Shift-click to toggle selection. The weld target keeps its position";
+      "Shift-click to toggle selection. The weld target keeps its position. "
+      "Mesh symmetry welds the mirrored elements as well";
 
   ot->invoke = target_weld_invoke;
   ot->modal = target_weld_modal;
@@ -660,12 +903,21 @@ static void target_weld_gizmo_draw(const bContext * /*C*/, wmGizmo *gz)
   if (g_target_weld_modal || !gz_weld->active || gz_weld->point_count <= 0) {
     return;
   }
+  float hover_edge[1][2][3];
+  if (gz_weld->point_count == 2) {
+    copy_v3_v3(hover_edge[0][0], gz_weld->points[0]);
+    copy_v3_v3(hover_edge[0][1], gz_weld->points[1]);
+  }
   target_weld_draw_elements(gz_weld->matrix,
                             gz_weld->points,
                             gz_weld->point_count,
                             g_target_weld_col_hover,
                             nullptr,
                             0,
+                            nullptr,
+                            0,
+                            gz_weld->point_count == 2 ? hover_edge : nullptr,
+                            gz_weld->point_count == 2 ? 1 : 0,
                             nullptr,
                             0);
 }

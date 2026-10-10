@@ -1263,7 +1263,8 @@ class _defs_edit_mesh:
             description=(
                 "Drag a vertex onto another vertex, or an edge onto another edge, to weld it. "
                 "Click to select. Shift-click toggles the vertex or edge. "
-                "The target keeps its position"
+                "The target keeps its position. "
+                "Mesh symmetry welds the mirrored side as well"
             ),
             icon="ops.mesh.target_weld",
             widget="VIEW3D_GGT_target_weld",

@@ -44,6 +44,17 @@
 
 键位在 `3D View Tool: Edit Mesh, Target Weld`，使用当前键位预设的工具鼠标。Industry Compatible 会从默认键位带上这项，并额外得到中键。悬停 gizmo 带 `WM_GIZMO_HIDDEN_KEYMAP`，高亮时不吃掉这次点击。
 
+## Knife 对称
+
+编辑模式的 Knife，以及 Knife Project，在网格对称打开时会把每一段确认的切割映到对称的另一侧。
+
+- 镜像发生在物体局部空间，映的是这一刀的交点，不是把屏幕上的笔画像翻转一次。透视下镜像那一刀的切割面不经过相机。
+- X、Y、Z 可同时开，斜向那一份也会切。拓扑镜像打开时同样生效。顶栏显示 Symmetry。
+- 拖动预览同时画出镜像那一刀和镜像交点。两端都落在原来这一刀上时不再另画一条线。
+- 整刀已经躺在镜像平面上时不再切第二次。平面上新产生的点记成它自己的镜像，后面从这里继续切仍能连上。
+- 一刀穿过对称面时，映到本刀已经切过的交点上的点会丢掉，避免另一侧切两次。落在平面上的点保留，从中心切出去仍能连上。镜像交点不足两个时跳过这一份。
+- 这是网格编辑对称，不是 Mirror 修改器。带 Mirror 修改器时，编辑的仍是真实的那一半，修改器自己复制结果。
+
 ## 键位
 
 工业兼容键位里 **D** 会切到 Annotate，和按住 D 编辑枢轴冲突。这个 fork 加了一套派生键位，没有改原来的 Industry Compatible。
@@ -104,6 +115,7 @@
 - **Shift+V** 走 `mesh.vert_edge_slide`。包装操作符的 `bl_options` 为空，撤销记在它调用的 slide 上。它先 `transform.edge_slide`，失败再 `transform.vert_slide`。变换模态映射里的 `VERT_EDGE_SLIDE` 也改成 Shift+V，并删掉原来的那条。
 - 目标焊接的拾取走 `em_setup_viewcontext`。`ED_view3d_viewcontext_init` 不填 `em`，最近元素查询会直接空返回。操作符事件也没有 GL 上下文，查询前要调用 `view3d_operator_needs_gpu`，否则选中缓冲读不到。边焊接用 bmesh `weld_verts` 的 `targetmap`，目标顶点留在原地；`pointmerge` 会把参与的顶点收到同一个点，不能用来焊边。单击选择用 `EDBM_select_pick`：Shift 是 `SEL_OP_XOR`，否则 `SEL_OP_SET` 并 `deselect_all`。用 `WM_event_drag_test` 区分单击和拖动，光标和绘制回调只在拖动开始后装上。
 - 镜像在拖动开始时按每个打开的轴调用 `EDBM_verts_mirror_cache_begin`（含自身、不限选择、尊重隐藏，拓扑镜像看 `ME_EDIT_MIRROR_TOPO`），把结果存成顶点下标，鼠标移动时不再重建 KD 树。松开时先展开配对再退出模态，因为退出会释放操作符数据。`weld_verts` 的 map 不能让一个顶点既是源又是目标；多个源可以共用一个目标。预览的边线只画真实的边，不能把点列表的前两个点连起来，否则会把顶点画成它和镜像之间的一条边。
+- Knife 对称在工具开始时用同样的镜像缓存，按轴建好后立刻 `cache_end`，一次只能留一层。原刀写完交点上的 KnifeVert 之后，对 mask `1 .. (1 << 轴数) - 1` 依次翻转局部坐标再切。解析顺序是已有 BMVert、已有 BMEdge、面、本刀新顶点、还没有 BMEdge 的 KnifeEdge。镜像交点先按 `linehit_compare` 排好再交给 `knife_apply_linehits`，后者不再排序，否则和源顶点的平行下标会对错。整刀都在平面上时跳过切割，但把源 KnifeVert 映射到自己。预览的 cage 是世界空间，先变到物体局部再翻轴。镜像切割和原刀记在同一次撤销里。
 - 默认挤出是工具组元组的第一项 `builtin.extrude_outset`。`mesh.omni_outset` 只做分流，`bl_options` 为空，子操作符还在模态时父级返回 `FINISHED`，避免挤出进 Adjust Last Operation。源码按 GPL-3.0-or-later 放在 `bl_operators/mesh_omni_outset.py`，HUD 和翻译分文件。
 - 物体中心 gizmo 在 `gizmo_3d_calc_pos` 之后、自定义枢轴之前写入 `twmat[3]`。拖动 gizmo 时给 `center_override` 写同一个包围盒中心，自定义枢轴有效时不覆盖。
 
@@ -125,6 +137,7 @@
 - `scripts/presets/keyconfig/keymap_data/blender_default.py`
 - `scripts/presets/keyconfig/keymap_data/industry_compatible_data.py`
 - `scripts/presets/keyconfig/XM_KeyMapping.py`
+- `source/blender/editors/mesh/editmesh_knife.cc`
 - `source/blender/editors/mesh/editmesh_target_weld.cc`
 - `source/blender/editors/mesh/mesh_intern.hh`
 - `source/blender/editors/mesh/mesh_ops.cc`

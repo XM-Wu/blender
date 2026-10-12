@@ -6,6 +6,7 @@
  * \ingroup edmesh
  *
  * Interactive editmesh knife tool.
+ * Mesh symmetry mirrors each confirmed cut in object-local space.
  */
 
 #include <fmt/format.h>
@@ -203,17 +204,25 @@ struct KnifeBVH {
 struct KnifeObjectInfo {
   Array<float3> positions_cage;
 
-  /**
-   * Optionally allocate triangle indices, these are needed for non-interactive knife
-   * projection as multiple cuts are made without the BVH being updated.
-   * Using these indices the it's possible to access `cagecos` even if the face has been cut
-   * and the loops in `em->looptris` no longer refer to the original triangles, see: #97153.
-   */
+/**
+ * Optionally allocate triangle indices, these are needed for non-interactive knife
+ * projection as multiple cuts are made without the BVH being updated.
+ * Using these indices the it's possible to access `cagecos` even if the face has been cut
+ * and the loops in `em->looptris` no longer refer to the original triangles, see: #97153.
+ */
   Array<int3> tri_indices;
 
   /** Only assigned for convenient access. */
   BMEditMesh *em;
   BMesh *bm;
+
+  /**
+   * Mesh symmetry in object-local space. Each slot is one enabled axis.
+   * `symmetry_mirror_of[slot][vert_index]` is the mirrored vertex, or -1.
+   */
+  int symmetry_axis_count = 0;
+  int symmetry_axes[3] = {-1, -1, -1};
+  Vector<int> symmetry_mirror_of[3];
 };
 
 enum KnifeMode { MODE_IDLE, MODE_DRAGGING, MODE_CONNECT, MODE_PANNING };
@@ -325,6 +334,12 @@ struct KnifeTool_OpData {
   bool is_drag_undo;
 
   bool depth_test;
+
+  /**
+   * Knife verts created on the mirrored side, keyed by the vert on the cut the user drew.
+   * Index is the symmetry mask minus one (masks are 1..7).
+   */
+  Map<KnifeVert *, KnifeVert *> symmetry_kvert[7];
 };
 
 enum {
@@ -831,6 +846,12 @@ static void knifetool_draw_dist_angle(const KnifeTool_OpData *kcd)
 }
 
 /* Modal loop selection drawing callback. */
+static void knife_symmetry_flip_cage(const KnifeTool_OpData *kcd,
+                                     int ob_index,
+                                     int mask,
+                                     const float cage[3],
+                                     float r_cage[3]);
+
 static void knifetool_draw(const bContext * /*C*/, ARegion * /*region*/, void *arg)
 {
   const KnifeTool_OpData *kcd = static_cast<const KnifeTool_OpData *>(arg);
@@ -933,6 +954,25 @@ static void knifetool_draw(const bContext * /*C*/, ARegion * /*region*/, void *a
     immVertex3fv(pos, kcd->prev.cage);
     immVertex3fv(pos, kcd->curr.cage);
     immEnd();
+
+    const int ob_index = (kcd->prev.ob_index >= 0) ? kcd->prev.ob_index : kcd->curr.ob_index;
+    if (ob_index >= 0 && ob_index < kcd->objects_info.size()) {
+      const int axis_count = kcd->objects_info[ob_index].symmetry_axis_count;
+      for (int mask = 1; mask < (1 << axis_count); mask++) {
+        float start[3], end[3];
+        knife_symmetry_flip_cage(kcd, ob_index, mask, kcd->prev.cage, start);
+        knife_symmetry_flip_cage(kcd, ob_index, mask, kcd->curr.cage, end);
+        if (len_squared_v3v3(start, kcd->prev.cage) <= KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG &&
+            len_squared_v3v3(end, kcd->curr.cage) <= KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG)
+        {
+          continue;
+        }
+        immBegin(GPU_PRIM_LINES, 2);
+        immVertex3fv(pos, start);
+        immVertex3fv(pos, end);
+        immEnd();
+      }
+    }
   }
 
   if (kcd->curr.vert) {
@@ -1028,6 +1068,75 @@ static void knifetool_draw(const bContext * /*C*/, ARegion * /*region*/, void *a
 
     GPU_batch_discard(batch);
 
+    Vector<float3> snapped_points;
+    Vector<float3> other_points;
+    for (const KnifeLineHit &hit : kcd->linehits) {
+      if (hit.ob_index < 0 || hit.ob_index >= kcd->objects_info.size()) {
+        continue;
+      }
+      const int axis_count = kcd->objects_info[hit.ob_index].symmetry_axis_count;
+      for (int mask = 1; mask < (1 << axis_count); mask++) {
+        float cage[3];
+        knife_symmetry_flip_cage(kcd, hit.ob_index, mask, hit.cagehit, cage);
+        const bool same_as_source = len_squared_v3v3(cage, hit.cagehit) <=
+                                    KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG;
+        bool already = false;
+        if (!same_as_source) {
+          for (const KnifeLineHit &other : kcd->linehits) {
+            if (len_squared_v3v3(cage, other.cagehit) <= KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG) {
+              already = true;
+              break;
+            }
+          }
+        }
+        if (already) {
+          continue;
+        }
+        float3 co;
+        copy_v3_v3(co, cage);
+        if (hit.v) {
+          snapped_points.append(co);
+        }
+        else {
+          other_points.append(co);
+        }
+      }
+    }
+    const int mirror_snapped = snapped_points.size();
+    const int mirror_other = other_points.size();
+    if (mirror_snapped + mirror_other > 0) {
+      Vector<float3> mirror_points;
+      mirror_points.reserve(mirror_snapped + mirror_other);
+      for (const float3 &co : snapped_points) {
+        mirror_points.append(co);
+      }
+      for (const float3 &co : other_points) {
+        mirror_points.append(co);
+      }
+
+      gpu::VertBuf *mirror_vert = GPU_vertbuf_create_with_format(*format);
+      GPU_vertbuf_data_alloc(*mirror_vert, mirror_points.size());
+      for (const int i : mirror_points.index_range()) {
+        GPU_vertbuf_attr_set(mirror_vert, pos, i, mirror_points[i]);
+      }
+      gpu::Batch *mirror_batch = GPU_batch_create_ex(
+          GPU_PRIM_POINTS, mirror_vert, nullptr, GPU_BATCH_OWNS_VBO);
+      GPU_batch_program_set_builtin(mirror_batch, GPU_SHADER_3D_POINT_UNIFORM_SIZE_UNIFORM_COLOR_AA);
+      rgba_uchar_to_float(fcol, kcd->colors.point_a);
+      GPU_batch_uniform_4fv(mirror_batch, "color", fcol);
+      GPU_batch_uniform_1f(mirror_batch, "size", 11 * UI_SCALE_FAC);
+      if (mirror_snapped > 0) {
+        GPU_batch_draw_range(mirror_batch, 0, mirror_snapped);
+      }
+      rgba_uchar_to_float(fcol, kcd->colors.curpoint_a);
+      GPU_batch_uniform_4fv(mirror_batch, "color", fcol);
+      GPU_batch_uniform_1f(mirror_batch, "size", 7 * UI_SCALE_FAC);
+      if (mirror_other > 0) {
+        GPU_batch_draw_range(mirror_batch, mirror_snapped, mirror_other);
+      }
+      GPU_batch_discard(mirror_batch);
+    }
+
     GPU_blend(GPU_BLEND_NONE);
   }
 
@@ -1085,6 +1194,12 @@ static void knife_update_header(bContext *C, wmOperator *op, KnifeTool_OpData *k
   status.opmodal(
       IFACE_("Measure"), op->type, KNF_MODAL_SHOW_DISTANCE_ANGLE_TOGGLE, kcd->show_dist_angle);
   status.opmodal(IFACE_("X-Ray"), op->type, KNF_MODAL_DEPTH_TEST_TOGGLE, !kcd->depth_test);
+  for (const KnifeObjectInfo &info : kcd->objects_info) {
+    if (info.symmetry_axis_count > 0) {
+      status.item(IFACE_("Symmetry"), ICON_NONE);
+      break;
+    }
+  }
 
   const std::string angle = fmt::format(
       "{}: {:.2f}({:.2f}) ({}{}{}{})",
@@ -2300,6 +2415,350 @@ static void knife_make_cuts(KnifeTool_OpData *kcd, int ob_index)
   }
 }
 
+static void knife_symmetry_cache_build(Object *ob, KnifeObjectInfo *obinfo)
+{
+  obinfo->symmetry_axis_count = 0;
+  if (ob->type != OB_MESH || obinfo->bm == nullptr) {
+    return;
+  }
+
+  Mesh *mesh = id_cast<Mesh *>(ob->data);
+  BMEditMesh *em = BKE_editmesh_from_object(ob);
+  BMesh *bm = obinfo->bm;
+  if (em == nullptr) {
+    return;
+  }
+
+  const bool use_topology = (mesh->editflag & ME_EDIT_MIRROR_TOPO) != 0;
+  const int candidate_axes[3] = {
+      (mesh->symmetry & ME_SYMMETRY_X) ? 0 : -1,
+      (mesh->symmetry & ME_SYMMETRY_Y) ? 1 : -1,
+      (mesh->symmetry & ME_SYMMETRY_Z) ? 2 : -1,
+  };
+
+  BM_mesh_elem_index_ensure(bm, BM_VERT);
+  for (const int axis : candidate_axes) {
+    if (axis < 0) {
+      continue;
+    }
+    const int slot = obinfo->symmetry_axis_count;
+    obinfo->symmetry_axes[slot] = axis;
+    obinfo->symmetry_mirror_of[slot].resize(bm->totvert, -1);
+    EDBM_verts_mirror_cache_begin(em, bm, axis, true, false, true, use_topology);
+    BMIter iter;
+    BMVert *vert;
+    int index;
+    BM_ITER_MESH_INDEX (vert, &iter, bm, BM_VERTS_OF_MESH, index) {
+      if (BM_elem_flag_test(vert, BM_ELEM_HIDDEN)) {
+        continue;
+      }
+      if (BMVert *mirror = EDBM_verts_mirror_get(em, bm, vert)) {
+        obinfo->symmetry_mirror_of[slot][index] = BM_elem_index_get(mirror);
+      }
+    }
+    EDBM_verts_mirror_cache_end(em);
+    obinfo->symmetry_axis_count++;
+  }
+}
+
+static void knife_symmetry_flip_local(const KnifeObjectInfo &info, int mask, float co[3])
+{
+  for (int slot = 0; slot < info.symmetry_axis_count; slot++) {
+    if (mask & (1 << slot)) {
+      co[info.symmetry_axes[slot]] *= -1.0f;
+    }
+  }
+}
+
+static void knife_symmetry_flip_cage(const KnifeTool_OpData *kcd,
+                                     int ob_index,
+                                     int mask,
+                                     const float cage[3],
+                                     float r_cage[3])
+{
+  const Object *ob = kcd->objects[ob_index];
+  float local[3];
+  mul_v3_m4v3(local, ob->world_to_object().ptr(), cage);
+  knife_symmetry_flip_local(kcd->objects_info[ob_index], mask, local);
+  mul_v3_m4v3(r_cage, ob->object_to_world().ptr(), local);
+}
+
+static BMVert *knife_symmetry_bmvert(const KnifeObjectInfo &info, BMesh *bm, BMVert *vert, int mask)
+{
+  if (vert == nullptr) {
+    return nullptr;
+  }
+  BM_mesh_elem_table_ensure(bm, BM_VERT);
+  for (int slot = 0; slot < info.symmetry_axis_count; slot++) {
+    if ((mask & (1 << slot)) == 0) {
+      continue;
+    }
+    const int index = BM_elem_index_get(vert);
+    if (index < 0 || index >= info.symmetry_mirror_of[slot].size()) {
+      return nullptr;
+    }
+    const int mirror_index = info.symmetry_mirror_of[slot][index];
+    if (mirror_index < 0 || mirror_index >= bm->totvert) {
+      return nullptr;
+    }
+    vert = BM_vert_at_index(bm, mirror_index);
+  }
+  return vert;
+}
+
+static BMFace *knife_symmetry_bmface(const KnifeObjectInfo &info, BMesh *bm, BMFace *face, int mask)
+{
+  if (face == nullptr) {
+    return nullptr;
+  }
+  Vector<BMVert *, 16> verts;
+  BMIter iter;
+  BMVert *vert;
+  BM_ITER_ELEM (vert, &iter, face, BM_VERTS_OF_FACE) {
+    BMVert *mirror = knife_symmetry_bmvert(info, bm, vert, mask);
+    if (mirror == nullptr) {
+      return nullptr;
+    }
+    verts.append(mirror);
+  }
+  if (verts.size() < 3) {
+    return nullptr;
+  }
+  return BM_face_exists(verts.data(), verts.size());
+}
+
+static KnifeEdge *knife_edge_between(KnifeVert *v1, KnifeVert *v2)
+{
+  if (v1 == nullptr || v2 == nullptr) {
+    return nullptr;
+  }
+  for (LinkData &ref : v1->edges) {
+    KnifeEdge *kfe = static_cast<KnifeEdge *>(ref.data);
+    if (kfe->is_invalid) {
+      continue;
+    }
+    if ((kfe->v1 == v1 && kfe->v2 == v2) || (kfe->v1 == v2 && kfe->v2 == v1)) {
+      return kfe;
+    }
+  }
+  return nullptr;
+}
+
+static KnifeVert *knife_symmetry_mapped_vert(const KnifeTool_OpData *kcd, KnifeVert *vert, int mask)
+{
+  if (vert == nullptr || mask < 1 || mask > 7) {
+    return nullptr;
+  }
+  KnifeVert *mirror = kcd->symmetry_kvert[mask - 1].lookup_default(vert, nullptr);
+  if (mirror == nullptr || mirror->is_invalid) {
+    return nullptr;
+  }
+  return mirror;
+}
+
+/** A mirrored hit that lands on a different hit of this same stroke is already being cut. */
+static bool knife_symmetry_hit_already_cut(const KnifeLineHit &src,
+                                           const float hit[3],
+                                           Span<KnifeLineHit> original)
+{
+  if (len_squared_v3v3(hit, src.hit) <= KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG) {
+    return false;
+  }
+  for (const KnifeLineHit &other : original) {
+    if (len_squared_v3v3(hit, other.hit) <= KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool knife_symmetry_make_hit(KnifeTool_OpData *kcd,
+                                    const KnifeLineHit &src,
+                                    int mask,
+                                    KnifeLineHit *r_hit)
+{
+  if (src.ob_index < 0 || src.ob_index >= kcd->objects.size()) {
+    return false;
+  }
+  const KnifeObjectInfo &info = kcd->objects_info[src.ob_index];
+  if (info.symmetry_axis_count == 0 || info.bm == nullptr) {
+    return false;
+  }
+
+  memset(r_hit, 0, sizeof(*r_hit));
+  r_hit->l = src.l;
+  r_hit->m = src.m;
+  r_hit->ob_index = src.ob_index;
+  copy_v3_v3(r_hit->hit, src.hit);
+  knife_symmetry_flip_local(info, mask, r_hit->hit);
+  knife_symmetry_flip_cage(kcd, src.ob_index, mask, src.cagehit, r_hit->cagehit);
+
+  BMesh *bm = info.bm;
+
+  if (src.v != nullptr && src.v->v != nullptr) {
+    BMVert *mirror = knife_symmetry_bmvert(info, bm, src.v->v, mask);
+    if (mirror == nullptr) {
+      return false;
+    }
+    r_hit->v = get_bm_knife_vert(kcd, mirror, src.ob_index);
+    copy_v3_v3(r_hit->hit, r_hit->v->co);
+    copy_v3_v3(r_hit->cagehit, r_hit->v->cageco);
+    return true;
+  }
+
+  if (src.kfe != nullptr && src.kfe->e != nullptr) {
+    BMVert *v1 = knife_symmetry_bmvert(info, bm, src.kfe->e->v1, mask);
+    BMVert *v2 = knife_symmetry_bmvert(info, bm, src.kfe->e->v2, mask);
+    if (v1 == nullptr || v2 == nullptr || v1 == v2) {
+      return false;
+    }
+    BMEdge *edge = BM_edge_exists(v1, v2);
+    if (edge == nullptr) {
+      return false;
+    }
+    r_hit->kfe = get_bm_knife_edge(kcd, edge, src.ob_index);
+    return true;
+  }
+
+  if (src.f != nullptr) {
+    BMFace *face = knife_symmetry_bmface(info, bm, src.f, mask);
+    if (face == nullptr) {
+      return false;
+    }
+    r_hit->f = face;
+    return true;
+  }
+
+  if (src.v != nullptr && src.v->v == nullptr) {
+    if (KnifeVert *mirror = knife_symmetry_mapped_vert(kcd, src.v, mask)) {
+      r_hit->v = mirror;
+      copy_v3_v3(r_hit->hit, mirror->co);
+      copy_v3_v3(r_hit->cagehit, mirror->cageco);
+      return true;
+    }
+  }
+
+  if (src.kfe != nullptr && src.kfe->e == nullptr) {
+    KnifeVert *v1 = knife_symmetry_mapped_vert(kcd, src.kfe->v1, mask);
+    KnifeVert *v2 = knife_symmetry_mapped_vert(kcd, src.kfe->v2, mask);
+    if (KnifeEdge *edge = knife_edge_between(v1, v2)) {
+      r_hit->kfe = edge;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static void knife_apply_linehits(KnifeTool_OpData *kcd, Vector<KnifeLineHit> &hits)
+{
+  if (hits.size() < 2) {
+    return;
+  }
+
+  Map<BMFace *, ListBaseT<LinkData> *> facehits;
+  for (KnifeLineHit &hit : hits) {
+    if (hit.f) {
+      add_hit_to_facehits(kcd, facehits, hit.f, &hit);
+    }
+    if (hit.v) {
+      for (LinkData &ref : hit.v->faces) {
+        add_hit_to_facehits(kcd, facehits, static_cast<BMFace *>(ref.data), &hit);
+      }
+    }
+    if (hit.kfe) {
+      for (LinkData &ref : hit.kfe->faces) {
+        add_hit_to_facehits(kcd, facehits, static_cast<BMFace *>(ref.data), &hit);
+      }
+    }
+  }
+
+  for (const auto &item : facehits.items()) {
+    knife_cut_face(kcd, item.key, item.value);
+  }
+}
+
+static void knife_add_symmetry_cuts(KnifeTool_OpData *kcd, Span<KnifeLineHit> original)
+{
+  if (original.size() < 2) {
+    return;
+  }
+
+  int max_axes = 0;
+  for (const KnifeLineHit &hit : original) {
+    if (hit.ob_index < 0 || hit.ob_index >= kcd->objects.size()) {
+      continue;
+    }
+    max_axes = std::max(max_axes, kcd->objects_info[hit.ob_index].symmetry_axis_count);
+  }
+  if (max_axes == 0) {
+    return;
+  }
+
+  struct SymmetryHit {
+    KnifeLineHit hit;
+    KnifeVert *src = nullptr;
+  };
+
+    for (int mask = 1; mask < (1 << max_axes); mask++) {
+    Vector<SymmetryHit> mirrored;
+    mirrored.reserve(original.size());
+    bool any_off_plane = false;
+    for (const KnifeLineHit &src : original) {
+      if (src.ob_index < 0 || src.ob_index >= kcd->objects.size()) {
+        continue;
+      }
+      if (mask >= (1 << kcd->objects_info[src.ob_index].symmetry_axis_count)) {
+        continue;
+      }
+      SymmetryHit item;
+      if (!knife_symmetry_make_hit(kcd, src, mask, &item.hit)) {
+        continue;
+      }
+      if (knife_symmetry_hit_already_cut(src, item.hit.hit, original)) {
+        continue;
+      }
+      if (len_squared_v3v3(item.hit.hit, src.hit) > KNIFE_FLT_EPSBIG * KNIFE_FLT_EPSBIG) {
+        any_off_plane = true;
+      }
+      item.src = src.v;
+      mirrored.append(item);
+    }
+    if (mirrored.size() < 2) {
+      continue;
+    }
+    /* A stroke that already lies on the mirror plane is its own mirror. */
+    if (!any_off_plane) {
+      for (const SymmetryHit &item : mirrored) {
+        if (item.src != nullptr) {
+          kcd->symmetry_kvert[mask - 1].add_overwrite(item.src, item.src);
+        }
+      }
+      continue;
+    }
+    std::ranges::sort(mirrored, [](const SymmetryHit &a, const SymmetryHit &b) {
+      return linehit_compare(a.hit, b.hit);
+    });
+
+    Vector<KnifeLineHit> hits;
+    hits.reserve(mirrored.size());
+    for (SymmetryHit &item : mirrored) {
+      hits.append(item.hit);
+    }
+    /* `hits` must not reallocate after this: face lists store pointers into it. */
+    knife_apply_linehits(kcd, hits);
+
+    for (const int i : mirrored.index_range()) {
+      KnifeVert *src_vert = mirrored[i].src;
+      KnifeVert *dst_vert = hits[i].v;
+      if (src_vert == nullptr || dst_vert == nullptr) {
+        continue;
+      }
+      kcd->symmetry_kvert[mask - 1].add_overwrite(src_vert, dst_vert);
+    }
+  }
+}
+
 /* User has just left-clicked after the first time.
  * Add all knife cuts implied by line from prev to curr.
  * If that line crossed edges then kcd->linehits will be non-null.
@@ -2380,6 +2839,7 @@ static void knife_add_cut(KnifeTool_OpData *kcd)
     linehit_to_knifepos(&kcd->prev, lh);
   }
 
+  knife_add_symmetry_cuts(kcd, kcd->linehits);
   kcd->linehits.clear_and_shrink();
 }
 
@@ -3892,6 +4352,7 @@ static void knifetool_init_obinfo(KnifeTool_OpData *kcd,
   }
 
   BM_mesh_elem_index_ensure(obinfo->bm, BM_VERT);
+  knife_symmetry_cache_build(ob, obinfo);
 
   if (use_tri_indices) {
     const Span<std::array<BMLoop *, 3>> looptris = obinfo->em->looptris;
@@ -4664,7 +5125,7 @@ void MESH_OT_knife_tool(wmOperatorType *ot)
   /* Description. */
   ot->name = "Knife Topology Tool";
   ot->idname = "MESH_OT_knife_tool";
-  ot->description = "Cut new topology";
+  ot->description = "Cut new topology. Mesh symmetry cuts the mirrored side as well";
 
   /* Callbacks. */
   ot->invoke = knifetool_invoke;

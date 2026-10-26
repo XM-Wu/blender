@@ -27,6 +27,20 @@ def update_fn(_self, _context):
     load()
 
 
+class Prefs(bpy.types.KeyConfigPreferences):
+    bl_idname = IDNAME
+
+    remember_last_tool: bpy.props.BoolProperty(
+        name="Remember Last Tool in Group",
+        description="Group shortcuts restore the last selected sub-tool instead of cycling",
+        default=True,
+        update=update_fn,
+    )
+
+    def draw(self, layout):
+        layout.prop(self, "remember_last_tool")
+
+
 industry_compatible = bpy.utils.execfile(os.path.join(DIRNAME, "keymap_data", "industry_compatible_data.py"))
 
 
@@ -45,7 +59,19 @@ def _keymap_items(keyconfig_data, km_name):
     raise RuntimeError("keymap not found: " + km_name)
 
 
-def _add_xm_items(keyconfig_data):
+def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
+    if remember_last_tool:
+        for _name, _args, content in keyconfig_data:
+            for operator, _event, options in content["items"]:
+                if operator != "wm.tool_set_by_id" or not options:
+                    continue
+                properties = options.get("properties", [])
+                if not dict(properties).get("cycle", False):
+                    continue
+                options["properties"] = [
+                    (name, value) for name, value in properties if name not in {"cycle", "use_last"}
+                ] + [("cycle", False), ("use_last", True)]
+
     # Gizmo drags ignore unspecified modifiers, so Ctrl+Shift would miss the handle.
     # The Move tool then turns that drag into vertex slide. See gizmo_move_vert_slide.
     for km_name in ("Generic Gizmo Maybe Drag", "Generic Gizmo Drag"):
@@ -92,7 +118,7 @@ def load():
         use_annotate_tool=False,
     )
     keyconfig_data = industry_compatible.generate_keymaps(params)
-    _add_xm_items(keyconfig_data)
+    _add_xm_items(keyconfig_data, remember_last_tool=kc.preferences.remember_last_tool)
 
     if platform == "darwin":
         from bl_keymap_utils.platform_helpers import keyconfig_data_oskey_from_ctrl_for_macos
@@ -102,4 +128,5 @@ def load():
 
 
 if __name__ == "__main__":
+    bpy.utils.register_class(Prefs)
     load()

@@ -2356,6 +2356,12 @@ class WM_OT_tool_set_by_id(Operator):
         default=False,
         options={'SKIP_SAVE'},
     )
+    use_last: BoolProperty(
+        name="Use Last Tool in Group",
+        description="Activate the last used tool in this group without cycling",
+        default=False,
+        options={'SKIP_SAVE'},
+    )
     as_fallback: BoolProperty(
         name="Set Fallback",
         description="Set the fallback tool instead of the primary tool",
@@ -2381,12 +2387,14 @@ class WM_OT_tool_set_by_id(Operator):
         from bl_ui.space_toolsystem_common import (
             activate_by_id,
             activate_by_id_or_cycle,
+            activate_by_id_last,
         )
 
         if (space_type := WM_OT_tool_set_by_id.space_type_from_operator(self, context)) is None:
             return {'CANCELLED'}
 
-        fn = activate_by_id_or_cycle if self.cycle else activate_by_id
+        fn = activate_by_id_last if self.use_last else (
+            activate_by_id_or_cycle if self.cycle else activate_by_id)
         if fn(context, space_type, self.name, as_fallback=self.as_fallback):
             if self.as_fallback:
                 tool_settings = context.tool_settings

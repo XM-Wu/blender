@@ -179,47 +179,20 @@ def _items(operator):
     ctrl_active = getattr(operator, "_hud_ctrl", False)
     shift_active = getattr(operator, "_hud_shift", False)
 
-    if getattr(operator, "_hud_kind", None) == "FACE":
-        extrude_label = translate("Extrude Distance")
-        outward_label = translate("Outward Offset")
-        modifier_hint = (
-            f'{translate("Ctrl: Outward Offset")}    '
-            f'{translate("Shift: Precision")}'
-        )
-        return [
-            (
-                f"{extrude_label}: {_format_distance(operator.extrude_dist)}",
-                "active" if not ctrl_active else "value",
-            ),
-            (
-                f"{outward_label}: {_format_distance(operator.outward_offset)}",
-                "active" if ctrl_active else "value",
-            ),
-            (
-                modifier_hint,
-                "active" if ctrl_active or shift_active else "hint",
-            ),
-        ]
-
-    extrude_label = translate("Extrude")
-    offset_label = translate("Offset")
-    modifier_hint = (
-        f'{translate("Ctrl: Offset")}    '
-        f'{translate("Shift: Precision")}'
-    )
+    face = getattr(operator, "_hud_kind", None) == "FACE"
+    distance = operator.extrude_dist if face else operator.extrude
+    offset = operator.outward_offset if face else operator.offset
     return [
-        (
-            f"{extrude_label}: {_format_distance(operator.extrude)}",
-            "active" if not ctrl_active else "value",
-        ),
-        (
-            f"{offset_label}: {_format_distance(operator.offset)}",
-            "active" if ctrl_active else "value",
-        ),
-        (
-            modifier_hint,
-            "active" if ctrl_active or shift_active else "hint",
-        ),
+        (f'{translate("Thickness" if face else "Extrude")}: {_format_distance(distance)}',
+         'value' if ctrl_active else 'active'),
+        (f'{translate("Offset" if face else "Normal Offset")}: {_format_distance(offset)}',
+         'active' if ctrl_active else 'value'),
+        (f'{translate("Direction")}: {operator.direction}    '
+         f'{translate("Divisions")}: {operator.divisions}    '
+         f'{translate("Keep Faces Together")}: {operator.keep_faces_together}', 'value'),
+        (translate("X/Y/Z: Axis | Wheel: Divisions | K: Keep Together"), 'hint'),
+        (translate("Ctrl: Offset | Shift: Precision | Type: Distance"),
+         'active' if ctrl_active or shift_active else 'hint'),
     ]
 
 

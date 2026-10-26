@@ -785,3 +785,15 @@ translations_dict = {
     "de": dict_german,
     "de_DE": dict_german,
 }
+
+# Shared controls for the built-in component extrusion tool.
+dict_hans.update(_entries({
+    "Thickness": "厚度",
+    "Normal Offset": "法向偏移",
+    "Smart Edge Extrude": "智能边挤出",
+    "Direction": "方向",
+    "Translation": "位移",
+    "End Scale": "末端缩放",
+    "X/Y/Z: Axis | Wheel: Divisions | K: Keep Together": "X/Y/Z：轴向 | 滚轮：分段 | K：保持连接",
+    "Ctrl: Offset | Shift: Precision | Type: Distance": "Ctrl：偏移 | Shift：微调 | 输入数字：距离",
+}, contexts=(CONTEXT_DEFAULT, CONTEXT_OPERATOR)))

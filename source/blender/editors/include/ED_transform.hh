@@ -175,6 +175,7 @@ void VIEW3D_GGT_xform_shear(wmGizmoGroupType *gzgt);
 
 /* `transform_gizmo_extrude_3d.cc` */
 void VIEW3D_GGT_xform_extrude(wmGizmoGroupType *gzgt);
+void VIEW3D_GGT_xform_extrude_outset(wmGizmoGroupType *gzgt);
 
 /* Generic 2D transform gizmo callback assignment. */
 void ED_widgetgroup_gizmo2d_xform_callbacks_set(wmGizmoGroupType *gzgt);

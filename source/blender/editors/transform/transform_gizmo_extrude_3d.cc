@@ -150,7 +150,9 @@ static void gizmo_mesh_extrude_setup(const bContext *C, wmGizmoGroup *gzgroup)
     /* GPXX: Remove if #OB_MODE_EDIT_GPENCIL_LEGACY is merged with #OB_MODE_EDIT. */
     const Object *obact = CTX_data_active_object(C);
     if (obact->type == OB_MESH) {
-      op_idname = "MESH_OT_extrude_context_move";
+      op_idname = STREQ(gzgroup->type->idname, "VIEW3D_GGT_xform_extrude_outset") ?
+                      "MESH_OT_omni_outset_move" :
+                      "MESH_OT_extrude_context_move";
       ggd->normal_axis = 2;
     }
     else if (obact->type == OB_ARMATURE) {
@@ -517,5 +519,12 @@ void VIEW3D_GGT_xform_extrude(wmGizmoGroupType *gzgt)
 }
 
 /** \} */
+
+void VIEW3D_GGT_xform_extrude_outset(wmGizmoGroupType *gzgt)
+{
+  VIEW3D_GGT_xform_extrude(gzgt);
+  gzgt->name = "3D View Smart Extrude";
+  gzgt->idname = "VIEW3D_GGT_xform_extrude_outset";
+}
 
 }  // namespace blender::ed::transform

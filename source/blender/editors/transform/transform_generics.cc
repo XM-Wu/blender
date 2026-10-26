@@ -150,6 +150,8 @@ void initTransInfo(bContext *C, TransInfo *t, wmOperator *op, const wmEvent *eve
   t->region = region;
   t->settings = ts;
   t->reports = op ? op->reports : nullptr;
+  t->mirror_selected_only = op && op->opm &&
+                            STREQ(op->opm->idname, "MESH_OT_omni_outset_move");
 
   t->helpline = HLP_NONE;
 

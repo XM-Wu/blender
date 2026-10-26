@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_array.hh"
+#include "BLI_kdtree.hh"
 #include "BLI_linklist_stack.hh"
 #include "BLI_math_geom_c.hh"
 #include "BLI_math_matrix_c.hh"
@@ -1199,7 +1200,8 @@ void transform_convert_mesh_mirrordata_calc(BMEditMesh *em,
                                             const bool use_select,
                                             const bool use_topology,
                                             const bool mirror_axis[3],
-                                            TransMirrorData *r_mirror_data)
+                                            TransMirrorData *r_mirror_data,
+                                            const bool selected_only)
 {
   MirrorDataVert *vert_map;
 
@@ -1235,13 +1237,47 @@ void transform_convert_mesh_mirrordata_calc(BMEditMesh *em,
   int *index[3] = {nullptr, nullptr, nullptr};
   bool is_single_mirror_axis = (mirror_axis[0] + mirror_axis[1] + mirror_axis[2]) == 1;
   bool test_selected_only = use_select && is_single_mirror_axis;
+  /* Newly extruded caps coincide with their unselected base vertices. Do not
+   * let native mirror matching move the base instead of the mirrored cap. */
+  KDTree<float3> *selected_tree = nullptr;
+  if (selected_only) {
+    BM_mesh_elem_table_ensure(bm, BM_VERT);
+    BM_mesh_elem_index_ensure(bm, BM_VERT);
+    selected_tree = kdtree_new<float3>(bm->totvertsel);
+    BM_ITER_MESH_INDEX (eve, &iter, bm, BM_VERTS_OF_MESH, i) {
+      if (BM_elem_flag_test(eve, BM_ELEM_SELECT) &&
+          !BM_elem_flag_test(eve, BM_ELEM_HIDDEN))
+      {
+        kdtree_insert<float3>(selected_tree, i, eve->co);
+      }
+    }
+    kdtree_balance<float3>(selected_tree);
+  }
   for (int a = 0; a < 3; a++) {
     if (!mirror_axis[a]) {
       continue;
     }
 
     index[a] = MEM_new_array_uninitialized<int>(totvert, __func__);
-    EDBM_verts_mirror_cache_begin_ex(em,
+    if (selected_tree) {
+      BM_ITER_MESH_INDEX (eve, &iter, bm, BM_VERTS_OF_MESH, i) {
+        index[a][i] = -1;
+        if (!BM_elem_flag_test(eve, BM_ELEM_SELECT) ||
+            BM_elem_flag_test(eve, BM_ELEM_HIDDEN))
+        {
+          continue;
+        }
+        float3 co = eve->co;
+        co[a] *= -1.0f;
+        KDTreeNearest<float3> nearest;
+        const int match = kdtree_find_nearest<float3>(selected_tree, co, &nearest);
+        if (match != -1 && match != i && nearest.dist < TRANSFORM_MAXDIST_MIRROR) {
+          index[a][i] = match;
+        }
+      }
+    }
+    else {
+      EDBM_verts_mirror_cache_begin_ex(em,
                                      bm,
                                      a,
                                      false,
@@ -1250,6 +1286,7 @@ void transform_convert_mesh_mirrordata_calc(BMEditMesh *em,
                                      use_topology,
                                      TRANSFORM_MAXDIST_MIRROR,
                                      index[a]);
+    }
 
     flag = TD_MIRROR_X << a;
     BM_ITER_MESH_INDEX (eve, &iter, bm, BM_VERTS_OF_MESH, i) {
@@ -1281,6 +1318,10 @@ void transform_convert_mesh_mirrordata_calc(BMEditMesh *em,
       vert_map[i_mirr] = MirrorDataVert{i, flag};
       mirror_elem_len++;
     }
+  }
+
+  if (selected_tree) {
+    kdtree_free<float3>(selected_tree);
   }
 
   if (!mirror_elem_len) {
@@ -1590,7 +1631,7 @@ static void createTransEditVerts(bContext * /*C*/, TransInfo *t)
       const bool mirror_axis[3] = {
           bool(tc->use_mirror_axis_x), bool(tc->use_mirror_axis_y), bool(tc->use_mirror_axis_z)};
       transform_convert_mesh_mirrordata_calc(
-          em, bm, use_select, use_topology, mirror_axis, &mirror_data);
+          em, bm, use_select, use_topology, mirror_axis, &mirror_data, t->mirror_selected_only);
 
       if (mirror_data.vert_map) {
         tc->data_mirror_len = mirror_data.mirror_elem_len;

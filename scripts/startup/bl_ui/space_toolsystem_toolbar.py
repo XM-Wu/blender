@@ -1035,12 +1035,9 @@ class _defs_edit_mesh:
 
     @ToolDef.from_fn
     def extrude_outset():
-        def draw_settings(context, layout, _tool):
-            settings = context.window_manager.omni_outset
-            layout.prop(settings, "use_adaptive_drag_scale")
-            layout.prop(settings, "show_hud")
-            if settings.show_hud:
-                layout.prop(settings, "hud_font_size")
+        def draw_settings(_context, layout, tool):
+            props = tool.gizmo_group_properties("VIEW3D_GGT_xform_extrude_outset")
+            layout.row(align=True).prop(props, "axis_type", expand=True)
 
         return dict(
             idname="builtin.extrude_outset",
@@ -1050,8 +1047,8 @@ class _defs_edit_mesh:
                 "or edges equidistantly outward"
             ),
             icon="ops.mesh.extrude_region_move",
-            widget=None,
-            operator="mesh.omni_outset",
+            widget="VIEW3D_GGT_xform_extrude_outset",
+            operator="mesh.omni_outset_move",
             keymap=(),
             draw_settings=draw_settings,
         )

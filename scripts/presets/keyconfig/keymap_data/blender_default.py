@@ -7843,7 +7843,8 @@ def km_3d_view_tool_edit_mesh_extrude_outset(params):
         "3D View Tool: Edit Mesh, Extrude",
         {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
         {"items": [
-            ("mesh.omni_outset", {**params.tool_maybe_tweak_event, **params.tool_modifier}, None),
+            ("mesh.omni_outset_move", {**params.tool_maybe_tweak_event, **params.tool_modifier},
+             {"properties": [("TRANSFORM_OT_translate", [("release_confirm", True)])]}),
         ]},
     )
 

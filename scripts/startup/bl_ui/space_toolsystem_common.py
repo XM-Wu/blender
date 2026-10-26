@@ -1081,6 +1081,11 @@ def _activate_by_item(context, space_type, item, index, *, as_fallback=False):
                 from bl_keymap_utils.io import _init_properties_from_data
                 _init_properties_from_data(props, gizmo_properties)
 
+    # Record explicit selections immediately, including while the toolbar is
+    # hidden or another tool is activated before the next toolbar redraw.
+    if not as_fallback and index >= 0:
+        cls._tool_group_active_set_by_id(context, item.idname, item.idname)
+
     WindowManager = bpy.types.WindowManager
 
     handle_map = _activate_by_item._cursor_draw_handle
@@ -1111,6 +1116,24 @@ def activate_by_id(context, space_type, idname, *, as_fallback=False):
         return False
     _activate_by_item(context, space_type, item, index, as_fallback=as_fallback)
     return True
+
+
+def activate_by_id_last(context, space_type, idname, *, as_fallback=False):
+    cls = ToolSelectPanelHelper._tool_class_from_space_type(space_type)
+    if cls is None:
+        return False
+    item_group = cls._tool_get_group_by_id(context, idname)
+    if item_group is None:
+        return activate_by_id(context, space_type, idname, as_fallback=as_fallback)
+
+    tool_active = ToolSelectPanelHelper._tool_active_from_context(context, space_type)
+    active_id = getattr(tool_active, "idname_fallback" if as_fallback else "idname", None)
+    item = next((item for item in item_group if item and item.idname == active_id), None)
+    if item is None:
+        item = item_group[cls._tool_group_active_get_from_item(item_group)]
+    # Dynamic groups may contain separators or change while the tool is inactive.
+    return activate_by_id(
+        context, space_type, item.idname if item else idname, as_fallback=as_fallback)
 
 
 def activate_by_id_or_cycle(context, space_type, idname, *, offset=1, as_fallback=False):

@@ -349,7 +349,8 @@ void transform_convert_mesh_mirrordata_calc(BMEditMesh *em,
                                             bool use_select,
                                             bool use_topology,
                                             const bool mirror_axis[3],
-                                            TransMirrorData *r_mirror_data);
+                                            TransMirrorData *r_mirror_data,
+                                            bool selected_only = false);
 void transform_convert_mesh_mirrordata_free(TransMirrorData *mirror_data);
 /**
  * Detect CrazySpace (Blender term).

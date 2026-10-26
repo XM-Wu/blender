@@ -497,6 +497,7 @@ static void view3d_widgets()
   WM_gizmogrouptype_append(ed::transform::VIEW3D_GGT_xform_cage);
   WM_gizmogrouptype_append(ed::transform::VIEW3D_GGT_xform_shear);
   WM_gizmogrouptype_append(ed::transform::VIEW3D_GGT_xform_extrude);
+  WM_gizmogrouptype_append(ed::transform::VIEW3D_GGT_xform_extrude_outset);
   WM_gizmogrouptype_append(VIEW3D_GGT_mesh_preselect_elem);
   WM_gizmogrouptype_append(VIEW3D_GGT_mesh_preselect_edgering);
   WM_gizmogrouptype_append(VIEW3D_GGT_tool_generic_handle_normal);

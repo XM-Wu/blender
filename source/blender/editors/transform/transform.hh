@@ -843,6 +843,8 @@ struct TransInfo {
 
   /** Current context/options for transform. */
   eTContext options;
+  /** Smart extrusion creates both mirrored caps before starting the transform. */
+  bool mirror_selected_only;
   /** Generic flags for special behaviors. */
   eTFlag flag;
   /** Special modifiers, by function, not key. */

@@ -1032,6 +1032,29 @@ void MESH_OT_edge_face_add(wmOperatorType *ot)
 /** \name Mark Edge (Seam) Operator
  * \{ */
 
+/* Expand the affected edges without changing selection or selection history. */
+static void edbm_mark_edges_mirror(Object *obedit, BMesh *bm, Vector<BMEdge *> &edges)
+{
+  const Mesh *mesh = id_cast<Mesh *>(obedit->data);
+  BMEditMesh *em = BKE_editmesh_from_object(obedit);
+  for (int axis = 0; axis < 3; axis++) {
+    if (!(mesh->symmetry & (ME_SYMMETRY_X << axis))) {
+      continue;
+    }
+    /* Topology mirror is an X-axis mapping; use spatial matching for Y and Z. */
+    const bool use_topology = axis == 0 && (mesh->editflag & ME_EDIT_MIRROR_TOPO);
+    EDBM_verts_mirror_cache_begin(em, bm, axis, true, false, false, use_topology);
+    const int edges_num = edges.size();
+    for (int i = 0; i < edges_num; i++) {
+      BMEdge *mirror = EDBM_verts_mirror_get_edge(em, bm, edges[i]);
+      if (mirror && !BM_elem_flag_test(mirror, BM_ELEM_HIDDEN)) {
+        edges.append(mirror);
+      }
+    }
+    EDBM_verts_mirror_cache_end(em);
+  }
+}
+
 static wmOperatorStatus edbm_mark_seam_exec(bContext *C, wmOperator *op)
 {
   const Main *bmain = CTX_data_main(C);
@@ -1050,22 +1073,15 @@ static wmOperatorStatus edbm_mark_seam_exec(bContext *C, wmOperator *op)
       continue;
     }
 
-    if (clear) {
-      BM_ITER_MESH (eed, &iter, bm, BM_EDGES_OF_MESH) {
-        if (!BM_elem_flag_test(eed, BM_ELEM_SELECT) || BM_elem_flag_test(eed, BM_ELEM_HIDDEN)) {
-          continue;
-        }
-
-        BM_elem_flag_disable(eed, BM_ELEM_SEAM);
+    Vector<BMEdge *> edges;
+    BM_ITER_MESH (eed, &iter, bm, BM_EDGES_OF_MESH) {
+      if (BM_elem_flag_test(eed, BM_ELEM_SELECT) && !BM_elem_flag_test(eed, BM_ELEM_HIDDEN)) {
+        edges.append(eed);
       }
     }
-    else {
-      BM_ITER_MESH (eed, &iter, bm, BM_EDGES_OF_MESH) {
-        if (!BM_elem_flag_test(eed, BM_ELEM_SELECT) || BM_elem_flag_test(eed, BM_ELEM_HIDDEN)) {
-          continue;
-        }
-        BM_elem_flag_enable(eed, BM_ELEM_SEAM);
-      }
+    edbm_mark_edges_mirror(obedit, bm, edges);
+    for (BMEdge *edge : edges) {
+      BM_elem_flag_set(edge, BM_ELEM_SEAM, !clear);
     }
   }
 
@@ -1129,6 +1145,7 @@ static wmOperatorStatus edbm_mark_sharp_exec(bContext *C, wmOperator *op)
       continue;
     }
 
+    Vector<BMEdge *> edges;
     BM_ITER_MESH (eed, &iter, bm, BM_EDGES_OF_MESH) {
       if (use_verts) {
         if (!(BM_elem_flag_test(eed->v1, BM_ELEM_SELECT) ||
@@ -1141,7 +1158,11 @@ static wmOperatorStatus edbm_mark_sharp_exec(bContext *C, wmOperator *op)
         continue;
       }
 
-      BM_elem_flag_set(eed, BM_ELEM_SMOOTH, clear);
+      edges.append(eed);
+    }
+    edbm_mark_edges_mirror(obedit, bm, edges);
+    for (BMEdge *edge : edges) {
+      BM_elem_flag_set(edge, BM_ELEM_SMOOTH, clear);
     }
 
     EDBMUpdate_Params params{};

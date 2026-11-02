@@ -2014,6 +2014,12 @@ enum eTool_SelectMode : int {
 };
 ENUM_OPERATORS(eTool_SelectMode)
 
+/** #ToolSettings::mesh_select_flags. Zero preserves legacy selection behavior. */
+enum eMeshSelectFlag {
+  MESH_SELECT_THROUGH = 1 << 0,
+  MESH_SELECT_EXCLUDE_BACKFACING = 1 << 1,
+};
+
 /** #MeshStatVis::type */
 enum eMeshStatVis_Type : char {
   SCE_STATVIS_OVERHANG = 0,
@@ -2402,7 +2408,9 @@ struct ToolSettings {
 
   char workspace_tool_type = 0;
 
-  char _pad5[7] = {};
+  /** Region selection options, independent of viewport X-Ray shading. */
+  char mesh_select_flags = 0;
+  char _pad5[6] = {};
 
   /**
    * XXX: these `sculpt_paint_*` fields are deprecated, use the

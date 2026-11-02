@@ -437,6 +437,17 @@ class _defs_transform:
 
 class _defs_view3d_select:
 
+    @staticmethod
+    def draw_select_through_settings(context, layout):
+        if context.mode != 'EDIT_MESH':
+            return
+        settings = context.tool_settings
+        row = layout.row(align=True)
+        row.prop(settings, "mesh_select_through", icon='XRAY', toggle=True)
+        sub = row.row(align=True)
+        sub.active = settings.mesh_select_through
+        sub.prop(settings, "mesh_select_backfacing", icon='NORMALS_FACE', toggle=True)
+
     @ToolDef.from_fn
     def select():
         return dict(
@@ -449,11 +460,12 @@ class _defs_view3d_select:
 
     @ToolDef.from_fn
     def box():
-        def draw_settings(_context, layout, tool):
+        def draw_settings(context, layout, tool):
             props = tool.operator_properties("view3d.select_box")
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
+            _defs_view3d_select.draw_select_through_settings(context, row)
         return dict(
             idname="builtin.select_box",
             label="Select Box",
@@ -465,11 +477,12 @@ class _defs_view3d_select:
 
     @ToolDef.from_fn
     def lasso():
-        def draw_settings(_context, layout, tool):
+        def draw_settings(context, layout, tool):
             props = tool.operator_properties("view3d.select_lasso")
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
+            _defs_view3d_select.draw_select_through_settings(context, row)
         return dict(
             idname="builtin.select_lasso",
             label="Select Lasso",
@@ -481,11 +494,12 @@ class _defs_view3d_select:
 
     @ToolDef.from_fn
     def circle():
-        def draw_settings(_context, layout, tool):
+        def draw_settings(context, layout, tool):
             props = tool.operator_properties("view3d.select_circle")
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
+            _defs_view3d_select.draw_select_through_settings(context, row)
             layout.prop(props, "radius")
 
         def draw_cursor(_context, tool, xy):

@@ -4575,6 +4575,23 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_IMAGE, nullptr);
 
   /* Mesh */
+  prop = RNA_def_property(srna, "mesh_select_through", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "mesh_select_flags", MESH_SELECT_THROUGH);
+  RNA_def_property_ui_text(
+      prop,
+      "Select Through",
+      "Box, circle and lasso select occluded mesh elements with temporary X-Ray display");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
+  prop = RNA_def_property(srna, "mesh_select_backfacing", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(
+      prop, nullptr, "mesh_select_flags", MESH_SELECT_EXCLUDE_BACKFACING);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop,
+                           "Select Backfacing",
+                           "Include back-facing mesh elements when Select Through is enabled");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
   prop = RNA_def_property(srna, "mesh_select_mode", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_bitset_array_sdna(prop, nullptr, "selectmode", 1 << 0, 3);
   RNA_def_property_flag(prop,

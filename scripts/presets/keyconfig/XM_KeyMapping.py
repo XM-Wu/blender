@@ -30,6 +30,25 @@ def update_fn(_self, _context):
 class Prefs(bpy.types.KeyConfigPreferences):
     bl_idname = IDNAME
 
+    # Add-ons such as X-Ray Selection Tools read the standard key-config
+    # mouse preferences when any preferences object exists. XM has fixed
+    # Industry Compatible mouse semantics, so expose read-only values rather
+    # than configurable options which the generated key-map would ignore.
+    select_mouse: bpy.props.EnumProperty(
+        name="Select Mouse",
+        items=(('LEFT', "Left", "Left mouse selection", 0),
+               ('RIGHT', "Right", "Right mouse selection", 1)),
+        get=lambda _self: 0,
+        options={'HIDDEN'},
+    )
+    rmb_action: bpy.props.EnumProperty(
+        name="Right Mouse Action",
+        items=(('TWEAK', "Tweak", "Do not use right mouse for fallback selection", 0),
+               ('FALLBACK_TOOL', "Fallback Tool", "Right mouse fallback selection", 1)),
+        get=lambda _self: 0,
+        options={'HIDDEN'},
+    )
+
     remember_last_tool: bpy.props.BoolProperty(
         name="Remember Last Tool in Group",
         description="Group shortcuts restore the last selected sub-tool instead of cycling",
@@ -91,8 +110,30 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
          {"properties": [("release_confirm", True)]}),
     )
 
+    # Explicit edit toggle avoids per-object restore_mode history.
+    mode_items = _keymap_items(keyconfig_data, "Object Non-modal")
+    mode_items[:] = [
+        ("object.xm_edit_mode_toggle", event, None)
+        if operator == "object.mode_set" and event.get("type") == 'FOUR'
+        else (operator, event, options)
+        for operator, event, options in mode_items
+    ]
+
     # Shift+V is the only keyboard shortcut for vertex/edge slide.
     mesh_items = _keymap_items(keyconfig_data, "Mesh")
+    # Mesh-only overrides; global framing and transform modal keys stay intact.
+    mesh_items[:] = [item for item in mesh_items if not (
+        item[1].get("type") in {'Y', 'A', 'S'}
+        and not any(item[1].get(mod, False) for mod in ("ctrl", "shift", "alt", "oskey", "hyper"))
+    )]
+    mesh_items.extend([
+        ("wm.tool_set_by_id", {"type": 'Y', "value": 'PRESS'},
+         {"properties": [("name", "builtin.target_weld")]}),
+        ("mesh.apply_all_transforms", {"type": 'A', "value": 'PRESS'}, None),
+        ("wm.tool_set_by_id", {"type": 'S', "value": 'PRESS'},
+         {"properties": [("name", "builtin.loop_cut"),
+                         ("cycle", not remember_last_tool), ("use_last", remember_last_tool)]}),
+    ])
     slide_ops = {"transform.vert_slide", "transform.edge_slide", "mesh.vert_edge_slide"}
     mesh_items[:] = [item for item in mesh_items if item[0] not in slide_ops]
     mesh_items.append(

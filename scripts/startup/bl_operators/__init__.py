@@ -31,6 +31,7 @@ _modules = [
     "object",
     "object_align",
     "object_quick_effects",
+    "object_quick_lattice",
     "object_randomize_transform",
     "presets",
     "project",

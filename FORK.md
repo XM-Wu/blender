@@ -100,6 +100,42 @@
 
 开关只在物体模式显示。标志位是 `ToolSettings.transform_flag` 的 `SCE_XFORM_GIZMO_OBJECT_CENTER`，默认关。
 
+## UV 工具面板
+
+Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap、Packing 和 Distortion 模块。操作按钮使用大号方形彩色图标；`UILayout.operator()` 增加独立的 `icon_scale` 参数，默认值为 1，原有按钮大小不变。
+
+- **Mark Seam / Stitch UVs**：标记接缝、按当前顶点或边选择模式缝合；UV 已连续时清除选中接缝，没有可缝合的边界时提示。支持撤销、重做。
+- **Unwrap / Pack**：调用 Blender 原生操作和参数界面。Pack 初始关闭旋转；当前构建在重叠方形岛的旋转搜索测试中出现长时间等待，用户仍可在原生参数中调整。
+- **Distortion**：UV 与模型同步显示归一化 UV/世界空间面积比，1 为中性、红色压缩、蓝色拉伸；UV 底部直方图按模型表面积加权。这是面积诊断，不代表完整的角度或方向性畸变指标。
+- 热图连续填色后单独绘制细线框。编辑模式的交互变换缓存拓扑、局部更新受影响三角形及 GPU 块；全局归一化在 shader 中计算。坐标变化检测仍需扫描，不能保证任意规模模型的固定帧率。
+- Sync Selection 使用 UV 编辑器原生入口，不在 UV Tools 内重复放置。
+
+本机配置过的左 3D、中 UV、右下工具区布局不随此仓库分发：`release/datafiles/startup.blend` 的修改已按要求排除，避免向公共 fork 上传新的 LFS 对象。工具代码可单独使用；需要该布局时在用户启动文件中配置。
+
+## 快速晶格与 Apply All
+
+3D 视图的物体右键菜单、网格编辑右键菜单新增 **Quick Lattice**（`object.quick_lattice`）：
+
+- 物体模式支持多个选中 Mesh，共用一个晶格；网格编辑模式支持多物体的选中顶点、边、面。
+- 按目标的共同世界坐标包围盒拟合。物体模式考虑求值后的几何；编辑模式按原始选中顶点计算，并将晶格修改器放到栈首。平面、线和单点选择会补上最小厚度，避免零尺寸。
+- 复用原生 `object.lattice_add_to_selected` 创建晶格、初始化分辨率和添加修改器，不生成 Empty、Hook 或额外控制器。创建后直接进入原生晶格编辑模式并选中控制点；默认分辨率为 2×2×2。
+- 编辑模式自动创建 `Quick Lattice` 顶点组，权重为 1，只影响选中部分。共享网格数据在需要写入权重时复制，避免影响未选中的关联实例。物体模式不创建限制组。
+
+活动对象为晶格时，物体右键菜单和晶格编辑右键菜单提供 **Apply All**（`object.lattice_apply_all`）：
+
+- 扫描整个文件，包括未选中、隐藏和其他场景的对象，应用所有引用该晶格的 Lattice 修改器，再删除该晶格；其它修改器保留。
+- 先在对象与数据副本上尝试应用，全部成功后才写回。非可编辑对象、带 Shape Keys 等原生不能应用的情况会报错并保留原状态，不留下部分应用结果。
+- 成功后清理本次修改器使用的 `Quick Lattice` / `Quick Lattice.数字` 顶点组。仍被其它修改器、约束、粒子系统等引用的组保留；存在 Geometry Nodes 时保守保留。用户改名的组不按自动组清理。
+- 晶格若有子物体，删除前解除父子关系并保持其世界变换。创建与 Apply All 都支持整步撤销、重做；撤销 Apply All 会恢复晶格、修改器和已清理的顶点组。
+
+不依赖 Interactive Tools 插件。本机对该插件的禁用与移出加载目录属于用户配置，不会由本次 Git 提交自动修改其他机器的插件。
+
+自动化测试位于 `tests/python/bl_quick_lattice.py`，注册为 `script_quick_lattice`。已验证包围盒、不同分辨率、多物体顶点/边/面选择隔离、共享网格保护、隐藏/跨场景目标、多个修改器引用、失败保护和顶点组清理；真实窗口另行验证了撤销与重做。
+
+```sh
+blender --background --factory-startup --python-exit-code 1 --python tests/python/bl_quick_lattice.py
+```
+
 ## 实现要点
 
 给以后合并上游时对照。
@@ -150,3 +186,10 @@
 - `scripts/startup/bl_ui/space_view3d.py`
 - `source/blender/makesdna/DNA_scene_types.h`
 - `source/blender/makesrna/intern/rna_scene.cc`
+
+快速晶格相关文件：
+
+- `scripts/startup/bl_operators/object_quick_lattice.py`
+- `scripts/startup/bl_ui/space_view3d.py`
+- `tests/python/bl_quick_lattice.py`
+- `tests/python/CMakeLists.txt`

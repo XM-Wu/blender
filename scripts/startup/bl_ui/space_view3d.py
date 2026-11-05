@@ -2184,6 +2184,9 @@ class VIEW3D_MT_edit_lattice_context_menu(Menu):
     def draw(self, _context):
         layout = self.layout
 
+        layout.operator("object.lattice_apply_all", text="Apply All", icon='CHECKMARK')
+        layout.separator()
+
         layout.menu("VIEW3D_MT_mirror")
         layout.operator_menu_enum("lattice.flip", "axis")
         layout.menu("VIEW3D_MT_snap")
@@ -3105,6 +3108,14 @@ class VIEW3D_MT_object_context_menu(Menu):
         view = context.space_data
 
         obj = context.object
+
+        if obj is not None and obj.type == 'LATTICE':
+            layout.operator("object.lattice_apply_all", text="Apply All", icon='CHECKMARK')
+            layout.separator()
+
+        if any(ob.type == 'MESH' for ob in context.selected_editable_objects):
+            layout.operator("object.quick_lattice", text="Quick Lattice", icon='OUTLINER_OB_LATTICE')
+            layout.separator()
 
         selected_objects_len = len(context.selected_objects)
 
@@ -4723,6 +4734,9 @@ class VIEW3D_MT_edit_mesh_context_menu(Menu):
         '''
 
         # Else something is selected
+
+        layout.operator("object.quick_lattice", text="Quick Lattice", icon='OUTLINER_OB_LATTICE')
+        layout.separator()
 
         row = layout.row()
 

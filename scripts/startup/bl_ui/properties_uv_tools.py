@@ -22,9 +22,6 @@ def draw_icon_buttons(layout, items, setup=None):
         button.scale_y = 3.0
         button.operator_context = 'INVOKE_DEFAULT'
         props = button.operator(operator, text="", icon_value=icon_id(icon), icon_scale=2.5)
-        if operator == "uv.pack_islands":
-            # Start without rotation; the native popup exposes all packing options.
-            props.rotate = False
         if setup is not None:
             setup(props)
 
@@ -41,22 +38,6 @@ class UVTOOLS_PT_unwrap(UVToolsPanel, Panel):
 
     def draw(self, context):
         draw_icon_buttons(self.layout, (("uv.unwrap", "unwrap"),))
-
-
-class UVTOOLS_PT_distortion(UVToolsPanel, Panel):
-    bl_label = "Distortion"
-
-    def draw(self, context):
-        self.layout.prop(context.scene, "uv_tools_distortion", text="Show UV / Model Distortion")
-        self.layout.label(text="Red: compressed | Blue: stretched")
-        self.layout.label(text="1 = normalized area; surface-weighted bins")
-
-
-class UVTOOLS_PT_packing(UVToolsPanel, Panel):
-    bl_label = "Packing"
-
-    def draw(self, context):
-        draw_icon_buttons(self.layout, (("uv.pack_islands", "pack"),))
 
 
 class UVTOOLS_PT_texel_pack(UVToolsPanel, Panel):
@@ -106,8 +87,7 @@ class UVTOOLS_PT_texel_pack_density(UVToolsTexelPackSubPanel, Panel):
         layout.prop(settings, "density_mode")
         if settings.density_mode == 'TARGET':
             layout.prop(settings, "target_density", text="Pixels per Meter")
-        else:
-            layout.prop(settings, "density_tolerance", text="Tolerance")
+        layout.prop(settings, "density_tolerance", text="Tolerance", slider=True)
         layout.prop(settings, "use_density_weights")
         if settings.density_mode == 'UNIFORM':
             layout.prop(settings, "match_locked_density")
@@ -255,13 +235,11 @@ class IMAGE_PT_texel_pack_stacks(TexelPackIdListPanel, Panel):
 classes = (
     UVTOOLS_PT_seam,
     UVTOOLS_PT_unwrap,
-    UVTOOLS_PT_packing,
     UVTOOLS_PT_texel_pack,
     UVTOOLS_PT_texel_pack_density,
     UVTOOLS_PT_texel_pack_margin,
     UVTOOLS_PT_texel_pack_rotation,
     UVTOOLS_PT_texel_pack_target,
-    UVTOOLS_PT_distortion,
     IMAGE_PT_texel_pack_island,
     IMAGE_PT_texel_pack_groups,
     IMAGE_PT_texel_pack_stacks,

@@ -208,6 +208,21 @@ class TexelPackTest(unittest.TestCase):
             for j in range(i + 1, len(hulls)):
                 self.assertGreaterEqual(hull_distance(hulls[i], hulls[j]), margin - 1e-2, (i, j))
 
+    def test_tolerance_shrinks_around_keep_scale_island(self):
+        # Only one 150 px island fits at full size, the Keep Scale island must keep it.
+        specs = [
+            {'size': (1, 1), 'uv': (0.1, 0.1), 'uv_size': (150 / RES, 150 / RES),
+             'attrs': {'uvpack_scale': 1}},
+            {'size': (1, 1), 'uv': (0.2, 0.2), 'uv_size': (0.2, 0.2)},
+        ]
+        ob, ranges = make_islands(specs)
+        self.assertEqual(pack(density_mode='TARGET', target_density=150, density_tolerance=0.4,
+                              max_tiles=1, rotation='NONE', use_stacking=False), {'FINISHED'})
+        result = island_uvs(ob, ranges)
+        self.assert_layout(result)
+        self.assertAlmostEqual(math.sqrt(abs(area_px(result[0]))), 150, delta=0.05)
+        self.assertAlmostEqual(math.sqrt(abs(area_px(result[1]))), 90, delta=0.05)
+
     def test_basic_uniform_density(self):
         specs = [
             {'size': (1, 1), 'uv': (0.1, 0.1)},

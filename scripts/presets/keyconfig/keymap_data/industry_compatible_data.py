@@ -607,16 +607,10 @@ def km_uv_editor(params):
     items.extend([
         op_panel("TOPBAR_PT_name", {"type": 'RET', "value": 'PRESS'}, [("keep_open", False)]),
         ("wm.search_menu", {"type": 'TAB', "value": 'PRESS'}, None),
-        # Selection modes.
-        *_template_items_editmode_mesh_select_mode(params),
-        ("uv.select_mode", {"type": 'ONE', "value": 'PRESS'},
-         {"properties": [("type", 'VERTEX')]}),
-        ("uv.select_mode", {"type": 'TWO', "value": 'PRESS'},
-         {"properties": [("type", 'EDGE')]}),
-        ("uv.select_mode", {"type": 'THREE', "value": 'PRESS'},
-         {"properties": [("type", 'FACE')]}),
-        ("wm.context_toggle", {"type": 'FOUR', "value": 'PRESS'},
-         {"properties": [("data_path", "tool_settings.use_uv_select_island")]}),
+        # Exclusive UV vertex/edge/face/island modes, also with sync enabled.
+        *(("uv_tools.select_mode", {"type": key, "value": 'PRESS'},
+           {"properties": [("type", mode)]})
+          for key, mode in zip(('ONE', 'TWO', 'THREE', 'FOUR'), ('VERTEX', 'EDGE', 'FACE', 'ISLAND'))),
 
         ("uv.select", {"type": 'LEFTMOUSE', "value": 'CLICK'},
          {"properties": [("deselect_all", True)]}),

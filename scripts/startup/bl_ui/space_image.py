@@ -510,6 +510,21 @@ class IMAGE_MT_uvs(Menu):
         layout.separator()
 
 
+def draw_uv_selection_modes(layout, settings, labels=False):
+    if settings.use_uv_select_island:
+        active = 'ISLAND'
+    elif settings.use_uv_select_sync:
+        active = next((mode for mode, enabled in zip(('VERTEX', 'EDGE', 'FACE'), settings.mesh_select_mode)
+                       if enabled), 'VERTEX')
+    else:
+        active = settings.uv_select_mode
+    row = layout if labels else layout.row(align=True)
+    for mode, label, icon in (('VERTEX', 'Vertex', 'UV_VERTEXSEL'), ('EDGE', 'Edge', 'UV_EDGESEL'),
+                               ('FACE', 'Face', 'UV_FACESEL'), ('ISLAND', 'Island', 'UV_ISLANDSEL')):
+        row.operator('uv_tools.select_mode', text=label if labels else '', icon=icon,
+                     depress=active == mode).type = mode
+
+
 class IMAGE_MT_uvs_select_mode(Menu):
     bl_label = "UV Select Mode"
 
@@ -519,37 +534,7 @@ class IMAGE_MT_uvs_select_mode(Menu):
         layout.operator_context = 'INVOKE_REGION_WIN'
         tool_settings = context.tool_settings
 
-        # Do smart things depending on whether uv_select_sync is on.
-
-        if tool_settings.use_uv_select_sync:
-            props = layout.operator("wm.context_set_value", text="Vertex", icon='VERTEXSEL')
-            props.value = "(True, False, False)"
-            props.data_path = "tool_settings.mesh_select_mode"
-
-            props = layout.operator("wm.context_set_value", text="Edge", icon='EDGESEL')
-            props.value = "(False, True, False)"
-            props.data_path = "tool_settings.mesh_select_mode"
-
-            props = layout.operator("wm.context_set_value", text="Face", icon='FACESEL')
-            props.value = "(False, False, True)"
-            props.data_path = "tool_settings.mesh_select_mode"
-
-        else:
-            props = layout.operator("wm.context_set_string", text="Vertex", icon='UV_VERTEXSEL')
-            props.value = 'VERTEX'
-            props.data_path = "tool_settings.uv_select_mode"
-
-            props = layout.operator("wm.context_set_string", text="Edge", icon='UV_EDGESEL')
-            props.value = 'EDGE'
-            props.data_path = "tool_settings.uv_select_mode"
-
-            props = layout.operator("wm.context_set_string", text="Face", icon='UV_FACESEL')
-            props.value = 'FACE'
-            props.data_path = "tool_settings.uv_select_mode"
-
-        layout.separator()
-
-        layout.prop(tool_settings, "use_uv_select_island", text="Island")
+        draw_uv_selection_modes(layout, tool_settings, labels=True)
 
 
 class IMAGE_MT_uvs_context_menu(Menu):
@@ -870,7 +855,8 @@ class IMAGE_HT_header(Header):
         layout.template_header()
 
         if sima.mode == 'UV':
-            layout.prop(context.scene, "uv_tools_distortion", text="Distortion", toggle=True, icon='COLOR')
+            layout.prop(context.scene, "uv_tools_distortion", text="", toggle=True, icon='COLOR')
+            layout.prop(context.scene, "uv_tools_distortion_metric", text="")
 
         if sima.mode != 'UV':
             layout.prop(sima, "ui_mode", text="")
@@ -879,25 +865,7 @@ class IMAGE_HT_header(Header):
         if show_uvedit:
             layout.prop(tool_settings, "use_uv_select_sync", text="")
 
-            if tool_settings.use_uv_select_sync:
-                layout.template_edit_mode_selection()
-            else:
-                row = layout.row(align=True)
-                uv_select_mode = tool_settings.uv_select_mode[:]
-                row.operator(
-                    "uv.select_mode", text="", icon='UV_VERTEXSEL',
-                    depress=(uv_select_mode == 'VERTEX'),
-                ).type = 'VERTEX'
-                row.operator(
-                    "uv.select_mode", text="", icon='UV_EDGESEL',
-                    depress=(uv_select_mode == 'EDGE'),
-                ).type = 'EDGE'
-                row.operator(
-                    "uv.select_mode", text="", icon='UV_FACESEL',
-                    depress=(uv_select_mode == 'FACE'),
-                ).type = 'FACE'
-
-            layout.prop(tool_settings, "use_uv_select_island", icon_only=True)
+            draw_uv_selection_modes(layout, tool_settings)
             layout.prop(tool_settings, "uv_sticky_select_mode", icon_only=True)
 
         IMAGE_MT_editor_menus.draw_collapsible(context, layout)

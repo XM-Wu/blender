@@ -94,41 +94,14 @@ def _triangles(context, with_edges=False):
 def _engine_data(engine):
     return {'engine': engine, 'positions': [True] if engine.count else [],
             'count': engine.count, 'bins': engine.bins, 'compressed': engine.compressed,
-            'stretched': engine.stretched, 'generation': engine.generation, 'batches': {}}
+            'stretched': engine.stretched, 'distortion_bins': engine.distortion_bins,
+            'distortion_low': engine.distortion_low, 'distortion_high': engine.distortion_high, 'shape_bins': engine.shape_bins,
+            'shape_over_two': engine.shape_over_two, 'shape_over_four': engine.shape_over_four, 'generation': engine.generation, 'batches': {}}
 
 
 def _collect(context):
-    if context.mode == 'EDIT_MESH':
-        from .uv_tools_cache import EditCache
-        return _engine_data(EditCache(context))
-    triangles = _triangles(context, with_edges=True)
-    areas = []
-    for positions, uvs, _ in triangles:
-        world = (positions[1] - positions[0]).cross(positions[2] - positions[0]).length * 0.5
-        a, b = uvs[1] - uvs[0], uvs[2] - uvs[0]
-        areas.append((world, abs(a.x * b.y - a.y * b.x) * 0.5))
-    ratios, bins = normalized_ratios(areas)
-    pos3d, posuv, colors = [], [], []
-    densities, barycentrics, masks = [], [], []
-    compressed = stretched = 0.0
-    total = sum(a[0] for a in areas)
-    for (positions, uvs, boundary), (world, _), ratio in zip(triangles, areas, ratios):
-        if ratio is None:
-            continue
-        if ratio < 0.95:
-            compressed += world / total
-        elif ratio > 1.05:
-            stretched += world / total
-        pos3d.extend(tuple(p) for p in positions)
-        posuv.extend((uv.x, uv.y, 0.0) for uv in uvs)
-        colors.extend([distortion_color(ratio, 0.83)] * 3)
-        densities.extend([ratio] * 3)
-        barycentrics.extend(((1, 0, 0), (0, 1, 0), (0, 0, 1)))
-        masks.extend([boundary] * 3)
-    return {'positions': pos3d, 'uvs': posuv, 'colors': colors, 'bins': bins,
-            'densities': densities, 'barycentrics': barycentrics, 'edge_masks': masks,
-            'count': len(pos3d) // 3, 'compressed': compressed, 'stretched': stretched,
-            'batches': {}}
+    from .uv_tools_cache import EditCache
+    return _engine_data(EditCache(context))
 
 
 def _key(context):
@@ -207,18 +180,45 @@ def _get_overlay_shader():
     if _overlay_shader is None:
         interface = gpu.types.GPUStageInterfaceInfo('uv_distortion_interface')
         interface.smooth('FLOAT', 'raw_density')
+        interface.smooth('FLOAT', 'raw_shape')
+        interface.flat('FLOAT', 'raw_face_density')
+        interface.flat('FLOAT', 'island_index')
         info = gpu.types.GPUShaderCreateInfo()
         info.push_constant('MAT4', 'mvp')
         info.push_constant('FLOAT', 'normalization')
+        info.push_constant('INT', 'metric_kind')
+        info.sampler(0, 'FLOAT_2D', 'island_norms')
         info.vertex_in(0, 'VEC3', 'pos')
         info.vertex_in(1, 'FLOAT', 'density')
+        info.vertex_in(2, 'FLOAT', 'shape_ratio')
+        info.vertex_in(3, 'FLOAT', 'face_density')
+        info.vertex_in(4, 'FLOAT', 'island_id')
         info.vertex_out(interface)
         info.fragment_out(0, 'VEC4', 'fragColor')
-        info.vertex_source('void main() { gl_Position = mvp * vec4(pos, 1.0); raw_density = density; }')
+        info.vertex_source('void main() { gl_Position = mvp * vec4(pos, 1.0); raw_density = density; raw_shape = shape_ratio; raw_face_density = face_density; island_index = island_id; }')
         info.fragment_source("""
             void main() {
-                if (raw_density < 0.0 || normalization <= 0.0) discard;
-                float ratio = raw_density * normalization;
+                if (raw_density < 0.0) discard;
+                if (metric_kind == 1) {
+                    vec3 neutral = vec3(0.48, 0.50, 0.53);
+                    vec3 yellow = vec3(1.0, 0.72, 0.08);
+                    vec3 red = vec3(0.95, 0.08, 0.06);
+                    vec3 color = raw_shape < 2.0 ? mix(neutral, yellow, clamp(raw_shape-1.0,0.0,1.0)) :
+                        mix(yellow, red, clamp((raw_shape-2.0)/2.0,0.0,1.0));
+                    fragColor = vec4(color, 0.83);
+                    return;
+                }
+                float ratio;
+                if (metric_kind == 2) {
+                    int index = int(island_index);
+                    int width = textureSize(island_norms, 0).x;
+                    float factor = texelFetch(island_norms, ivec2(index % width, index / width), 0).r;
+                    ratio = sqrt(max(0.0, raw_face_density * factor));
+                }
+                else {
+                    if (normalization <= 0.0) discard;
+                    ratio = raw_density * normalization;
+                }
                 vec3 endpoint = ratio < 1.0 ? vec3(0.95, 0.08, 0.06) : vec3(0.02, 0.35, 1.0);
                 fragColor = vec4(mix(vec3(0.48, 0.50, 0.53), endpoint, min(1.0, abs(ratio-1.0))), 0.83);
             }
@@ -243,19 +243,24 @@ def _draw_overlay(is_uv):
     shader = _get_overlay_shader()
     name = 'uvs' if is_uv else 'positions'
     if not engine and name not in data['batches']:
-        data['batches'][name] = batch_for_shader(shader, 'TRIS', {'pos': data[name], 'density': data['densities']})
+        data['batches'][name] = batch_for_shader(shader, 'TRIS', {'pos': data[name], 'density': data['densities'], 'shape_ratio': data['shape_vertices']})
 
     def draw():
+        shader.bind()
+        shader.uniform_int('metric_kind', {'DENSITY': 0, 'SHAPE': 1, 'DISTORTION': 2}[context.scene.uv_tools_distortion_metric])
         if engine:
             from .uv_tools_cache import CHUNK_SIZE
             shader.bind()
             shader.uniform_float('mvp', gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix())
             shader.uniform_float('normalization', engine.normalization)
+            shader.uniform_sampler('island_norms', engine.normalization_texture())
             for chunk in range((len(engine.triangles) + CHUNK_SIZE - 1) // CHUNK_SIZE):
                 if chunk not in engine.batches[name]:
                     positions, density = engine.chunk_arrays(name, chunk)
+                    face_density, island_id = engine.chunk_island_values(chunk)
                     engine.batches[name][chunk] = {'faces': batch_for_shader(shader, 'TRIS',
-                        {'pos': positions, 'density': density})}
+                        {'pos': positions, 'density': density, 'shape_ratio': engine.chunk_shape(chunk),
+                         'face_density': face_density, 'island_id': island_id})}
                 engine.batches[name][chunk]['faces'].draw(shader)
         else:
             shader.bind()
@@ -344,6 +349,20 @@ def _text(x, y, text, size=11):
     blf.draw(0, text)
 
 
+def shape_color(value):
+    neutral, yellow, red = (0.48, 0.50, 0.53), (1.0, .72, .08), (.95, .08, .06)
+    a, b = (neutral, yellow) if value < 2 else (yellow, red)
+    t = min(1.0, max(0.0, value-1 if value < 2 else (value-2)/2))
+    return (*(x+(y-x)*t for x,y in zip(a,b)), 1.0)
+
+
+def _diagnostic_redraw(_self, context):
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type in {'VIEW_3D', 'IMAGE_EDITOR'}:
+                area.tag_redraw()
+
+
 def _build_histogram():
     context = bpy.context
     if context.area.ui_type != 'UV':
@@ -354,43 +373,41 @@ def _build_histogram():
         return
     data = _cache.get(_key(context))
     enabled = context.scene.uv_tools_distortion
-    h = 94 * scale
-    left, right = 16 * scale, width - 16 * scale
-    blend, depth = gpu.state.blend_get(), gpu.state.depth_test_get()
-    try:
-        gpu.state.blend_set('ALPHA')
-        gpu.state.depth_test_set('NONE')
-        _rect(0, 0, width, h, (0.055, 0.06, 0.07, 0.97))
-        status = 'ON' if enabled else 'OFF - enable Distortion in the UV header'
-        _text(left, 75 * scale, 'UV Area Distortion  |  ' + status, int(11 * scale))
-        span = right - left
-        for i in range(_BINS):
-            x = left + span * i / _BINS
-            _rect(x, 24 * scale, span / _BINS + 0.5, 10 * scale, distortion_color((i + 0.5) * 2 / _BINS))
-        if enabled and data and data['count']:
-            peak = max(data['bins'])
-            for i, value in enumerate(data['bins']):
-                if value:
-                    _rect(left + span * i / _BINS, 36 * scale, max(1, span / _BINS - 1),
-                          30 * scale * value / peak, distortion_color((i + 0.5) * 2 / _BINS))
-            if width > 650 * scale:
-                _text(
-                    left + 290 * scale, 75 * scale, f"Compressed {
-                        data['compressed']:.1%}   Stretched {
-                        data['stretched']:.1%}   ({
-                        data['count']} triangles)", int(
-                        10 * scale))
-        elif enabled:
-            _text(left, 47 * scale, 'Select a mesh with a non-degenerate UV map', int(11 * scale))
-        _rect(left + span / 2, 22 * scale, 1 * scale, 46 * scale, (0.9, 0.9, 0.9, 0.7))
-        for fraction, label in ((0, '0 / Compressed'), (.25, '0.5'), (.5, '1 / Neutral'),
-                                (.75, '1.5'), (1, '2+ / Stretched')):
-            blf.size(0, int(10 * scale))
-            tw = blf.dimensions(0, label)[0]
-            _text(min(right - tw, max(left, left + span * fraction - tw / 2)), 8 * scale, label, int(10 * scale))
-    finally:
-        gpu.state.blend_set(blend)
-        gpu.state.depth_test_set(depth)
+    shape = context.scene.uv_tools_distortion_metric == 'SHAPE'
+    island_relative = context.scene.uv_tools_distortion_metric == 'DISTORTION'
+    title = ('Shape Stretch (principal stretch ratio)' if shape else
+             'Distortion (island-relative area scale)' if island_relative else 'Density (relative UV area ratio)')
+    color_at = (lambda f: shape_color(1+3*f)) if shape else (lambda f: distortion_color(2*f))
+    left, right = 16*scale, width-16*scale
+    span = right-left
+    _rect(0, 0, width, 94*scale, (.055,.06,.07,.97))
+    _text(left, 75*scale, title + (' | ON' if enabled else ' | OFF'), int(11*scale))
+    for i in range(_BINS):
+        _rect(left+span*i/_BINS, 24*scale, span/_BINS+.5, 10*scale, color_at((i+.5)/_BINS))
+    if enabled and data and data['count']:
+        bins = data['shape_bins'] if shape else data['distortion_bins'] if island_relative else data['bins']
+        peak = max(bins)
+        for i,value in enumerate(bins):
+            if value:
+                _rect(left+span*i/_BINS, 36*scale, max(1,span/_BINS-1),
+                      30*scale*value/peak, color_at((i+.5)/_BINS))
+        if width > 800*scale:
+            summary = (f"Area >2x: {data['shape_over_two']:.1%}  >4x: {data['shape_over_four']:.1%}" if shape else
+                       f"Compressed: {data['distortion_low']:.1%}  Expanded: {data['distortion_high']:.1%}" if island_relative else
+                       f"Lower density: {data['compressed']:.1%}  Higher density: {data['stretched']:.1%}")
+            _text(left+400*scale,75*scale,summary,int(10*scale))
+    elif enabled:
+        _text(left,47*scale,'Select a mesh with a UV map',int(11*scale))
+    neutral_x = left if shape else left+span/2
+    _rect(neutral_x,22*scale,scale,46*scale,(.9,.9,.9,.7))
+    labels = ((0,'1 / Shape preserved'),(1/3,'2'),(2/3,'3'),(1,'4+ / High distortion')) if shape else (
+        (0,'0 / Compressed' if island_relative else '0 / Low density'),(.25,'0.5'),
+        (.5,'1 / Neutral' if island_relative else '1 / Average'),(.75,'1.5'),
+        (1,'2+ / Expanded' if island_relative else '2+ / High density'))
+    for fraction,label in labels:
+        blf.size(0,int(10*scale))
+        tw=blf.dimensions(0,label)[0]
+        _text(min(right-tw,max(left,left+span*fraction-tw/2)),8*scale,label,int(10*scale))
 
 
 def _draw_histogram():
@@ -401,7 +418,7 @@ def _draw_histogram():
     data = _cache.get(_key(context))
     region_key = context.region.as_pointer()
     signature = (context.region.width, context.preferences.system.ui_scale,
-                 context.scene.uv_tools_distortion, id(data))
+                 context.scene.uv_tools_distortion, context.scene.uv_tools_distortion_metric, id(data))
     cached = _hud_cache.get(region_key)
     # Hold a reference to data as well: Python may otherwise reuse its id.
     if cached is None or cached[0] != signature or cached[3] is not data:
@@ -618,6 +635,46 @@ def _uv_area(context):
     return next((a for a in context.screen.areas if a.type == 'IMAGE_EDITOR' and a.ui_type == 'UV'), None)
 
 
+class UVTOOLS_OT_select_mode(bpy.types.Operator):
+    bl_idname = 'uv_tools.select_mode'
+    bl_label = 'UV Selection Mode'
+    bl_description = 'Choose vertex, edge, face or island selection exclusively'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    type: EnumProperty(items=(('VERTEX', 'Vertex', ''), ('EDGE', 'Edge', ''),
+                              ('FACE', 'Face', ''), ('ISLAND', 'Island', '')))
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        settings = context.tool_settings
+        area = _uv_area(context)
+        if area is None:
+            return {'CANCELLED'}
+        target = 'FACE' if self.type == 'ISLAND' else self.type
+        with context.temp_override(area=area, region=next(r for r in area.regions if r.type == 'WINDOW')):
+            settings.use_uv_select_island = False
+            if settings.use_uv_select_sync:
+                desired = tuple(target == mode for mode in ('VERTEX', 'EDGE', 'FACE'))
+                result = ({'FINISHED'} if tuple(settings.mesh_select_mode) == desired else
+                          bpy.ops.mesh.select_mode(type='VERT' if target == 'VERTEX' else target))
+            else:
+                result = ({'FINISHED'} if settings.uv_select_mode == target else bpy.ops.uv.select_mode(type=target))
+            if result != {'FINISHED'}:
+                return result
+            # Keep the stored UV mode aligned too, including when sync is later disabled.
+            if settings.uv_select_mode != target:
+                settings.uv_select_mode = target
+            settings.use_uv_select_island = self.type == 'ISLAND'
+        for window in context.window_manager.windows:
+            for editor in window.screen.areas:
+                if editor.type in {'IMAGE_EDITOR', 'VIEW_3D'}:
+                    editor.tag_redraw()
+        return {'FINISHED'}
+
+
 class UVTOOLS_OT_mark_seam(bpy.types.Operator):
     bl_idname = 'uv_tools.mark_seam'
     bl_label = 'Mark Seam'
@@ -712,11 +769,44 @@ def _load_pre(_):
     _hud_cache.clear()
 
 
+def _migrate_uv_selection_keymaps():
+    """Route legacy saved UV keymaps through the same exclusive modes as the header."""
+    configs = bpy.context.window_manager.keyconfigs
+    seen = set()
+    for config in (configs.default, configs.active, configs.user, configs.addon):
+        if config is None or config.as_pointer() in seen:
+            continue
+        seen.add(config.as_pointer())
+        keymap = config.keymaps.get('UV Editor')
+        if keymap is None:
+            continue
+        for item in keymap.keymap_items:
+            if item.shift or item.ctrl or item.alt or item.oskey or item.any:
+                continue
+            mode = None
+            if item.idname in {'mesh.select_mode', 'uv.select_mode'}:
+                mode = getattr(item.properties, 'type', None)
+                if mode == 'VERT':
+                    mode = 'VERTEX'
+            elif (item.idname == 'wm.context_toggle' and
+                  item.properties.data_path == 'tool_settings.use_uv_select_island'):
+                mode = 'ISLAND'
+            if mode in {'VERTEX', 'EDGE', 'FACE', 'ISLAND'}:
+                item.idname = 'uv_tools.select_mode'
+                item.properties.type = mode
+    return None
+
+
 def register():
     bpy.types.Scene.uv_tools_texel_pack = PointerProperty(type=UVToolsTexelPackSettings)
     bpy.types.Scene.uv_tools_distortion = BoolProperty(
-        name='UV Area Distortion', default=False,
-        description='UV/world area ratio normalized across visible edited or selected meshes: red < 1, gray = 1, blue > 1; histogram weighted by world surface area')
+        name='UV Diagnostics', default=False, update=_diagnostic_redraw,
+        description='Show the selected UV metric on the UVs and model')
+    bpy.types.Scene.uv_tools_distortion_metric = EnumProperty(
+        name='Diagnostic Metric', default='DISTORTION', update=_diagnostic_redraw,
+        items=(('DISTORTION', 'Distortion', 'Square root of polygon UV/world area ratio normalized within each UV island', 0, 2),
+               ('DENSITY', 'Density', 'Relative UV/world area ratio: red below average, blue above average', 0, 0),
+               ('SHAPE', 'Shape Stretch', 'Ratio of principal stretches: 1 preserves shape; independent of uniform UV scale; does not detect mirrored orientation', 0, 1)))
     bpy.app.handlers.load_pre.append(_load_pre)
     bpy.app.handlers.depsgraph_update_post.append(_invalidate)
     bpy.app.handlers.undo_post.append(_invalidate)
@@ -728,10 +818,13 @@ def register():
             (bpy.types.SpaceView3D, bpy.types.SpaceView3D.draw_handler_add(_draw_overlay, (False,), 'WINDOW', 'POST_VIEW')),
         ])
         bpy.app.timers.register(_tick, first_interval=.3, persistent=True)
+        bpy.app.timers.register(_migrate_uv_selection_keymaps, first_interval=1.0)
 
 
 def unregister():
     global _shader, _icons, _overlay_shader, _wire_shader
+    if bpy.app.timers.is_registered(_migrate_uv_selection_keymaps):
+        bpy.app.timers.unregister(_migrate_uv_selection_keymaps)
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
     for space, handle in _handles:
@@ -752,7 +845,8 @@ def unregister():
         if _invalidate in handlers:
             handlers.remove(_invalidate)
     del bpy.types.Scene.uv_tools_distortion
+    del bpy.types.Scene.uv_tools_distortion_metric
     del bpy.types.Scene.uv_tools_texel_pack
 
 
-classes = (UVToolsTexelPackSettings, UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch)
+classes = (UVToolsTexelPackSettings, UVTOOLS_OT_select_mode, UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch)

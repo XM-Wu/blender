@@ -509,11 +509,13 @@ struct Prepared {
 
 /**
  * Order islands for placement: by group (largest group first) when groups are laid out
- * separately, then by estimated area at `global`, largest first.
+ * separately, then fixed scale islands first when `fixed_first` (the others can still shrink
+ * into the remaining space), then by estimated area at `global`, largest first.
  */
 static void sort_for_placement(Vector<Prepared> &order,
                                const float global,
-                               const GroupLayout layout)
+                               const GroupLayout layout,
+                               const bool fixed_first)
 {
   auto area_at = [&](const Prepared &p) {
     return p.fixed_scale ? p.area_px : p.area_px * p.factor * p.factor * global * global;
@@ -531,6 +533,9 @@ static void sort_for_placement(Vector<Prepared> &order,
         return ga > gb;
       }
       return a.group < b.group;
+    }
+    if (fixed_first && a.fixed_scale != b.fixed_scale) {
+      return a.fixed_scale;
     }
     const float aa = area_at(a);
     const float ab = area_at(b);
@@ -850,6 +855,8 @@ Result pack(MutableSpan<Island> islands, const Params &params)
   }
 
   Layout best;
+  /* Islands that can shrink go after those that cannot. */
+  const bool fixed_first = params.density_tolerance > 0.0f;
   const bool fill = params.density_mode != DensityMode::Target &&
                     !(params.density_mode == DensityMode::Uniform &&
                       params.match_locked_density && !locked_densities.is_empty()) &&
@@ -866,7 +873,7 @@ Result pack(MutableSpan<Island> islands, const Params &params)
     else if (params.density_mode == DensityMode::Uniform) {
       global = median_density;
     }
-    sort_for_placement(packer.order_base, global, params.group_layout);
+    sort_for_placement(packer.order_base, global, params.group_layout, fixed_first);
     best = packer.attempt(global, true);
   }
   else {
@@ -906,7 +913,7 @@ Result pack(MutableSpan<Island> islands, const Params &params)
         for (const int64_t c : range) {
           /* Each candidate needs its own ordering. */
           Packer local = packer;
-          sort_for_placement(local.order_base, candidates[c], params.group_layout);
+          sort_for_placement(local.order_base, candidates[c], params.group_layout, fixed_first);
           layouts[c] = local.attempt(candidates[c], false);
         }
       });
@@ -939,7 +946,7 @@ Result pack(MutableSpan<Island> islands, const Params &params)
     if (lo == 0.0f && !packer.cancelled()) {
       /* Nothing packs completely: place what fits at the smallest tried scale. */
       const float global = hi > 0.0f ? hi : guess;
-      sort_for_placement(packer.order_base, global, params.group_layout);
+      sort_for_placement(packer.order_base, global, params.group_layout, fixed_first);
       best = packer.attempt(global, true);
       }
   }

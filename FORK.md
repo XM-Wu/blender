@@ -102,17 +102,21 @@
 
 ## UV 工具面板
 
-Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap、Packing 和 Distortion 模块。操作按钮使用大号方形彩色图标；`UILayout.operator()` 增加独立的 `icon_scale` 参数，默认值为 1，原有按钮大小不变。
+Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap 和 Texel Packing 模块。操作按钮使用大号方形彩色图标；`UILayout.operator()` 增加独立的 `icon_scale` 参数，默认值为 1，原有按钮大小不变。
 
 - **Mark Seam / Stitch UVs**：标记接缝、按当前顶点或边选择模式缝合；UV 已连续时清除选中接缝，没有可缝合的边界时提示。支持撤销、重做。
-- **Unwrap / Pack**：调用 Blender 原生操作和参数界面。Pack 初始关闭旋转；当前构建在重叠方形岛的旋转搜索测试中出现长时间等待，用户仍可在原生参数中调整。
-- **Distortion**：UV 与模型同步显示归一化 UV/世界空间面积比，1 为中性、红色压缩、蓝色拉伸；UV 底部直方图按模型表面积加权。这是面积诊断，不代表完整的角度或方向性畸变指标。
-- 热图连续填色后单独绘制细线框。编辑模式的交互变换缓存拓扑、局部更新受影响三角形及 GPU 块；全局归一化在 shader 中计算。坐标变化检测仍需扫描，不能保证任意规模模型的固定帧率。
+- **Unwrap**：调用 Blender 原生展开操作。UV Tools 移除旧 Packing 入口，仅保留 Texel Packing；原生 Pack 仍可从 Blender 原菜单使用。
+- **诊断显示**：入口位于 UV 编辑器顶栏，不在 UV Tools 中重复显示。UV 与模型同步着色，底部统计按模型表面积加权。
+  - **Distortion（默认）**：`sqrt((面 UV 面积 / 面 3D 面积) / (岛 UV 总面积 / 岛 3D 总面积))`。先汇总原始多边形的三角形面积，按 UV 连通岛归一化。1 为中性，红色相对压缩，蓝色相对膨胀；整体等比缩放不改变结果。该公式与本机 RizomUV 2027 的九组平面实验匹配，但不宣称覆盖其所有退化或非平面处理细节。
+  - **Shape Stretch**：雅可比最大/最小主伸缩比，1 为保形，灰→黄→红表示方向性畸变增强；能发现面积不变的非等比拉伸，不检测镜像方向。
+  - **Density**：相对参与统计的网格总面积比，反映 UV 面积分配，不是相对于目标 px/m 的绝对密度。
+- 热图连续填色后单独绘制细线框。编辑模式的交互变换缓存拓扑、局部更新受影响三角形及 GPU 块；岛归一化因子通过 GPU 纹理更新；UV 连通关系改变时重建岛划分，保留未受影响的绘制块。坐标变化检测仍需扫描，不能保证任意规模模型的固定帧率。
 - Sync Selection 使用 UV 编辑器原生入口，不在 UV Tools 内重复放置。
+- UV 顶栏和选择菜单提供点、边、面、岛四个互斥模式。默认与工业兼容（含 XM）键位的 1/2/3/4 统一调用 `uv_tools.select_mode`；切到点、边、面时清除岛选择标记，同步模式同时更新网格和 UV 选择类型。启动时迁移旧 UV Editor 的无修饰键模式绑定，避免只改变 3D 模式。
 - 打包算法的设计要点、原生实现现状与改进方向见 [doc/uv_pack_design.md](doc/uv_pack_design.md)。
-- **Texel Packing**（`uv.texel_pack`）：与原生 Pack 并存的新打包策略，原生 Pack 不变。
+- **Texel Packing**（`uv.texel_pack`）：UV Tools 中唯一的打包入口，原生 Pack 算法与原菜单入口不变。
   - 在纹素栅格上打包，间距、边缘留白都按像素计算，支持像素对齐。
-  - TD 有三种模式：统一并填满、保持相对比例、指定 px/m；可设 TD 容差和逐岛密度权重。
+  - TD 有三种模式：统一并填满、保持相对比例、指定 px/m；可设 TD 容差和逐岛密度权重。容差大于零时优先安排 Keep Scale 岛，其余岛再按容差缩小；没有额外新增 Mixed Scale 控件。
   - 自动堆叠相同的岛，可把副本偏移若干 tile 用于烘焙。
     - 镜像岛（包括对称网格的左右两半）可选，默认不堆叠。
     - 手动堆叠组总是允许镜像，形状容差至少 5%。
@@ -208,3 +212,5 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `scripts/startup/bl_ui/space_view3d.py`
 - `tests/python/bl_quick_lattice.py`
 - `tests/python/CMakeLists.txt`
+
+UV 诊断与选择模式回归：`tests/python/bl_uv_tools.py`（11 项）；Texel Pack 回归：`tests/python/bl_uv_texel_pack.py`（13 项）。另已在真实窗口中验证默认及 XM 键位下的 1/2/3/4 按键和 UV 实际拾取结果。

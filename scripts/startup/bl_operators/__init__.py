@@ -42,6 +42,7 @@ _modules = [
     "spreadsheet",
     "userpref",
     "uv_tools",
+    "uv_tools_texel_pack",
     "uvcalc_follow_active",
     "uvcalc_lightmap",
     "uvcalc_transform",
@@ -81,6 +82,7 @@ def register():
     project.register()
     workplane.register()
     uv_tools.register()
+    uv_tools_texel_pack.register()
 
 
 def unregister():
@@ -96,6 +98,7 @@ def unregister():
     mesh_omni_outset.unregister()
     project.unregister()
     workplane.unregister()
+    uv_tools_texel_pack.unregister()
     uv_tools.unregister()
 
     for mod in reversed(_modules_loaded):

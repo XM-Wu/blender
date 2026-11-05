@@ -32,6 +32,7 @@
 #  include "BKE_report.hh"
 
 #  include "ED_mesh.hh"
+#  include "ED_uvedit.hh"
 
 #  include "DEG_depsgraph.hh"
 
@@ -193,6 +194,14 @@ static void rna_Mesh_flip_normals(Mesh *mesh)
   BKE_mesh_tessface_clear(mesh);
   BKE_mesh_runtime_clear_geometry(mesh);
   DEG_id_tag_update(&mesh->id, 0);
+}
+
+static void rna_Mesh_texel_pack_info(Mesh *mesh, bContext *C, float **r_info, int *r_info_num)
+{
+  const Vector<float> info = ED_uvedit_texel_pack_info(CTX_data_scene(C), mesh);
+  *r_info_num = int(info.size());
+  *r_info = MEM_new_array_uninitialized<float>(std::max<size_t>(info.size(), 1), __func__);
+  std::copy(info.begin(), info.end(), *r_info);
 }
 
 static void rna_Mesh_update(Mesh *mesh,
@@ -357,6 +366,17 @@ void RNA_api_mesh(StructRNA *srna)
   parm = RNA_def_float_array(func, "normals", 1, nullptr, -1.0f, 1.0f, "", "Normals", 0.0f, 0.0f);
   RNA_def_property_multi_array(parm, 2, normals_array_dim);
   RNA_def_parameter_flags(parm, PROP_DYNAMIC, PARM_REQUIRED);
+
+  func = RNA_def_function(srna, "texel_pack_info", "rna_Mesh_texel_pack_info");
+  RNA_def_function_ui_description(
+      func,
+      "Texel Pack constraint state of the edit-mesh as flat records (see "
+      "ED_uvedit_texel_pack_info). Doesn't create Python BMesh elements, so it's safe to call "
+      "while drawing during a UV transform");
+  RNA_def_function_flag(func, FUNC_USE_CONTEXT);
+  parm = RNA_def_float_array(
+      func, "info", 1, nullptr, -FLT_MAX, FLT_MAX, "", "Records", -FLT_MAX, FLT_MAX);
+  RNA_def_parameter_flags(parm, PROP_DYNAMIC, PARM_OUTPUT);
 
   func = RNA_def_function(srna, "update", "rna_Mesh_update");
   RNA_def_boolean(func, "calc_edges", false, "Calculate Edges", "Force recalculation of edges");

@@ -11,6 +11,7 @@
 #include "DNA_listBase.h"
 
 #include "BLI_function_ref.hh"
+#include "BLI_vector.hh"
 #include "BLI_vector_list.hh"
 
 #include "BKE_customdata.hh"
@@ -28,6 +29,7 @@ struct BMesh;
 struct Image;
 struct ImageUser;
 struct Main;
+struct Mesh;
 struct Object;
 struct Scene;
 struct SpaceImage;
@@ -336,6 +338,22 @@ void ED_uvedit_get_aspect(Object *obedit, float *r_aspx, float *r_aspy);
  * Apply this aspect by multiplying with the Y axis (X aspect is always 1 & unchanged).
  */
 float ED_uvedit_get_aspect_y(Object *obedit);
+
+/**
+ * Texel Pack constraint state of an edit-mesh, for UI drawing (reads only, never reallocates
+ * BMesh data, so it is safe while UVs are being transformed).
+ *
+ * Records of #ED_UVEDIT_TEXEL_PACK_INFO_STRIDE floats, the first float being the record type:
+ * - 0: value counts of the selected faces: `kind, value, face count`.
+ * - 1: group or stack in use by visible faces:
+ *   `kind, id, face count, any face selected, u_min, v_min, u_max, v_max`.
+ * - 2: largest group or stack id of all faces: `kind, id`.
+ * - 3: number of selected faces.
+ *
+ * `kind` is 0 rotation, 1 flip, 2 keep scale, 3 density, 4 group, 5 stack, 6 lock.
+ */
+Vector<float> ED_uvedit_texel_pack_info(const Scene *scene, Mesh *mesh);
+#define ED_UVEDIT_TEXEL_PACK_INFO_STRIDE 9
 
 void ED_uvedit_get_aspect_from_material(Object *ob,
                                         const int material_index,

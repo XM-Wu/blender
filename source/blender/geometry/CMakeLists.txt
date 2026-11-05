@@ -59,6 +59,7 @@ set(SRC
   intern/trim_curves.cc
   intern/uv_pack.cc
   intern/uv_parametrizer.cc
+  intern/uv_texel_pack.cc
   intern/volume_grid_resample.cc
 
   xpbd/intern/xpbd_constraint_coloring.cc
@@ -107,6 +108,7 @@ set(SRC
   GEO_trim_curves.hh
   GEO_uv_pack.hh
   GEO_uv_parametrizer.hh
+  GEO_uv_texel_pack.hh
   GEO_volume_grid_resample.hh
 
   xpbd/GEO_xpbd_constraint_align_rotations.hh

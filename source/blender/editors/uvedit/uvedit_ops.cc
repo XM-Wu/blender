@@ -2953,6 +2953,10 @@ void ED_operatortypes_uvedit()
   WM_operatortype_append(UV_OT_project_from_view);
   WM_operatortype_append(UV_OT_minimize_stretch);
   WM_operatortype_append(UV_OT_pack_islands);
+  WM_operatortype_append(UV_OT_texel_pack);
+  WM_operatortype_append(UV_OT_texel_pack_constraint_set);
+  WM_operatortype_append(UV_OT_texel_pack_constraint_clear);
+  WM_operatortype_append(UV_OT_texel_pack_constraint_select);
   WM_operatortype_append(UV_OT_reset);
   WM_operatortype_append(UV_OT_sphere_project);
   WM_operatortype_append(UV_OT_unwrap);

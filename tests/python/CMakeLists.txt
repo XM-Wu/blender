@@ -369,6 +369,11 @@ add_blender_test(
 )
 
 add_blender_test(
+  script_uv_texel_pack
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_texel_pack.py
+)
+
+add_blender_test(
   script_pyapi_bmesh
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_bmesh.py
 )

@@ -24,6 +24,7 @@ set(SRC
   uvedit_rip.cc
   uvedit_select.cc
   uvedit_smart_stitch.cc
+  uvedit_texel_pack.cc
   uvedit_unwrap_ops.cc
 
   uvedit_clipboard_graph_iso.hh

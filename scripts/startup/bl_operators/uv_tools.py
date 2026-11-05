@@ -8,7 +8,13 @@ import bmesh
 import blf
 import gpu
 from bpy.app.handlers import persistent
-from bpy.props import BoolProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    IntProperty,
+    PointerProperty,
+)
 from gpu_extras.batch import batch_for_shader
 
 _handles = []
@@ -435,7 +441,7 @@ def icon_id(name):
             dx, dy = b[0] - a[0], b[1] - a[1]
             t = max(0, min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy)))
             return math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) <= r
-        for kind in ('cut', 'stitch', 'unwrap', 'pack'):
+        for kind in ('cut', 'stitch', 'unwrap', 'pack', 'texel_pack'):
             pixels = []
             for iy in range(size):
                 for ix in range(size):
@@ -474,6 +480,20 @@ def icon_id(name):
                                         (16, 16, 10, 9, (.3, .85, .48, 1))):
                                     if ox <= x <= ox+w and oy <= y <= oy+h:
                                         c = color
+                            elif kind == 'texel_pack':
+                                # Islands snapped to a texel grid, with a stacked pair.
+                                if 3 <= x <= 29 and 3 <= y <= 29 and (min(x-3, 29-x, y-3, 29-y) < 1 or (
+                                        (x - 3) % 6.5 < .45 or (y - 3) % 6.5 < .45)):
+                                    c = (.45, .52, .6, 1)
+                                for ox, oy, w, h, color in (
+                                        (5, 5, 11, 11, (.12, .7, .95, 1)),
+                                        (18, 5, 9, 17, (1, .58, .12, 1)),
+                                        (7, 18, 8, 8, (.3, .85, .48, 1)),
+                                        (5, 16, 8, 8, (.2, .62, .36, 1))):
+                                    if ox <= x <= ox+w and oy <= y <= oy+h:
+                                        c = color
+                                        if min(x-ox, ox+w-x, y-oy, oy+h-y) < .7:
+                                            c = (.9, .96, 1, 1)
                             for j in range(4):
                                 accum[j] += c[j] / (samples * samples)
                     pixels.extend(accum)
@@ -483,6 +503,115 @@ def icon_id(name):
             preview.icon_size = (size, size)
             preview.icon_pixels_float = pixels
     return _icons[name].icon_id
+
+
+def _redraw_uv_editors(_self, context):
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                area.tag_redraw()
+
+
+def _set_resolution_preset(self, _context):
+    if self.resolution_preset != 'CUSTOM':
+        self.resolution_x = self.resolution_y = int(self.resolution_preset)
+
+
+_ISLAND_ROTATION_ITEMS = (
+    ('INHERIT', 'Default', 'Use the packing setting'),
+    ('NONE', 'None', 'Keep the current orientation'),
+    ('CARDINAL', '90°', 'Rotate by multiples of 90 degrees'),
+    ('FREE', 'Free', 'Rotate to the smallest bounding box first'),
+)
+
+# Settings passed on to `uv.texel_pack`, named like its properties.
+TEXEL_PACK_SETTINGS = (
+    'resolution_x', 'resolution_y', 'precision', 'margin', 'edge_padding', 'pixel_snap',
+    'density_mode', 'target_density', 'density_tolerance', 'use_density_weights',
+    'match_locked_density', 'rotation', 'allow_flip', 'use_stacking', 'stack_mirrored',
+    'stack_tolerance', 'stack_offset', 'target', 'udim_tile', 'max_tiles', 'group_layout',
+    'only_selected', 'keep_unselected',
+)
+
+
+class UVToolsTexelPackSettings(bpy.types.PropertyGroup):
+    """Scene settings of the Texel Packing panel, stored in the blend file."""
+    resolution_preset: EnumProperty(
+        name='Texture Size',
+        items=[(str(size), str(size), '') for size in (512, 1024, 2048, 4096, 8192)] +
+        [('CUSTOM', 'Custom', 'Width and height set separately')],
+        default='1024', update=_set_resolution_preset)
+    resolution_x: IntProperty(name='Width', default=1024, min=16, max=32768)
+    resolution_y: IntProperty(name='Height', default=1024, min=16, max=32768)
+    precision: EnumProperty(name='Precision', default='MEDIUM', items=(
+        ('LOW', 'Low', 'Occupancy grid of at most 512 cells'),
+        ('MEDIUM', 'Medium', 'Occupancy grid of at most 1024 cells'),
+        ('HIGH', 'High', 'Occupancy grid of at most 2048 cells'),
+        ('EXACT', 'Exact', 'One occupancy cell per texture pixel'),
+    ))
+    margin: FloatProperty(
+        name='Margin', default=4.0, min=0.0, max=1024.0, soft_max=64.0, subtype='PIXEL',
+        description='Minimum distance between islands in pixels (mip level N needs 2^N)')
+    edge_padding: FloatProperty(
+        name='Edge Padding', default=2.0, min=0.0, max=1024.0, soft_max=64.0, subtype='PIXEL',
+        description='Minimum distance between islands and the tile border in pixels')
+    pixel_snap: BoolProperty(name='Pixel Snap', default=True, description='Move islands by whole pixels only')
+    density_mode: EnumProperty(name='Texel Density', default='UNIFORM', items=(
+        ('UNIFORM', 'Uniform', 'Give all islands the same texel density and fill the tiles'),
+        ('RELATIVE', 'Keep Relative', 'Keep the relative UV scale of islands and fill the tiles'),
+        ('TARGET', 'Target', 'Use a fixed texel density, overflowing into further tiles'),
+    ))
+    target_density: FloatProperty(
+        name='Target Density', default=512.0, min=0.001, soft_min=1.0, soft_max=8192.0,
+        description='Texel density in pixels per meter')
+    density_tolerance: FloatProperty(
+        name='Density Tolerance', default=0.0, min=0.0, max=0.5, subtype='FACTOR',
+        description='How much islands may shrink below the common density to make them fit')
+    use_density_weights: BoolProperty(
+        name='Density Weights', default=True,
+        description='Multiply the density of islands by their density constraint')
+    match_locked_density: BoolProperty(
+        name='Match Locked Density', default=True,
+        description='With locked islands and uniform density, use their density instead of filling the tiles')
+    rotation: EnumProperty(name='Rotation', default='CARDINAL', items=_ISLAND_ROTATION_ITEMS[1:])
+    allow_flip: BoolProperty(
+        name='Allow Flip', default=False,
+        description='Allow mirroring islands without their own flip constraint (changes tangent space handedness)')
+    use_stacking: BoolProperty(name='Stack Identical', default=True,
+                               description='Overlap islands with identical shapes')
+    stack_mirrored: BoolProperty(
+        name='Stack Mirrored', default=False,
+        description='Also overlap mirror images of islands (changes tangent space handedness)')
+    stack_tolerance: FloatProperty(
+        name='Stack Tolerance', default=0.01, min=0.0001, max=0.2, soft_max=0.1, subtype='FACTOR',
+        description='Shape difference allowed for stacking, relative to the island size')
+    stack_offset: IntProperty(
+        name='Stack Offset', default=0, min=0, max=99, soft_max=10,
+        description='Move stacked copies this many UDIM tiles away, for baking')
+    target: EnumProperty(name='Pack To', default='CLOSEST', items=(
+        ('CLOSEST', 'Closest Tile', 'Start at the tile closest to the islands'),
+        ('ACTIVE', 'Active Tile', 'Start at the active image tile, or the tile under the 2D cursor'),
+        ('FIXED', 'Fixed Tile', 'Start at the given UDIM tile'),
+    ))
+    udim_tile: IntProperty(name='UDIM Tile', default=1001, min=1001, max=2000)
+    max_tiles: IntProperty(name='Max Tiles', default=1, min=1, max=100, soft_max=10,
+                           description='Number of UDIM tiles islands may use')
+    group_layout: EnumProperty(name='Groups', default='MIXED', items=(
+        ('MIXED', 'Mixed', 'Ignore island groups'),
+        ('CLUSTER', 'Cluster', 'Place islands of the same group next to each other'),
+        ('TILE_PER_GROUP', 'Tile per Group', 'Give every group its own UDIM tile'),
+    ))
+    only_selected: BoolProperty(name='Selected Only', default=True, description='Only pack selected islands')
+    keep_unselected: BoolProperty(
+        name='Avoid Unselected', default=False,
+        description='Keep unselected islands in place and pack around them')
+
+    show_groups: BoolProperty(
+        name='Show Groups', default=False, update=_redraw_uv_editors,
+        description='Outline every island group in the UV editor with its color and id')
+    show_stacks: BoolProperty(
+        name='Show Stacks', default=False, update=_redraw_uv_editors,
+        description='Outline every manual island stack in the UV editor with its color and id')
 
 
 def _uv_area(context):
@@ -584,6 +713,7 @@ def _load_pre(_):
 
 
 def register():
+    bpy.types.Scene.uv_tools_texel_pack = PointerProperty(type=UVToolsTexelPackSettings)
     bpy.types.Scene.uv_tools_distortion = BoolProperty(
         name='UV Area Distortion', default=False,
         description='UV/world area ratio normalized across visible edited or selected meshes: red < 1, gray = 1, blue > 1; histogram weighted by world surface area')
@@ -622,6 +752,7 @@ def unregister():
         if _invalidate in handlers:
             handlers.remove(_invalidate)
     del bpy.types.Scene.uv_tools_distortion
+    del bpy.types.Scene.uv_tools_texel_pack
 
 
-classes = (UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch)
+classes = (UVToolsTexelPackSettings, UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch)

@@ -13,6 +13,7 @@
 #include "BKE_compositor.hh"
 #include "BKE_sound_types.hh"
 
+#include "BLI_math_matrix_types.hh"
 #include "BLI_set.hh"
 #include "BLI_utility_mixins.hh"
 
@@ -60,6 +61,10 @@ struct SceneAudioRuntime {
 
 class SceneRuntime : NonCopyable, NonMovable {
  public:
+  /* Session-only workplane alignment for interactive object creation. */
+  bool use_workplane = false;
+  float4x4 workplane_matrix = float4x4::identity();
+
   CompositorRuntime compositor;
   SequencerRuntime sequencer;
   SceneAudioRuntime audio;

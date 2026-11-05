@@ -67,6 +67,7 @@ set(SRC
   view3d_view.cc
   view3d_vr_location_scouting.cc
 
+  view3d_workplane.hh
   view3d_intern.hh
   view3d_navigate.hh
 )

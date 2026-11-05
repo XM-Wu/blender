@@ -46,6 +46,7 @@ _modules = [
     "vertexpaint_dirt",
     "view3d",
     "world",
+    "workplane",
     "wm",
 ]
 
@@ -76,6 +77,7 @@ def register():
     copy_global_transform.register()
     mesh_omni_outset.register()
     project.register()
+    workplane.register()
 
 
 def unregister():
@@ -90,6 +92,7 @@ def unregister():
     copy_global_transform.unregister()
     mesh_omni_outset.unregister()
     project.unregister()
+    workplane.unregister()
 
     for mod in reversed(_modules_loaded):
         for cls in reversed(mod.classes):

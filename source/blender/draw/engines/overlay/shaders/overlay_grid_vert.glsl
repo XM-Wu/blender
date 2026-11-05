@@ -119,7 +119,7 @@ void main()
   }
   else if (flag_test(grid_flag, SHOW_AXES)) {
     /* Store axis value on X-axis for now, it is swapped later. */
-    step_offs = float2(drw_view_position()[line.axis], 0.0f);
+    step_offs = float2(workplane_camera[line.axis], 0.0f);
   } /* else: GRID_SIMA, do nothing. */
 
   /* Output vertex position in [-1,1], which we use to fade level boundaries. */
@@ -204,7 +204,7 @@ void main()
     return; /* Discard line. */
   }
 
-  gl_Position = drw_view().winmat * (drw_view().viewmat * float4(vertex_out.pos, 1.0f));
+  gl_Position = drw_view().winmat * (drw_view().viewmat * workplane_matrix * float4(vertex_out.pos, 1.0f));
 
   /* Adjust z-component. */
   if (drw_view_is_perspective() || flag_test(grid_flag, GRID_SIMA)) {

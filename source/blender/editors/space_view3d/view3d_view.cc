@@ -48,8 +48,9 @@
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 
-#include "view3d_intern.hh" /* own include */
+#include "view3d_intern.hh"
 #include "view3d_navigate.hh"
+#include "view3d_workplane.hh" /* own include */
 
 #include "DNA_camera_types.h"
 
@@ -424,6 +425,7 @@ void view3d_viewmatrix_set(const Depsgraph *depsgraph,
     /* should be moved to better initialize later on XXX */
     if (RV3D_LOCK_FLAGS(rv3d) & RV3D_LOCK_ROTATION) {
       ED_view3d_lock(rv3d);
+      view3d_workplane_axis_quat(scene, rv3d->viewquat);
     }
 
     quat_to_mat4(rv3d->viewmat, rv3d->viewquat);

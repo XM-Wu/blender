@@ -25,7 +25,8 @@
 #include "WM_api.hh"
 #include "WM_types.hh"
 
-#include "view3d_intern.hh" /* own include */
+#include "view3d_intern.hh"
+#include "view3d_workplane.hh" /* own include */
 
 namespace blender {
 
@@ -273,8 +274,13 @@ static void WIDGETGROUP_navigate_draw_prepare(const bContext *C, wmGizmoGroup *g
   const RegionView3D *rv3d = static_cast<const RegionView3D *>(region->regiondata);
   const View3D *v3d = CTX_wm_view3d(C);
 
+  float frame[4], frame_matrix[3][3], navigation_matrix[3][3], view_matrix[3][3];
+  view3d_workplane_quat(CTX_data_scene(C), frame);
+  quat_to_mat3(frame_matrix, frame);
+  copy_m3_m4(view_matrix, rv3d->viewmat);
+  mul_m3_m3m3(navigation_matrix, view_matrix, frame_matrix);
   for (int i = 0; i < 3; i++) {
-    copy_v3_v3(navgroup->gz_array[GZ_INDEX_ROTATE]->matrix_offset[i], rv3d->viewmat[i]);
+    copy_v3_v3(navgroup->gz_array[GZ_INDEX_ROTATE]->matrix_offset[i], navigation_matrix[i]);
   }
 
   const rcti *rect_visible = ED_region_visible_rect(region);

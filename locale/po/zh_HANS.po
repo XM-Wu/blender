@@ -165512,3 +165512,8 @@ msgstr "均匀缩放每条曲线到特定长度"
 msgid "Distance from the ground plane"
 msgstr "距地平面距离"
 
+
+
+msgctxt "Operator"
+msgid "Restore Defaults"
+msgstr "恢复默认"

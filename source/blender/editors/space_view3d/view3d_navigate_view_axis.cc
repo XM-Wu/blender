@@ -25,6 +25,7 @@
 #include "UI_resources.hh"
 
 #include "view3d_intern.hh"
+#include "view3d_workplane.hh"
 
 #include "view3d_navigate.hh" /* own include */
 
@@ -119,6 +120,9 @@ static wmOperatorStatus view_axis_exec(bContext *C, wmOperator *op)
         float quat_axis[4];
         ED_view3d_quat_from_axis_view(
             eRegionView3D_View(i), eRegionView3D_ViewAxisRoll(j), quat_axis);
+        if (!align_quat) {
+          view3d_workplane_axis_quat(CTX_data_scene(C), quat_axis);
+        }
         if (align_quat) {
           mul_qt_qtqt(quat_axis, quat_axis, align_quat);
         }
@@ -154,6 +158,9 @@ static wmOperatorStatus view_axis_exec(bContext *C, wmOperator *op)
   const eRegionView3D_ViewAxisRoll view_axis_roll_enum = eRegionView3D_ViewAxisRoll(
       view_axis_roll);
   ED_view3d_quat_from_axis_view(viewnum_enum, view_axis_roll_enum, quat);
+  if (!align_quat) {
+    view3d_workplane_axis_quat(CTX_data_scene(C), quat);
+  }
   axis_set_view(C,
                 v3d,
                 region,

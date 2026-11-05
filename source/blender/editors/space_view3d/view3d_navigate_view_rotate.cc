@@ -18,6 +18,7 @@
 
 #include "view3d_intern.hh"
 #include "view3d_navigate.hh" /* own include */
+#include "view3d_workplane.hh"
 
 namespace blender {
 
@@ -65,7 +66,10 @@ static void viewrotate_apply_snap(ViewOpsData *vod)
   int x, y, z;
   bool found = false;
 
-  invert_qt_qt_normalized(viewquat_inv, vod->curr.viewquat);
+  float frame[4], frame_view[4];
+  view3d_workplane_quat(vod->scene, frame);
+  mul_qt_qtqt(frame_view, vod->curr.viewquat, frame);
+  invert_qt_qt_normalized(viewquat_inv, frame_view);
 
   mul_qt_v3(viewquat_inv, zaxis);
   normalize_v3(zaxis);
@@ -100,7 +104,7 @@ static void viewrotate_apply_snap(ViewOpsData *vod)
      * for testing roll */
     rotation_between_vecs_to_quat(viewquat_align, zaxis_best, zaxis);
     normalize_qt(viewquat_align);
-    mul_qt_qtqt(viewquat_align, vod->curr.viewquat, viewquat_align);
+    mul_qt_qtqt(viewquat_align, frame_view, viewquat_align);
     normalize_qt(viewquat_align);
     invert_qt_qt_normalized(viewquat_align_inv, viewquat_align);
 
@@ -146,6 +150,7 @@ static void viewrotate_apply_snap(ViewOpsData *vod)
       copy_qt_qt(quat_best, viewquat_align);
     }
 
+    view3d_workplane_axis_quat(vod->scene, quat_best);
     copy_qt_qt(rv3d->viewquat, quat_best);
 
     viewrotate_apply_dyn_ofs(vod, rv3d->viewquat);
@@ -207,7 +212,10 @@ static void viewrotate_apply(ViewOpsData *vod, const int event_xy[2])
     float quat_local_x[4], quat_global_z[4];
     float m[3][3];
     float m_inv[3][3];
-    const float zvec_global[3] = {0.0f, 0.0f, 1.0f};
+    float zvec_global[3] = {0.0f, 0.0f, 1.0f};
+    float workplane[4];
+    view3d_workplane_quat(vod->scene, workplane);
+    mul_qt_v3(workplane, zvec_global);
     float xaxis[3];
 
     /* Radians per-pixel. */
@@ -270,8 +278,9 @@ static void viewrotate_apply(ViewOpsData *vod, const int event_xy[2])
     mul_qt_qtqt(quat_local_x, vod->curr.viewquat, quat_local_x);
 
     /* Perform the orbital rotation */
-    axis_angle_to_quat_single(
-        quat_global_z, 'Z', sensitivity * vod->reverse * (event_xy[0] - vod->prev.event_xy[0]));
+    axis_angle_to_quat(quat_global_z,
+                       zvec_global,
+                       sensitivity * vod->reverse * (event_xy[0] - vod->prev.event_xy[0]));
     mul_qt_qtqt(vod->curr.viewquat, quat_local_x, quat_global_z);
 
     viewrotate_apply_dyn_ofs(vod, vod->curr.viewquat);

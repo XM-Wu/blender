@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "BKE_scene_runtime.hh"
+#include "BLI_math_matrix.hh"
 #include "DEG_depsgraph_query.hh"
 
 #include "DNA_camera_types.h"
@@ -37,6 +39,9 @@ class Grid : Overlay {
 
   /* Config data */
   float2 grid_offs_ = float2(0.0f);
+  float4x4 workplane_matrix_ = float4x4::identity();
+  float3 workplane_camera_ = float3(0);
+  float3 workplane_forward_ = float3(0, 0, 1);
   int grid_flag_ = 0;
   int axis_flag_ = 0;
   uint num_iters_ = 0;
@@ -82,6 +87,9 @@ class Grid : Overlay {
       sub.shader_set(res.shaders->grid.get());
       sub.state_set(grid_draw_state);
       sub.bind_ubo("grid_buf", &grid_ubo_);
+      sub.push_constant("workplane_matrix", workplane_matrix_);
+      sub.push_constant("workplane_camera", workplane_camera_);
+      sub.push_constant("workplane_forward", workplane_forward_);
 
       for (int grid_iter = 0; grid_iter < num_iters_; grid_iter++) {
         /* NOTE(not_mark): Only the first iteration draws to depth as a workaround for
@@ -135,6 +143,7 @@ class Grid : Overlay {
   {
     /* Set config flags to default values. */
     grid_flag_ = axis_flag_ = 0;
+    workplane_matrix_ = float4x4::identity();
 
     if (state.hide_overlays) {
       return false;
@@ -305,6 +314,15 @@ class Grid : Overlay {
 
     /* Camera parameters. */
     float3 drw_view_position = rv3d->viewinv[3], drw_view_forward = rv3d->viewinv[2];
+    const Scene *original_scene = DEG_get_original(state.scene);
+    if (original_scene->runtime->use_workplane) {
+      workplane_matrix_ = original_scene->runtime->workplane_matrix;
+      const float4x4 inverse = math::invert(workplane_matrix_);
+      drw_view_position = math::transform_point(inverse, drw_view_position);
+      drw_view_forward = math::transform_direction(inverse, drw_view_forward);
+    }
+    workplane_camera_ = drw_view_position;
+    workplane_forward_ = drw_view_forward;
 
     /* Compute distance to a relevant floor point-of-interest from the camera. The grid translates
      * with this point and is only drawn around it. */

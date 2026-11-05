@@ -97,6 +97,7 @@
 #include "BKE_pointcloud.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
+#include "BKE_scene_runtime.hh"
 #include "BKE_vfont.hh"
 #include "BKE_volume.hh"
 
@@ -534,7 +535,13 @@ void add_generic_get_opts(bContext *C,
       RNA_float_get_array(op->ptr, "location", r_loc);
     }
     else {
-      location_from_view(C, r_loc);
+      const Scene *scene = CTX_data_scene(C);
+      if (scene->runtime->use_workplane) {
+        copy_v3_v3(r_loc, scene->runtime->workplane_matrix.location());
+      }
+      else {
+        location_from_view(C, r_loc);
+      }
       RNA_float_set_array(op->ptr, "location", r_loc);
     }
   }
@@ -569,7 +576,12 @@ void add_generic_get_opts(bContext *C,
       else {
         /* If alignment is not set, use User Preferences. */
         *r_is_view_aligned = (U.flag & USER_ADD_VIEWALIGNED) != 0;
-        if (*r_is_view_aligned) {
+        if (CTX_data_scene(C)->runtime->use_workplane) {
+          *r_is_view_aligned = false;
+          RNA_property_enum_set(op->ptr, prop, ALIGN_CURSOR);
+          alignment = ALIGN_CURSOR;
+        }
+        else if (*r_is_view_aligned) {
           RNA_property_enum_set(op->ptr, prop, ALIGN_VIEW);
           alignment = ALIGN_VIEW;
         }
@@ -592,7 +604,9 @@ void add_generic_get_opts(bContext *C,
           break;
         case ALIGN_CURSOR: {
           const Scene *scene = CTX_data_scene(C);
-          const float3x3 tmat = scene->cursor.matrix<float3x3>();
+          const float3x3 tmat = scene->runtime->use_workplane ?
+                                    float3x3(scene->runtime->workplane_matrix) :
+                                    scene->cursor.matrix<float3x3>();
           mat3_normalized_to_eul(r_rot, tmat.ptr());
           RNA_float_set_array(op->ptr, "rotation", r_rot);
           break;

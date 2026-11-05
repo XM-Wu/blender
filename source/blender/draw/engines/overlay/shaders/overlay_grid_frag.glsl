@@ -55,7 +55,7 @@ void main()
     out_color.a *= length_fade;
 
     /* Compute normalized view vector. */
-    float3 V = drw_view_position() - vertex_out.pos;
+    float3 V = workplane_camera - vertex_out.pos;
     float dist = length(V);
     V /= dist;
 
@@ -77,7 +77,7 @@ void main()
 
     /* Add fade at steep angles for contents of the floor plane. */
     if (flag_test(grid_flag, PLANE_XY)) {
-      float3 V = -drw_view_forward();
+      float3 V = -workplane_forward;
       out_color.a *= 1.0f - pow3f(1.0f - abs(V.z));
     }
   }

@@ -34,6 +34,7 @@
 #include "RNA_define.hh"
 
 #include "view3d_intern.hh"
+#include "view3d_workplane.hh"
 
 #include "view3d_navigate.hh" /* own include */
 
@@ -389,7 +390,11 @@ void ViewOpsData::init_navigation(bContext *C,
   copy_qt_qt(this->curr.viewquat, rv3d->viewquat);
 
   this->reverse = 1.0f;
-  if (rv3d->persmat[2][1] < 0.0f) {
+  float frame[4], up[3] = {0, 0, 1};
+  view3d_workplane_quat(this->scene, frame);
+  mul_qt_v3(frame, up);
+  mul_mat3_m4_v3(rv3d->persmat, up);
+  if (up[1] < 0.0f) {
     this->reverse = -1.0f;
   }
 

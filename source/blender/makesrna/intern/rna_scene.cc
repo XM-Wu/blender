@@ -768,6 +768,7 @@ static const EnumPropertyItem eevee_resolution_scale_items[] = {
 #  include "BKE_node_runtime.hh"
 #  include "BKE_pointcache.h"
 #  include "BKE_scene.hh"
+#  include "BKE_scene_runtime.hh"
 #  include "BKE_screen.hh"
 #  include "BKE_unit.hh"
 
@@ -944,6 +945,21 @@ static void rna_Scene_objects_end(CollectionPropertyIterator *iter)
 {
   BKE_scene_objects_iterator_end(static_cast<BLI_Iterator *>(iter->internal.custom));
   MEM_delete_void(iter->internal.custom);
+}
+
+static bool rna_Scene_use_workplane_get(PointerRNA *ptr)
+{
+  const Scene *scene = static_cast<const Scene *>(ptr->data);
+  return scene->runtime->use_workplane;
+}
+
+static void rna_Scene_use_workplane_set(PointerRNA *ptr, bool value)
+{
+  Scene *scene = static_cast<Scene *>(ptr->data);
+  scene->runtime->use_workplane = value;
+  if (value) {
+    scene->runtime->workplane_matrix = scene->cursor.matrix<float4x4>();
+  }
 }
 
 static PointerRNA rna_Scene_objects_get(CollectionPropertyIterator *iter)
@@ -9300,6 +9316,14 @@ void RNA_def_scene(BlenderRNA *brna)
 
   /* Struct definition */
   srna = RNA_def_struct(brna, "Scene", "ID");
+
+  prop = RNA_def_property(srna, "use_workplane", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_funcs(
+      prop, "rna_Scene_use_workplane_get", "rna_Scene_use_workplane_set");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Temporary Workplane", "Align new objects to the temporary cursor workplane");
+
   RNA_def_struct_ui_text(srna,
                          "Scene",
                          "Scene data-block, consisting in objects and "

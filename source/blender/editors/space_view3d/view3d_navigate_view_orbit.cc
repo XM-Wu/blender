@@ -17,6 +17,7 @@
 #include "RNA_define.hh"
 
 #include "view3d_intern.hh"
+#include "view3d_workplane.hh"
 
 #include "view3d_navigate.hh" /* own include */
 
@@ -93,7 +94,10 @@ static wmOperatorStatus vieworbit_exec(bContext *C, wmOperator *op)
     }
 
     /* z-axis */
-    axis_angle_to_quat_single(quat_mul, 'Z', angle);
+    float axis[3] = {0, 0, 1}, frame[4];
+    view3d_workplane_quat(vod.scene, frame);
+    mul_qt_v3(frame, axis);
+    axis_angle_to_quat(quat_mul, axis, angle);
   }
   else {
     if (orbitdir == V3D_VIEW_STEPDOWN) {
@@ -113,6 +117,7 @@ static wmOperatorStatus vieworbit_exec(bContext *C, wmOperator *op)
     vod.rv3d->view = view_opposite;
     /* avoid float in-precision, just get a new orientation */
     ED_view3d_quat_from_axis_view(view_opposite, vod.rv3d->view_axis_roll, quat_new);
+    view3d_workplane_axis_quat(vod.scene, quat_new);
   }
   else {
     vod.rv3d->view = RV3D_VIEW_USER;

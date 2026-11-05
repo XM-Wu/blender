@@ -12,6 +12,7 @@ from bpy.app.translations import (
 
 tabs_attr_infos = (
     ("show_properties_tool", "Tool", 'TOOL_SETTINGS'),
+    ("show_properties_uv_tools", "UV Tools", 'UV'),
     ("show_properties_render", "Render", 'SCENE'),
     ("show_properties_output", "Output", 'OUTPUT'),
     ("show_properties_scene", "Scene", 'SCENE_DATA'),
@@ -49,6 +50,9 @@ class PROPERTIES_HT_header(Header):
         ui_scale = context.preferences.system.ui_scale
 
         layout.template_header()
+
+        if view.context == 'UV_TOOLS':
+            layout.label(text="UV Tools")
 
         layout.separator_spacer()
 

@@ -359,6 +359,11 @@ add_blender_test(
 )
 
 add_blender_test(
+  script_uv_tools
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_tools.py
+)
+
+add_blender_test(
   script_pyapi_bmesh
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_bmesh.py
 )

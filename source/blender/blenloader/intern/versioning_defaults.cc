@@ -308,6 +308,25 @@ static void blo_update_defaults_screen(bScreen *screen,
     }
   }
 
+  /* The UV workspace has a dedicated tools editor below the regular properties. */
+  if (STREQ(workspace_name, "UV Editing")) {
+    ScrArea *tools_area = nullptr;
+    int properties_count = 0;
+    for (ScrArea &area : screen->areabase) {
+      if (area.spacetype == SPACE_PROPERTIES) {
+        properties_count++;
+        if (!tools_area || area.v1->vec.y < tools_area->v1->vec.y) {
+          tools_area = &area;
+        }
+      }
+    }
+    if (properties_count > 1) {
+      SpaceProperties *sbuts = tools_area->spacedata.first_as<SpaceProperties>();
+      sbuts->mainb = sbuts->mainbuser = BCONTEXT_UV_TOOLS;
+      sbuts->visible_tabs = (1 << BCONTEXT_UV_TOOLS);
+    }
+  }
+
   /* 2D animation template. */
   if (app_template && STREQ(app_template, "2D_Animation")) {
     for (ScrArea &area : screen->areabase) {

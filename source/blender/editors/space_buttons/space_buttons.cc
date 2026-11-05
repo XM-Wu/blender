@@ -195,6 +195,7 @@ void ED_buttons_visible_tabs_menu(bContext *C, ui::Layout *layout, void * /*arg*
       "show_properties_texture",
       "show_properties_strip",
       "show_properties_strip_modifier",
+      "show_properties_uv_tools",
   };
 
   for (StringRefNull item : filter_items) {
@@ -227,6 +228,7 @@ Vector<eSpaceButtons_Context> ED_buttons_tabs_list(const SpaceProperties *sbuts,
   };
 
   add_tab(BCONTEXT_TOOL);
+  add_tab(BCONTEXT_UV_TOOLS);
 
   add_spacer();
 
@@ -311,6 +313,8 @@ static const char *buttons_main_region_context_string(const short mainb)
       return "strip_modifier";
     case BCONTEXT_COMPOSITOR:
       return "compositor";
+    case BCONTEXT_UV_TOOLS:
+      return "uv_tools";
   }
 
   /* All the cases should be handled. */

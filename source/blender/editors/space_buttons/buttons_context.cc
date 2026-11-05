@@ -705,6 +705,7 @@ static bool buttons_context_path(
     case BCONTEXT_COLLECTION: /* This is for Line Art collection flags */
       found = buttons_context_path_collection(C, path, window);
       break;
+    case BCONTEXT_UV_TOOLS:
     case BCONTEXT_TOOL:
       found = true;
       break;
@@ -979,7 +980,7 @@ int /*eContextResult*/ buttons_context(const bContext *C,
     return CTX_RESULT_MEMBER_NOT_FOUND;
   }
 
-  if (sbuts->mainb == BCONTEXT_TOOL) {
+  if (ELEM(sbuts->mainb, BCONTEXT_TOOL, BCONTEXT_UV_TOOLS)) {
     return CTX_RESULT_MEMBER_NOT_FOUND;
   }
 
@@ -1299,7 +1300,7 @@ int /*eContextResult*/ buttons_context(const bContext *C,
 static bool buttons_panel_context_poll(const bContext *C, PanelType * /*pt*/)
 {
   SpaceProperties *sbuts = CTX_wm_space_properties(C);
-  return sbuts->mainb != BCONTEXT_TOOL;
+  return !ELEM(sbuts->mainb, BCONTEXT_TOOL, BCONTEXT_UV_TOOLS);
 }
 
 static void buttons_panel_context_draw(const bContext *C, Panel *panel)

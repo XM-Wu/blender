@@ -470,7 +470,8 @@ struct Layout : public Item, NonCopyable, NonMovable {
                 std::optional<StringRef> name,
                 int icon,
                 wm::OpCallContext context,
-                eUI_Item_Flag flag);
+                eUI_Item_Flag flag,
+                float icon_scale = 1.0f);
 
   /**
    * Adds a operator item, places a button in the layout to call the operator.

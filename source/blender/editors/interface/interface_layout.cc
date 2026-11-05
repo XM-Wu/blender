@@ -1530,10 +1530,14 @@ PointerRNA Layout::op(wmOperatorType *ot,
                       std::optional<StringRef> name,
                       const int icon,
                       const wm::OpCallContext context,
-                      const eUI_Item_Flag flag)
+                      const eUI_Item_Flag flag,
+                      const float icon_scale)
 {
   PointerRNA ptr;
-  uiItemFullO_ptr_ex(this, ot, name, icon, context, flag, &ptr);
+  Button *but = uiItemFullO_ptr_ex(this, ot, name, icon, context, flag, &ptr);
+  if (but) {
+    button_icon_scale_set(but, icon_scale);
+  }
   return ptr;
 }
 

@@ -869,6 +869,9 @@ class IMAGE_HT_header(Header):
 
         layout.template_header()
 
+        if sima.mode == 'UV':
+            layout.prop(context.scene, "uv_tools_distortion", text="Distortion", toggle=True, icon='COLOR')
+
         if sima.mode != 'UV':
             layout.prop(sima, "ui_mode", text="")
 

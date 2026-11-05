@@ -483,7 +483,8 @@ static PointerRNA rna_uiItemO(Layout *layout,
                               bool emboss,
                               bool depress,
                               int icon_value,
-                              const float search_weight)
+                              const float search_weight,
+                              const float icon_scale)
 {
   wmOperatorType *ot;
 
@@ -512,7 +513,7 @@ static PointerRNA rna_uiItemO(Layout *layout,
   const float prev_weight = layout->search_weight();
   layout->search_weight_set(search_weight);
 
-  PointerRNA opptr = layout->op(ot, text, icon, layout->operator_context(), flag);
+  PointerRNA opptr = layout->op(ot, text, icon, layout->operator_context(), flag, icon_scale);
 
   layout->search_weight_set(prev_weight);
   return opptr;
@@ -1799,6 +1800,15 @@ void RNA_api_ui_layout(StructRNA *srna)
                     "Influences the sorting when using menu-seach",
                     -FLT_MAX,
                     FLT_MAX);
+      RNA_def_float(func,
+                    "icon_scale",
+                    1.0f,
+                    0.1f,
+                    8.0f,
+                    "Icon Scale",
+                    "Scale the icon independently of the button size",
+                    0.5f,
+                    4.0f);
     }
     parm = RNA_def_pointer(
         func, "properties", "OperatorProperties", "", "Operator properties to fill in");

@@ -40,6 +40,7 @@ _modules = [
     "sequencer",
     "spreadsheet",
     "userpref",
+    "uv_tools",
     "uvcalc_follow_active",
     "uvcalc_lightmap",
     "uvcalc_transform",
@@ -78,6 +79,7 @@ def register():
     mesh_omni_outset.register()
     project.register()
     workplane.register()
+    uv_tools.register()
 
 
 def unregister():
@@ -93,6 +95,7 @@ def unregister():
     mesh_omni_outset.unregister()
     project.unregister()
     workplane.unregister()
+    uv_tools.unregister()
 
     for mod in reversed(_modules_loaded):
         for cls in reversed(mod.classes):

@@ -157,6 +157,7 @@ class Instance : public DrawEngine {
   void draw_v3d(Manager &manager, View &view);
 
   void draw_text(Framebuffer &framebuffer);
+  void draw_surface_preview(Framebuffer &framebuffer);
 
   void ensure_weight_ramp_texture();
 };

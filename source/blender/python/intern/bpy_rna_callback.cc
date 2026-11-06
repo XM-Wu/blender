@@ -42,6 +42,8 @@ static const EnumPropertyItem region_draw_mode_items[] = {
     {REGION_DRAW_POST_PIXEL, "POST_PIXEL", 0, "Post Pixel", ""},
     {REGION_DRAW_POST_VIEW, "POST_VIEW", 0, "Post View", ""},
     {REGION_DRAW_PRE_VIEW, "PRE_VIEW", 0, "Pre View", ""},
+    {REGION_DRAW_PRE_OVERLAY, "PRE_OVERLAY", 0, "Pre Overlay",
+     "Draw surface previews after scene rendering and before native overlays"},
     {REGION_DRAW_BACKDROP, "BACKDROP", 0, "Backdrop", ""},
     {0, nullptr, 0, nullptr, nullptr},
 };

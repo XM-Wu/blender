@@ -69,6 +69,8 @@ void ED_file_exit();
 #define REGION_DRAW_POST_PIXEL 1
 #define REGION_DRAW_PRE_VIEW 2
 #define REGION_DRAW_BACKDROP 3
+/* Surface previews drawn into the scene color before native overlay compositing. */
+#define REGION_DRAW_PRE_OVERLAY 4
 
 void *ED_region_draw_cb_activate(ARegionType *art,
                                  void (*draw)(const bContext *, ARegion *, void *),

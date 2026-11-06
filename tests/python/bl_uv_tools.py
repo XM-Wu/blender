@@ -190,5 +190,39 @@ class TestExclusiveUVSelectionModes(unittest.TestCase):
                                          tuple(target == item for item in ('VERTEX', 'EDGE', 'FACE')))
 
 
+class TestCheckerPreview(unittest.TestCase):
+    def test_toggle_preserves_image_view_and_materials(self):
+        import bpy
+        area = next(a for a in bpy.data.workspaces['UV Editing'].screens[0].areas
+                    if a.type == 'IMAGE_EDITOR')
+        region = next(r for r in area.regions if r.type == 'WINDOW')
+        space = area.spaces.active
+        original = space.image
+        image = bpy.data.images.new('Checker regression image', width=512, height=256)
+        space.image = image
+        before = tuple(region.view2d.region_to_view(x, y) for x, y in ((0, 0), (100, 100)))
+        counts = (len(bpy.data.images), len(bpy.data.materials))
+        try:
+            with bpy.context.temp_override(screen=bpy.data.workspaces['UV Editing'].screens[0],
+                                           area=area, region=region):
+                bpy.context.scene.uv_tools_checker = False
+                for _ in range(4):
+                    self.assertEqual(bpy.ops.uv_tools.checker(), {'FINISHED'})
+                    self.assertEqual(space.image, image)
+                    self.assertEqual(before, tuple(region.view2d.region_to_view(x, y)
+                                                   for x, y in ((0, 0), (100, 100))))
+                    self.assertEqual(counts, (len(bpy.data.images), len(bpy.data.materials)))
+                bpy.context.scene.uv_tools_distortion = True
+                bpy.ops.uv_tools.checker()
+                self.assertFalse(bpy.context.scene.uv_tools_distortion)
+                bpy.context.scene.uv_tools_distortion = True
+                self.assertFalse(bpy.context.scene.uv_tools_checker)
+        finally:
+            bpy.context.scene.uv_tools_checker = False
+            bpy.context.scene.uv_tools_distortion = False
+            space.image = original
+            bpy.data.images.remove(image)
+
+
 if __name__ == '__main__':
     unittest.main(argv=[__file__])

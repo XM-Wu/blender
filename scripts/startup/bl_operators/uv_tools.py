@@ -26,6 +26,115 @@ _BINS = 64
 _revision = 0
 _hud_cache = {}
 _hud_record = None
+_checker_shader = None
+
+
+class UVTOOLS_OT_checker(bpy.types.Operator):
+    bl_idname = 'uv_tools.checker'
+    bl_label = 'UV Checker Preview'
+    bl_description = 'Toggle a UV checker on the selected meshes and UV canvas without changing materials or view framing'
+
+    def execute(self, context):
+        context.scene.uv_tools_checker = not context.scene.uv_tools_checker
+        _diagnostic_redraw(None, context)
+        return {'FINISHED'}
+
+
+class UVTOOLS_GGT_checker(bpy.types.GizmoGroup):
+    bl_idname = 'UVTOOLS_GGT_checker'
+    bl_label = 'UV Checker Preview'
+    bl_space_type = 'IMAGE_EDITOR'
+    bl_region_type = 'WINDOW'
+    bl_options = {'PERSISTENT', 'SCALE'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.mode == 'UV'
+
+    def setup(self, context):
+        self.button = self.gizmos.new('GIZMO_GT_button_2d')
+        self.button.target_set_operator('uv_tools.checker')
+        self.button.icon = 'TEXTURE'
+        self.button.draw_options = {'BACKDROP', 'OUTLINE'}
+        self.button.scale_basis = 16
+        self.button.alpha = self.button.alpha_highlight = 1.0
+        self.button.color_highlight = (0.8, 0.9, 1.0)
+        self.button.use_tooltip = True
+
+    def draw_prepare(self, context):
+        scale = context.preferences.system.ui_scale
+        toolbar = next((r for r in context.area.regions if r.type == 'TOOLS'), None)
+        left = toolbar.width if toolbar else 0
+        self.button.matrix_basis.translation = (left + 40 * scale, context.region.height - 40 * scale, 0)
+        self.button.color = (0.3, 0.6, 1.0) if context.scene.uv_tools_checker else (0.7, 0.7, 0.7)
+
+
+def _get_checker_shader():
+    global _checker_shader
+    if _checker_shader is None:
+        interface = gpu.types.GPUStageInterfaceInfo('uv_checker_interface')
+        interface.smooth('VEC2', 'uv')
+        info = gpu.types.GPUShaderCreateInfo()
+        info.push_constant('MAT4', 'mvp')
+        info.push_constant('FLOAT', 'cells')
+        info.vertex_in(0, 'VEC3', 'pos')
+        info.vertex_in(1, 'VEC2', 'texCoord')
+        info.vertex_out(interface)
+        info.fragment_out(0, 'VEC4', 'fragColor')
+        info.vertex_source('void main() { gl_Position = mvp * vec4(pos, 1.0); uv = texCoord; }')
+        info.fragment_source('''
+            void main() {
+                vec2 p = uv * cells;
+                vec2 w = max(fwidth(p), vec2(0.00001));
+                // Analytically filter the periodic checker over the pixel footprint.
+                vec2 a = abs(fract((p - 0.5 * w) * 0.5) - 0.5);
+                vec2 b = abs(fract((p + 0.5 * w) * 0.5) - 0.5);
+                vec2 integral = 2.0 * (a - b) / w;
+                float checker = 0.5 - 0.5 * integral.x * integral.y;
+                fragColor = vec4(vec3(mix(0.08, 0.65, checker)), 1.0);
+            }
+        ''')
+        _checker_shader = gpu.shader.create_from_info(info)
+    return _checker_shader
+
+
+def _draw_surface_preview(is_uv):
+    context = bpy.context
+    if not context.scene.uv_tools_checker:
+        _draw_overlay(is_uv)
+        return
+    if not context.space_data.overlay.show_overlays or (is_uv and context.area.ui_type != 'UV'):
+        return
+    data = _cache.get(_key(context))
+    shader = _get_checker_shader()
+    blend, depth, mask = gpu.state.blend_get(), gpu.state.depth_test_get(), gpu.state.depth_mask_get()
+    try:
+        gpu.state.blend_set('NONE')
+        gpu.state.depth_mask_set(False)
+        gpu.state.depth_test_set('NONE' if is_uv else 'LESS_EQUAL')
+        with gpu.matrix.push_pop_projection():
+            shader.bind()
+            shader.uniform_float('mvp', gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix())
+            shader.uniform_float('cells', 32.0)
+            if is_uv:
+                batch_for_shader(shader, 'TRIS', {
+                    'pos': ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 0, 0), (1, 1, 0), (0, 1, 0)),
+                    'texCoord': ((0, 0), (1, 0), (1, 1), (0, 0), (1, 1), (0, 1)),
+                }).draw(shader)
+            elif data and data.get('engine'):
+                from .uv_tools_cache import CHUNK_SIZE
+                engine = data['engine']
+                for chunk in range((len(engine.triangles) + CHUNK_SIZE - 1) // CHUNK_SIZE):
+                    key = ('checker', chunk)
+                    if key not in data['batches']:
+                        positions, _ = engine.chunk_arrays('positions', chunk)
+                        uv = engine.uv[engine.triangles[chunk*CHUNK_SIZE:(chunk+1)*CHUNK_SIZE]].reshape((-1, 2)).astype('float32')
+                        data['batches'][key] = batch_for_shader(shader, 'TRIS', {'pos': positions, 'texCoord': uv})
+                    data['batches'][key].draw(shader)
+    finally:
+        gpu.state.blend_set(blend)
+        gpu.state.depth_test_set(depth)
+        gpu.state.depth_mask_set(mask)
 
 
 def distortion_color(ratio, alpha=1.0):
@@ -122,7 +231,7 @@ def _tick():
                 continue
             seen.add(key)
             changed = False
-            if context.scene.uv_tools_distortion:
+            if context.scene.uv_tools_distortion or context.scene.uv_tools_checker:
                 objects = (context.objects_in_mode_unique_data if context.mode == 'EDIT_MESH'
                            else context.selected_objects)
                 signature = (_revision, context.mode, tuple(sorted(
@@ -163,16 +272,6 @@ def _get_shader():
     if _shader is None:
         _shader = gpu.shader.from_builtin('SMOOTH_COLOR')
     return _shader
-
-
-_wire_shader = None
-
-
-def _get_wire_shader():
-    global _wire_shader
-    if _wire_shader is None:
-        _wire_shader = gpu.shader.from_builtin('POLYLINE_SMOOTH_COLOR')
-    return _wire_shader
 
 
 def _get_overlay_shader():
@@ -267,66 +366,14 @@ def _draw_overlay(is_uv):
             shader.uniform_float('mvp', gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix())
             shader.uniform_float('normalization', 1.0)
             data['batches'][name].draw(shader)
-    def draw_wires():
-        if not engine and (is_uv or not (context.space_data.overlay.show_wireframes
-                or any(obj.show_wire for obj in context.selected_objects if obj.type == 'MESH'))):
-            return
-        theme = context.preferences.themes[0].view_3d
-        normal = (*theme.wire_edit[:3], 1.0)
-        selected = (*theme.edge_select[:3], 1.0)
-        seam = (*theme.seam[:3], 1.0)
-        line_shader = _get_wire_shader()
-        line_shader.bind()
-        line_shader.uniform_float('viewportSize', (context.region.width, context.region.height))
-        line_shader.uniform_float('lineWidth', context.preferences.system.ui_scale)
-        if not engine:
-            key = ('wires', name, normal, selected)
-            if key not in data['batches']:
-                import numpy as np
-                triangles = np.asarray(data[name], dtype=np.float32).reshape((-1, 3, 3))
-                masks = np.asarray(data['edge_masks'], dtype=bool).reshape((-1, 3, 3))[:, 0]
-                endpoints = triangles[:, ((1, 2), (2, 0), (0, 1)), :][masks].reshape((-1, 3))
-                data['batches'][key] = batch_for_shader(line_shader, 'LINES',
-                    {'pos': endpoints, 'color': np.tile(normal, (len(endpoints), 1))})
-            data['batches'][key].draw(line_shader)
-            return
-        for chunk, batches in engine.batches[name].items():
-            key = (normal, selected, seam)
-            if batches.get('wire_theme') != key:
-                positions, colors = engine.wire_arrays(name, chunk, normal, selected, seam)
-                batches['wires'] = batch_for_shader(line_shader, 'LINES', {'pos': positions, 'color': colors})
-                batches['wire_theme'] = key
-            batches['wires'].draw(line_shader)
+
     blend, depth, mask = gpu.state.blend_get(), gpu.state.depth_test_get(), gpu.state.depth_mask_get()
     try:
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE' if is_uv else 'LESS_EQUAL')
         gpu.state.depth_mask_set(False)
-        if is_uv:
-            draw()
-            draw_wires()
-        else:
-            # Offset in clip space, so coplanar edit-mode surfaces do not fight the overlay.
-            # Unlike world-space normal offsets this is stable across scene and object scales.
-            with gpu.matrix.push_pop_projection():
-                projection = gpu.matrix.get_projection_matrix()
-                for column in range(4):
-                    projection[2][column] -= 0.000001 * projection[3][column]
-                gpu.matrix.load_projection_matrix(projection)
-                # Resolve the nearest overlay surface before blending any colors. Otherwise
-                # back faces inside the depth bias can blend through the front faces.
-                gpu.state.color_mask_set(False, False, False, False)
-                gpu.state.depth_mask_set(True)
-                try:
-                    draw()
-                finally:
-                    gpu.state.color_mask_set(True, True, True, True)
-                    gpu.state.depth_mask_set(False)
-                draw()
-                for column in range(4):
-                    projection[2][column] -= 0.0000005 * projection[3][column]
-                gpu.matrix.load_projection_matrix(projection)
-                draw_wires()
+        draw()
+
     finally:
         gpu.state.blend_set(blend)
         gpu.state.depth_test_set(depth)
@@ -357,10 +404,18 @@ def shape_color(value):
 
 
 def _diagnostic_redraw(_self, context):
+    if context.scene.uv_tools_distortion and context.scene.uv_tools_checker:
+        context.scene.uv_tools_checker = False
     for window in context.window_manager.windows:
         for area in window.screen.areas:
             if area.type in {'VIEW_3D', 'IMAGE_EDITOR'}:
                 area.tag_redraw()
+
+
+def _checker_redraw(_self, context):
+    if context.scene.uv_tools_checker:
+        context.scene.uv_tools_distortion = False
+    _diagnostic_redraw(None, context)
 
 
 def _build_histogram():
@@ -798,6 +853,10 @@ def _migrate_uv_selection_keymaps():
 
 
 def register():
+    bpy.utils.register_class(UVTOOLS_GGT_checker)
+    bpy.types.Scene.uv_tools_checker = BoolProperty(
+        name='UV Checker', default=False, update=_checker_redraw,
+        description='Preview a checker on the UV canvas and selected meshes without altering materials')
     bpy.types.Scene.uv_tools_texel_pack = PointerProperty(type=UVToolsTexelPackSettings)
     bpy.types.Scene.uv_tools_distortion = BoolProperty(
         name='UV Diagnostics', default=False, update=_diagnostic_redraw,
@@ -813,16 +872,20 @@ def register():
     bpy.app.handlers.redo_post.append(_invalidate)
     if not bpy.app.background:
         _handles.extend([
-            (bpy.types.SpaceImageEditor, bpy.types.SpaceImageEditor.draw_handler_add(_draw_overlay, (True,), 'WINDOW', 'POST_VIEW')),
+            (bpy.types.SpaceImageEditor, bpy.types.SpaceImageEditor.draw_handler_add(_draw_surface_preview, (True,), 'WINDOW', 'PRE_OVERLAY')),
             (bpy.types.SpaceImageEditor, bpy.types.SpaceImageEditor.draw_handler_add(_draw_histogram, (), 'WINDOW', 'POST_PIXEL')),
-            (bpy.types.SpaceView3D, bpy.types.SpaceView3D.draw_handler_add(_draw_overlay, (False,), 'WINDOW', 'POST_VIEW')),
+            (bpy.types.SpaceView3D, bpy.types.SpaceView3D.draw_handler_add(_draw_surface_preview, (False,), 'WINDOW', 'PRE_OVERLAY')),
         ])
         bpy.app.timers.register(_tick, first_interval=.3, persistent=True)
         bpy.app.timers.register(_migrate_uv_selection_keymaps, first_interval=1.0)
 
 
 def unregister():
-    global _shader, _icons, _overlay_shader, _wire_shader
+    global _shader, _icons, _overlay_shader
+    global _checker_shader
+    bpy.utils.unregister_class(UVTOOLS_GGT_checker)
+    del bpy.types.Scene.uv_tools_checker
+    _checker_shader = None
     if bpy.app.timers.is_registered(_migrate_uv_selection_keymaps):
         bpy.app.timers.unregister(_migrate_uv_selection_keymaps)
     if bpy.app.timers.is_registered(_tick):
@@ -834,7 +897,6 @@ def unregister():
     _hud_cache.clear()
     _shader = None
     _overlay_shader = None
-    _wire_shader = None
     if _icons is not None:
         from bpy.utils import previews
         previews.remove(_icons)
@@ -849,4 +911,5 @@ def unregister():
     del bpy.types.Scene.uv_tools_texel_pack
 
 
-classes = (UVToolsTexelPackSettings, UVTOOLS_OT_select_mode, UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch)
+classes = (UVToolsTexelPackSettings, UVTOOLS_OT_select_mode, UVTOOLS_OT_mark_seam, UVTOOLS_OT_stitch,
+           UVTOOLS_OT_checker)

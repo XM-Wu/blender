@@ -17,6 +17,11 @@
 #include "draw_debug.hh"
 #include "overlay_instance.hh"
 
+#include "ED_space_api.hh"
+#include "GPU_matrix.hh"
+#include "GPU_state.hh"
+#include "WM_api.hh"
+
 namespace blender::draw::overlay {
 
 void Instance::init()
@@ -849,6 +854,9 @@ void Instance::draw_v2d(Manager &manager, View &view)
 
   background.draw_output(resources.overlay_output_color_only_fb, manager, view);
   grid.draw_line(resources.overlay_output_fb, manager, view);
+  /* The empty-image grid includes an opaque tile background. Surface previews
+   * must follow it, but precede the native UV edges and selection. */
+  draw_surface_preview(resources.overlay_output_fb);
   regular.mesh_uvs.draw(resources.overlay_output_fb, manager, view);
 
   draw_text(resources.overlay_output_color_only_fb);
@@ -969,6 +977,7 @@ void Instance::draw_v3d(Manager &manager, View &view)
   }
   {
     /* Overlay (+Line) pass. */
+    draw_surface_preview(resources.overlay_fb);
     draw(regular, resources.overlay_fb);
     draw_line(regular, resources.overlay_line_fb);
 
@@ -1025,6 +1034,39 @@ void Instance::draw_v3d(Manager &manager, View &view)
       background.draw_vignette(resources.overlay_output_color_only_fb, manager, view);
     }
   }
+}
+
+void Instance::draw_surface_preview(Framebuffer &framebuffer)
+{
+  const DRWContext *ctx = DRW_context_get();
+  if (!ctx->evil_C || state.is_depth_only_drawing || resources.is_selection() ||
+      state.hide_overlays || state.is_image_render)
+  {
+    return;
+  }
+  GPU_framebuffer_bind(framebuffer);
+  GPU_matrix_push();
+  GPU_matrix_push_projection();
+  command::StateSet::set();
+  if (state.rv3d) {
+    GPU_matrix_projection_set(state.rv3d->winmat);
+    GPU_matrix_set(state.rv3d->viewmat);
+    /* Same scale-aware offset convention as native edit-mesh surfaces. */
+    GPU_polygon_offset(state.rv3d->dist, 0.5f);
+  }
+  else {
+    GPU_matrix_identity_set();
+    const rctf &rect = state.region->v2d.cur;
+    wmOrtho2(rect.xmin, rect.xmax, rect.ymin, rect.ymax);
+  }
+  GPU_depth_mask(false);
+  ED_region_draw_cb_draw(ctx->evil_C, ctx->region, REGION_DRAW_PRE_OVERLAY);
+  if (state.rv3d) {
+    GPU_polygon_offset(state.rv3d->dist, 0.0f);
+  }
+  GPU_matrix_pop_projection();
+  GPU_matrix_pop();
+  command::StateSet::set();
 }
 
 void Instance::draw_text(Framebuffer &framebuffer)

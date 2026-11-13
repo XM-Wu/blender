@@ -675,7 +675,7 @@ struct SpaceImage {
 
   char lock = 0;
   /** UV draw type. */
-  eSpaceImage_UVDT dt_uv = SI_UVDT_OUTLINE;
+  eSpaceImage_UVDT dt_uv = SI_UVDT_BLACK;
   /** Sticky selection type. */
   eSpaceImage_UVDT_Stretch dt_uvstretch = SI_UVDT_STRETCH_ANGLE;
   char around = 0;

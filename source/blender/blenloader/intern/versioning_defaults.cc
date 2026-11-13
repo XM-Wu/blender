@@ -133,6 +133,7 @@ static void blo_update_defaults_screen(bScreen *screen,
     }
 
     if (area.spacetype == SPACE_IMAGE) {
+      area.spacedata.first_as<SpaceImage>()->dt_uv = SI_UVDT_BLACK;
       if (STREQ(workspace_name, "UV Editing")) {
         SpaceImage *sima = area.spacedata.first_as<SpaceImage>();
         if (sima->mode == SI_MODE_VIEW) {
@@ -308,19 +309,42 @@ static void blo_update_defaults_screen(bScreen *screen,
     }
   }
 
-  /* The UV workspace has a dedicated tools editor below the regular properties. */
+  /* Initialize the shipped UV workspace in code, without changing startup.blend:
+   * model on the left, UVs in the center, UV Tools below the Outliner. */
   if (STREQ(workspace_name, "UV Editing")) {
     ScrArea *tools_area = nullptr;
-    int properties_count = 0;
+    ScrArea *uv_area = nullptr;
+    ScrArea *view_area = nullptr;
+    auto area_size = [](const ScrArea *area) -> int64_t {
+      return area ? int64_t(area->v3->vec.x - area->v1->vec.x) *
+                        (area->v3->vec.y - area->v1->vec.y) : 0;
+    };
     for (ScrArea &area : screen->areabase) {
       if (area.spacetype == SPACE_PROPERTIES) {
-        properties_count++;
         if (!tools_area || area.v1->vec.y < tools_area->v1->vec.y) {
           tools_area = &area;
         }
       }
+      else if (area.spacetype == SPACE_IMAGE &&
+               area.spacedata.first_as<SpaceImage>()->mode == SI_MODE_UV &&
+               area_size(&area) > area_size(uv_area))
+      {
+        uv_area = &area;
+      }
+      else if (area.spacetype == SPACE_VIEW3D && area_size(&area) > area_size(view_area)) {
+        view_area = &area;
+      }
     }
-    if (properties_count > 1) {
+    if (uv_area && view_area && uv_area->v1->vec.x < view_area->v1->vec.x) {
+      /* Equivalent to the editor-data swap, but before region initialization.
+       * Keep screen vertices/area sizes and move each editor with its regions. */
+      std::swap(uv_area->spacetype, view_area->spacetype);
+      std::swap(uv_area->type, view_area->type);
+      std::swap(uv_area->spacedata, view_area->spacedata);
+      std::swap(uv_area->regionbase, view_area->regionbase);
+      uv_area->region_active_win = view_area->region_active_win = 0;
+    }
+    if (tools_area) {
       SpaceProperties *sbuts = tools_area->spacedata.first_as<SpaceProperties>();
       sbuts->mainb = sbuts->mainbuser = BCONTEXT_UV_TOOLS;
       sbuts->visible_tabs = (1 << BCONTEXT_UV_TOOLS);

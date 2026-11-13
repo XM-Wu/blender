@@ -48,8 +48,13 @@
 #include "BKE_mesh_types.hh"
 #include "BKE_report.hh"
 #include "BKE_screen.hh"
+#include "BKE_scene.hh"
+#include "BKE_wm_runtime.hh"
+#include <mutex>
+#include <memory>
 
 #include "DEG_depsgraph.hh"
+#include "DEG_depsgraph_query.hh"
 
 #include "GEO_uv_texel_pack.hh"
 
@@ -249,10 +254,23 @@ Vector<float> ED_uvedit_texel_pack_info(const Scene *scene, Mesh *mesh)
   Map<std::pair<int, int>, IdEntry> ids;
   int max_id[2] = {0, 0};
   int selected_faces = 0;
+  Map<std::pair<int, int>, int> all_groups;
+  Map<std::pair<int, int>, int> hidden_groups;
 
   BMFace *f;
   BMIter iter;
   BM_ITER_MESH (f, &iter, bm, BM_FACES_OF_MESH) {
+    for (const int kind : {CONSTRAINT_GROUP, CONSTRAINT_STACK}) {
+      if (offsets_by_kind[kind] != -1) {
+        const int id = BM_ELEM_CD_GET_INT(f, offsets_by_kind[kind]);
+        if (id > 0) {
+          all_groups.lookup_or_add({kind, id}, 0)++;
+          if (BM_elem_flag_test(f, BM_ELEM_HIDDEN)) {
+            hidden_groups.lookup_or_add({kind, id}, 0)++;
+          }
+        }
+      }
+    }
     for (const int kind : {CONSTRAINT_GROUP, CONSTRAINT_STACK}) {
       if (offsets_by_kind[kind] != -1) {
         max_id[kind - CONSTRAINT_GROUP] = std::max(max_id[kind - CONSTRAINT_GROUP],
@@ -300,6 +318,12 @@ Vector<float> ED_uvedit_texel_pack_info(const Scene *scene, Mesh *mesh)
 
   for (const auto item : counts.items()) {
     record({0.0f, float(item.key.first), item.key.second, float(item.value)});
+  }
+  /* Group membership includes hidden and UV-unselected faces; bounds above
+   * deliberately remain limited to UVs visible in the editor. */
+  for (const auto item : all_groups.items()) {
+    record({4.0f, float(item.key.first), float(item.key.second), float(item.value),
+            float(hidden_groups.lookup_default(item.key, 0))});
   }
   for (const auto item : ids.items()) {
     const IdEntry &e = item.value;
@@ -752,6 +776,9 @@ enum {
 };
 
 struct TexelPackSettings {
+  bool heuristic_search;
+  float search_time;
+  float no_improvement_time;
   int2 resolution;
   int precision;
   float margin;
@@ -779,6 +806,8 @@ struct TexelPackSettings {
 struct TexelPackJob {
   wmWindowManager *wm = nullptr;
   Scene *scene = nullptr;
+  Main *bmain = nullptr;
+  Depsgraph *depsgraph = nullptr;
   Vector<Object *> objects;
   TexelPackSettings settings;
   /** First UDIM tile number. */
@@ -791,6 +820,16 @@ struct TexelPackJob {
   std::string report;
   bool warning = false;
   bool changed = false;
+  bool was_cancelled = false;
+  bool preview_applied = false;
+  int preview_updates = 0;
+  Vector<TexelIsland> islands;
+  std::mutex update_mutex;
+  std::shared_ptr<const Vector<texel_pack::Transform>> pending;
+  std::shared_ptr<const Vector<texel_pack::Transform>> applied;
+  texel_pack::SearchProgress live;
+  std::atomic<bool> finish_search{false};
+  std::atomic<bool> cancel_request{false};
 };
 
 static int2 udim_tile_coords(const int tile_number)
@@ -857,11 +896,110 @@ static void write_island_uvs(const TexelIsland &island, Span<float2> unique_uvs)
   }
 }
 
+static void texel_pack_apply_preview(TexelPackJob &job, const Vector<texel_pack::Transform> &transforms)
+{
+  const auto &s = job.settings;
+  const auto &islands = job.islands;
+  const int start_tile = job.start_tile;
+  /* Final UVs of every packed island, used by its copies too. */
+  Map<int, Vector<float2>> final_uvs;
+  auto transform_island = [&](const TexelIsland &island, const texel_pack::Transform &placed) {
+    const float2 tile = float2(udim_tile_coords(start_tile + placed.tile));
+    Vector<float2> uvs(island.unique_uvs.size());
+    for (const int64_t j : island.unique_uvs.index_range()) {
+      const float2 px = placed.matrix * to_pixels(island.unique_uvs[j], s.resolution) +
+                        placed.translation;
+      uvs[j] = tile + float2(px.x / s.resolution.x, px.y / s.resolution.y);
+    }
+    return uvs;
+  };
+  for (const int64_t i : islands.index_range()) {
+    const TexelIsland &island = islands[i];
+    if (island.role != ROLE_PACK) {
+      continue;
+    }
+    const int source = island.stack_source == -1 ? int(i) : island.stack_source;
+    const texel_pack::Transform &placed = transforms[islands[source].engine_index];
+    if (!placed.placed) {
+      continue;
+    }
+    if (island.stack_source == -1 || island.stack_union) {
+      final_uvs.add(int(i), transform_island(island, placed));
+    }
+  }
+  for (const int64_t i : islands.index_range()) {
+    const TexelIsland &island = islands[i];
+    if (island.role != ROLE_PACK) {
+      continue;
+    }
+    if (island.stack_source != -1 && !island.stack_union) {
+      const Vector<float2> *source_uvs = final_uvs.lookup_ptr(island.stack_source);
+      if (!source_uvs) {
+        continue;
+      }
+      const texel_pack::Transform &placed = transforms[islands[island.stack_source].engine_index];
+      const int tile = start_tile + placed.tile;
+      const float2 offset = float2(udim_tile_coords(tile + s.stack_offset)) -
+                            float2(udim_tile_coords(tile));
+      Vector<float2> uvs(island.unique_uvs.size());
+      for (const int64_t j : uvs.index_range()) {
+        uvs[j] = (*source_uvs)[island.stack_map[j]] + offset;
+      }
+      write_island_uvs(island, uvs);
+      job.preview_applied = true;
+    }
+  }
+  for (const auto item : final_uvs.items()) {
+    write_island_uvs(islands[item.key], item.value);
+    job.preview_applied = true;
+  }
+
+
+}
+
+static void texel_pack_updatejob(void *job_v)
+{
+  auto &job = *static_cast<TexelPackJob *>(job_v);
+  std::shared_ptr<const Vector<texel_pack::Transform>> snapshot;
+  texel_pack::SearchProgress live;
+  {
+    std::unique_lock lock(job.update_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return;
+    }
+    snapshot = job.pending;
+    live = job.live;
+  }
+  if (snapshot && snapshot != job.applied && !job.cancel_request.load(std::memory_order_relaxed)) {
+    texel_pack_apply_preview(job, *snapshot);
+    job.applied = snapshot;
+    job.preview_updates++;
+    for (Object *ob : job.objects) {
+      EDBM_update_extern(id_cast<Mesh *>(ob->data), false, false);
+    }
+    /* The normal event-loop dependency update is skipped while editing is locked.
+     * This main-thread refresh is safe: the solver owns detached numeric input. */
+    BKE_scene_graph_update_tagged(job.depsgraph, job.bmain);
+  }
+  char text[768];
+  const char *phase = live.total == 0 ? "Preparing" : live.searching ? "Searching" : "Baseline";
+  SNPRINTF(text, "%s; Elapsed: %.1f s; Attempts: %d; Improvements: %d; Best: %d/%d islands; "
+                 "Coverage: %.2f%%; Density: %.2f px/m; Tiles: %d; No improvement: %.1f s; "
+                 "Search limit: %.0f s; Idle limit: %.0f s; Live updates: %d; Enter: apply best | Esc: restore",
+           phase, live.elapsed, live.attempts, live.improvements, live.placed, live.total,
+           live.utilization * 100.0f, live.density, live.tiles, live.idle,
+           job.settings.search_time, job.settings.no_improvement_time, job.preview_updates);
+  IDProperty *properties = IDP_EnsureProperties(&job.scene->id);
+  IDP_ReplaceInGroup(properties, bke::idprop::create("uv_texel_pack_progress", text).release());
+  IDP_ReplaceInGroup(properties, bke::idprop::create("uv_texel_pack_live_updates", job.preview_updates).release());
+  WM_main_add_notifier(NC_SPACE | ND_SPACE_IMAGE, nullptr);
+  WM_main_add_notifier(NC_SCENE | ND_TOOLSETTINGS, job.scene);
+}
+
 static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
 {
   const TexelPackSettings &s = job.settings;
-  Vector<TexelIsland> islands;
-  gather_islands(job.scene, job.objects, islands);
+  Vector<TexelIsland> &islands = job.islands;
 
   /* Roles. */
   int pack_count = 0;
@@ -882,7 +1020,6 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
   if (pack_count == 0) {
     job.report = RPT_("No UV islands to pack");
     job.warning = true;
-    free_islands(islands);
     return;
   }
 
@@ -898,6 +1035,7 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
     start_tile = udim_tile_number((min + max) * 0.5f);
   }
 
+  job.start_tile = start_tile;
   const int stacked = detect_stacks(
       islands, s.resolution, s.use_stacking, s.stack_mirrored, s.stack_tolerance);
 
@@ -960,73 +1098,37 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
   params.group_layout = s.group_layout;
   params.stop = stop;
   params.progress = progress;
+  params.heuristic_search = s.heuristic_search;
+  params.search_time = s.search_time;
+  params.no_improvement_time = s.no_improvement_time;
+  params.finish_search = &job.finish_search;
+  params.cancel_request = &job.cancel_request;
+  params.on_update = [&](const Vector<texel_pack::Transform> *transforms,
+                         const texel_pack::SearchProgress &live) {
+    // Copy lightweight transforms before locking. The search never waits for UV redraws.
+    std::shared_ptr<const Vector<texel_pack::Transform>> snapshot;
+    if (transforms) {
+      snapshot = std::make_shared<Vector<texel_pack::Transform>>(*transforms);
+    }
+    std::lock_guard lock(job.update_mutex);
+    if (snapshot) {
+      job.pending = std::move(snapshot);
+    }
+    job.live = live;
+  };
 
   const texel_pack::Result result = texel_pack::pack(engine, params);
 
   if (result.too_many_groups) {
     job.report = RPT_("More island groups than UDIM tiles, increase the tile limit");
     job.warning = true;
-    free_islands(islands);
     return;
   }
-  if (result.cancelled) {
+  if (result.cancelled || job.cancel_request.load(std::memory_order_relaxed)) {
+    job.was_cancelled = true;
     job.report = RPT_("Texel pack cancelled");
     job.warning = true;
-    free_islands(islands);
     return;
-  }
-
-  /* Final UVs of every packed island, used by its copies too. */
-  Map<int, Vector<float2>> final_uvs;
-  auto transform_island = [&](const TexelIsland &island, const texel_pack::Island &placed) {
-    const float2 tile = float2(udim_tile_coords(start_tile + placed.tile));
-    Vector<float2> uvs(island.unique_uvs.size());
-    for (const int64_t j : island.unique_uvs.index_range()) {
-      const float2 px = placed.matrix * to_pixels(island.unique_uvs[j], s.resolution) +
-                        placed.translation;
-      uvs[j] = tile + float2(px.x / s.resolution.x, px.y / s.resolution.y);
-    }
-    return uvs;
-  };
-  for (const int64_t i : islands.index_range()) {
-    const TexelIsland &island = islands[i];
-    if (island.role != ROLE_PACK) {
-      continue;
-    }
-    const int source = island.stack_source == -1 ? int(i) : island.stack_source;
-    const texel_pack::Island &placed = engine[islands[source].engine_index];
-    if (!placed.placed) {
-      continue;
-    }
-    if (island.stack_source == -1 || island.stack_union) {
-      final_uvs.add(int(i), transform_island(island, placed));
-    }
-  }
-  for (const int64_t i : islands.index_range()) {
-    const TexelIsland &island = islands[i];
-    if (island.role != ROLE_PACK) {
-      continue;
-    }
-    if (island.stack_source != -1 && !island.stack_union) {
-      const Vector<float2> *source_uvs = final_uvs.lookup_ptr(island.stack_source);
-      if (!source_uvs) {
-        continue;
-      }
-      const texel_pack::Island &placed = engine[islands[island.stack_source].engine_index];
-      const int tile = start_tile + placed.tile;
-      const float2 offset = float2(udim_tile_coords(tile + s.stack_offset)) -
-                            float2(udim_tile_coords(tile));
-      Vector<float2> uvs(island.unique_uvs.size());
-      for (const int64_t j : uvs.index_range()) {
-        uvs[j] = (*source_uvs)[island.stack_map[j]] + offset;
-      }
-      write_island_uvs(island, uvs);
-      job.changed = true;
-    }
-  }
-  for (const auto item : final_uvs.items()) {
-    write_island_uvs(islands[item.key], item.value);
-    job.changed = true;
   }
 
   char buf[512];
@@ -1040,6 +1142,10 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
            result.density_deviation * 100.0f,
            result.tiles_used);
   job.report = buf;
+  if (s.heuristic_search) {
+    job.report += "; search " + std::to_string(result.search_iterations) + " attempts, " +
+                  std::to_string(result.search_seconds) + " seconds";
+  }
   if (result.unplaced_count > 0) {
     SNPRINTF(buf, RPT_("; %d island(s) did not fit and were left unchanged"),
              result.unplaced_count);
@@ -1049,7 +1155,6 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
   if (mixed) {
     job.report += RPT_("; some islands have mixed constraint values");
   }
-  free_islands(islands);
 }
 
 static void texel_pack_startjob(void *job_v, wmJobWorkerStatus *worker_status)
@@ -1064,6 +1169,23 @@ static void texel_pack_startjob(void *job_v, wmJobWorkerStatus *worker_status)
 static void texel_pack_endjob(void *job_v)
 {
   TexelPackJob *job = static_cast<TexelPackJob *>(job_v);
+  texel_pack_updatejob(job);
+  if (job->was_cancelled || job->cancel_request.load(std::memory_order_relaxed)) {
+    if (job->preview_applied) {
+      for (const TexelIsland &island : job->islands) {
+        write_island_uvs(island, island.unique_uvs);
+      }
+      for (Object *ob : job->objects) {
+        EDBM_update_extern(id_cast<Mesh *>(ob->data), false, false);
+      }
+    }
+    job->report = RPT_("Texel pack cancelled; original UVs restored");
+    job->warning = true;
+    job->changed = false;
+  }
+  else {
+    job->changed = job->preview_applied;
+  }
   for (Object *ob : job->objects) {
     DEG_id_tag_update(static_cast<ID *>(ob->data), ID_RECALC_GEOMETRY);
     WM_main_add_notifier(NC_GEOM | ND_DATA, ob->data);
@@ -1079,7 +1201,7 @@ static void texel_pack_endjob(void *job_v)
   if (job->use_job) {
     WM_global_report(job->warning ? RPT_WARNING : RPT_INFO, job->report.c_str());
   }
-  if (job->undo_str) {
+  if (job->undo_str && job->changed) {
     ED_undo_push(job->undo_context, job->undo_str);
   }
 }
@@ -1089,6 +1211,7 @@ static void texel_pack_freejob(void *job_v)
   WM_cursor_wait(false);
   TexelPackJob *job = static_cast<TexelPackJob *>(job_v);
   WM_locked_interface_set(job->wm, false);
+  free_islands(job->islands);
   MEM_delete(job);
 }
 
@@ -1130,6 +1253,9 @@ static int active_udim_tile(const SpaceImage *sima)
 static TexelPackSettings texel_pack_settings_from_op(wmOperator *op)
 {
   TexelPackSettings s;
+  s.heuristic_search = RNA_boolean_get(op->ptr, "heuristic_search");
+  s.search_time = RNA_float_get(op->ptr, "search_time");
+  s.no_improvement_time = RNA_float_get(op->ptr, "no_improvement_time");
   s.resolution = int2(RNA_int_get(op->ptr, "resolution_x"), RNA_int_get(op->ptr, "resolution_y"));
   s.precision = RNA_enum_get(op->ptr, "precision");
   s.margin = RNA_float_get(op->ptr, "margin");
@@ -1155,6 +1281,55 @@ static TexelPackSettings texel_pack_settings_from_op(wmOperator *op)
   return s;
 }
 
+struct TexelPackModal {
+  Scene *scene;
+  wmTimer *timer;
+};
+
+static void texel_pack_modal_free(bContext *C, wmOperator *op)
+{
+  if (auto *modal = static_cast<TexelPackModal *>(op->customdata)) {
+    WM_event_timer_remove(CTX_wm_manager(C), CTX_wm_window(C), modal->timer);
+    MEM_delete(modal);
+    op->customdata = nullptr;
+  }
+}
+
+static wmOperatorStatus texel_pack_modal(bContext *C, wmOperator *op, const wmEvent *event)
+{
+  auto *modal = static_cast<TexelPackModal *>(op->customdata);
+  auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
+      CTX_wm_manager(C), modal->scene, WM_JOB_TYPE_UV_PACK));
+  if (!job) {
+    texel_pack_modal_free(C, op);
+    return OPERATOR_FINISHED;
+  }
+  if (event->val == KM_PRESS) {
+    if (event->type == EVT_ESCKEY) {
+      job->cancel_request.store(true, std::memory_order_relaxed);
+      return OPERATOR_RUNNING_MODAL;
+    }
+    if (ELEM(event->type, EVT_RETKEY, EVT_PADENTER)) {
+      job->finish_search.store(true, std::memory_order_relaxed);
+      return OPERATOR_RUNNING_MODAL;
+    }
+  }
+  return OPERATOR_PASS_THROUGH;
+}
+
+static void texel_pack_cancel(bContext *C, wmOperator *op)
+{
+  auto *modal = static_cast<TexelPackModal *>(op->customdata);
+  if (modal) {
+    auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
+        CTX_wm_manager(C), modal->scene, WM_JOB_TYPE_UV_PACK));
+    if (job) {
+      job->cancel_request.store(true, std::memory_order_relaxed);
+    }
+  }
+  texel_pack_modal_free(C, op);
+}
+
 static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
 {
   const Main *bmain = CTX_data_main(C);
@@ -1171,9 +1346,18 @@ static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
   TexelPackJob *job = MEM_new<TexelPackJob>(__func__);
   job->wm = CTX_wm_manager(C);
   job->scene = scene;
+  job->bmain = CTX_data_main(C);
+  job->depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   job->objects = std::move(objects);
   job->settings = texel_pack_settings_from_op(op);
-  job->use_job = (op->flag & OP_IS_INVOKE) != 0;
+  job->use_job = (op->flag & OP_IS_INVOKE) != 0 && !G.background;
+  if (!job->use_job && job->settings.heuristic_search && job->settings.search_time == 0.0f &&
+      job->settings.no_improvement_time == 0.0f)
+  {
+    BKE_report(op->reports, RPT_ERROR, "Synchronous heuristic search needs a time limit");
+    MEM_delete(job);
+    return OPERATOR_CANCELLED;
+  }
   switch (job->settings.target) {
     case TEXEL_PACK_TARGET_ACTIVE:
       job->start_tile = active_udim_tile(find_space_image(C));
@@ -1184,6 +1368,9 @@ static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
     default:
       break; /* Computed from the islands. */
   }
+
+  // Snapshot original UVs and topology on the main thread before background work.
+  gather_islands(scene, job->objects, job->islands);
 
   /* Needed even when jobs aren't used, see: #146195. */
   G.is_break = false;
@@ -1201,12 +1388,18 @@ static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
                                 WM_JOB_PROGRESS,
                                 WM_JOB_TYPE_UV_PACK);
     WM_jobs_customdata_set(wm_job, job, texel_pack_freejob);
-    WM_jobs_timer(wm_job, 0.1, 0, 0);
+    WM_jobs_timer(wm_job, 0.05, 0, 0, texel_pack_updatejob);
     WM_locked_interface_set_with_flags(job->wm, REGION_DRAW_LOCK_RENDER);
-    WM_jobs_callbacks(wm_job, texel_pack_startjob, nullptr, nullptr, texel_pack_endjob);
+    // Keep editing locked, but allow draw-only viewport refreshes. Workers no longer write BMesh.
+    BKE_spacedata_draw_locks(REGION_DRAW_LOCK_NONE);
+    WM_jobs_callbacks(wm_job, texel_pack_startjob, nullptr, texel_pack_updatejob, texel_pack_endjob);
     WM_cursor_wait(true);
     WM_jobs_start(job->wm, wm_job);
-    return OPERATOR_FINISHED;
+    op->customdata = MEM_new<TexelPackModal>(__func__, scene,
+        WM_event_timer_add(job->wm, CTX_wm_window(C), TIMER, 0.1f));
+    WM_event_add_modal_handler(C, op);
+    WM_main_add_notifier(NC_SPACE | ND_SPACE_IMAGE, nullptr);
+    return OPERATOR_RUNNING_MODAL;
   }
 
   wmJobWorkerStatus worker_status = {};
@@ -1226,7 +1419,9 @@ static wmOperatorStatus texel_pack_invoke(bContext *C, wmOperator *op, const wmE
 static bool texel_pack_poll(bContext *C)
 {
   const Object *obedit = CTX_data_edit_object(C);
-  return obedit && obedit->type == OB_MESH;
+  return obedit && obedit->type == OB_MESH &&
+         !CTX_wm_manager(C)->runtime->is_interface_locked &&
+         !WM_jobs_customdata_from_type(CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK);
 }
 
 static const EnumPropertyItem texel_pack_rotation_items[] = {
@@ -1242,6 +1437,12 @@ static const EnumPropertyItem texel_pack_rotation_items[] = {
 
 static void texel_pack_def_settings(wmOperatorType *ot)
 {
+  RNA_def_boolean(ot->srna, "heuristic_search", false, "Heuristic Search",
+                  "Search alternative island orders and placements, retaining the best result");
+  RNA_def_float(ot->srna, "search_time", 600.0f, 0.0f, 86400.0f, "Search Time",
+                "Additional search seconds after the baseline; 0 disables this limit", 0.0f, 120.0f);
+  RNA_def_float(ot->srna, "no_improvement_time", 20.0f, 0.0f, 86400.0f, "No Improvement Time",
+                "Stop after this many seconds without improvement; 0 disables this limit", 0.0f, 60.0f);
   static const EnumPropertyItem precision_items[] = {
       {TEXEL_PACK_PRECISION_LOW, "LOW", 0, "Low", "Occupancy grid of at most 512 cells"},
       {TEXEL_PACK_PRECISION_MEDIUM, "MEDIUM", 0, "Medium", "Occupancy grid of at most 1024 cells"},
@@ -1430,13 +1631,48 @@ void UV_OT_texel_pack(wmOperatorType *ot)
       "groups and per-island constraints";
 
   /* The operator handles undo itself, so the job system can push it after the job completes. */
-  ot->flag = OPTYPE_REGISTER;
+  /* Modal Enter/Esc must remain available while the packing job locks editing. */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_LOCK_BYPASS;
 
   ot->exec = texel_pack_exec;
   ot->invoke = texel_pack_invoke;
+  ot->modal = texel_pack_modal;
+  ot->cancel = texel_pack_cancel;
   ot->poll = texel_pack_poll;
 
   texel_pack_def_settings(ot);
+}
+
+static bool texel_pack_control_poll(bContext *C)
+{
+  return WM_jobs_customdata_from_type(CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK) != nullptr;
+}
+
+static wmOperatorStatus texel_pack_control_exec(bContext *C, wmOperator *op)
+{
+  auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
+      CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK));
+  if (!job) {
+    return OPERATOR_CANCELLED;
+  }
+  if (RNA_boolean_get(op->ptr, "cancel")) {
+    job->cancel_request.store(true, std::memory_order_relaxed);
+  }
+  else {
+    job->finish_search.store(true, std::memory_order_relaxed);
+  }
+  return OPERATOR_FINISHED;
+}
+
+void UV_OT_texel_pack_control(wmOperatorType *ot)
+{
+  ot->name = "Stop Texel Pack Search";
+  ot->idname = "UV_OT_texel_pack_control";
+  ot->description = "Apply the best result found so far, or cancel without changing UVs";
+  ot->exec = texel_pack_control_exec;
+  ot->poll = texel_pack_control_poll;
+  ot->flag = OPTYPE_LOCK_BYPASS;
+  RNA_def_boolean(ot->srna, "cancel", false, "Cancel", "Discard search results and preserve original UVs");
 }
 
 /** \} */

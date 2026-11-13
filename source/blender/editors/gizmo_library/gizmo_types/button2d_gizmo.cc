@@ -306,6 +306,7 @@ static void button2d_draw_intern(const bContext *C,
     }
     else if (button->icon != -1) {
       float pos[2];
+      const float icon_scale = is_3d ? 1.0f : RNA_float_get(gz->ptr, "icon_scale");
       if (is_3d) {
         const float fac = 2.0f;
         GPU_matrix_translate_2f(-(fac / 2), -(fac / 2));
@@ -315,8 +316,8 @@ static void button2d_draw_intern(const bContext *C,
         pos[1] = 1.0f;
       }
       else {
-        pos[0] = gz->matrix_basis[3][0] - (ICON_DEFAULT_WIDTH / 2.0) * UI_SCALE_FAC;
-        pos[1] = gz->matrix_basis[3][1] - (ICON_DEFAULT_HEIGHT / 2.0) * UI_SCALE_FAC;
+        pos[0] = gz->matrix_basis[3][0] - (ICON_DEFAULT_WIDTH / 2.0) * UI_SCALE_FAC * icon_scale;
+        pos[1] = gz->matrix_basis[3][1] - (ICON_DEFAULT_HEIGHT / 2.0) * UI_SCALE_FAC * icon_scale;
         GPU_matrix_pop();
         need_to_pop = false;
       }
@@ -331,7 +332,7 @@ static void button2d_draw_intern(const bContext *C,
       ui::icon_draw_ex(pos[0],
                        pos[1],
                        button->icon,
-                       UI_INV_SCALE_FAC,
+                       UI_INV_SCALE_FAC / icon_scale,
                        alpha,
                        0.0f,
                        icon_color,
@@ -482,6 +483,8 @@ static void GIZMO_GT_button_2d(wmGizmoType *gzt)
   RNA_def_property_enum_items(prop, rna_enum_icon_items);
 
   RNA_def_property(gzt->srna, "icon_value", PROP_INT, PROP_UNSIGNED);
+  RNA_def_float(gzt->srna, "icon_scale", 1.0f, 0.5f, 4.0f,
+                "Icon Scale", "Scale the icon within a 2D button", 0.5f, 2.0f);
 
   /* Passed to 'GPU_batch_tris_from_poly_2d_encoded' */
   RNA_def_property(gzt->srna, "shape", PROP_STRING, PROP_BYTESTRING);

@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <functional>
+
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
@@ -74,6 +77,27 @@ struct Island {
   float2 translation = float2(0.0f);
 };
 
+struct Transform {
+  bool placed = false;
+  int tile = 0;
+  float scale = 1.0f;
+  float2x2 matrix;
+  float2 translation;
+};
+
+struct SearchProgress {
+  bool searching = false;
+  int attempts = 0;
+  int improvements = 0;
+  int placed = 0;
+  int total = 0;
+  int tiles = 0;
+  float elapsed = 0.0f;
+  float idle = 0.0f;
+  float density = 0.0f;
+  float utilization = 0.0f;
+};
+
 struct Params {
   /** Texture size of one tile in pixels. */
   int width = 1024;
@@ -96,6 +120,15 @@ struct Params {
   int max_tiles = 1;
   GroupLayout group_layout = GroupLayout::Mixed;
 
+  bool heuristic_search = false;
+  /** Extra search budget after the baseline, seconds; zero disables this limit. */
+  float search_time = 600.0f;
+  float no_improvement_time = 20.0f;
+  /** Called on the search thread. Non-null transforms indicate a new incumbent. */
+  std::function<void(const Vector<Transform> *, const SearchProgress &)> on_update;
+  const std::atomic<bool> *finish_search = nullptr;
+  const std::atomic<bool> *cancel_request = nullptr;
+
   const bool *stop = nullptr;
   float *progress = nullptr;
 };
@@ -113,11 +146,14 @@ struct Result {
   bool cancelled = false;
   /** More groups than tiles with #GroupLayout::TilePerGroup. */
   bool too_many_groups = false;
+  int search_iterations = 0;
+  float search_seconds = 0.0f;
 };
 
 /**
  * Pack `islands` in place, writing the transform of every non-locked island that could be
- * placed. Results are deterministic for a given input.
+ * placed. Results are deterministic with heuristic search disabled. Timed search
+ * retains the best valid candidate but can vary with the number of completed attempts.
  */
 Result pack(MutableSpan<Island> islands, const Params &params);
 

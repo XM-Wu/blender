@@ -40,6 +40,16 @@ class UVTOOLS_OT_checker(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class UVTOOLS_GT_toolbar_background(bpy.types.Gizmo):
+    bl_idname = 'UVTOOLS_GT_toolbar_background'
+
+    def draw(self, context):
+        _draw_quick_toolbar()
+
+    def test_select(self, context, location):
+        return -1
+
+
 class UVTOOLS_GGT_checker(bpy.types.GizmoGroup):
     bl_idname = 'UVTOOLS_GGT_checker'
     bl_label = 'UV Checker Preview'
@@ -52,21 +62,85 @@ class UVTOOLS_GGT_checker(bpy.types.GizmoGroup):
         return context.space_data.mode == 'UV'
 
     def setup(self, context):
-        self.button = self.gizmos.new('GIZMO_GT_button_2d')
-        self.button.target_set_operator('uv_tools.checker')
-        self.button.icon = 'TEXTURE'
-        self.button.draw_options = {'BACKDROP', 'OUTLINE'}
-        self.button.scale_basis = 16
-        self.button.alpha = self.button.alpha_highlight = 1.0
-        self.button.color_highlight = (0.8, 0.9, 1.0)
-        self.button.use_tooltip = True
+        self.buttons = []
+        for operator, icon in (('uv_tools.checker', None), ('uv_tools.mark_seam', 'cut'),
+                               ('uv_tools.stitch', 'stitch'), ('uv.unwrap', 'unwrap'),
+                               ('uv.texel_pack', 'texel_pack')):
+            button = self.gizmos.new('GIZMO_GT_button_2d')
+            props = button.target_set_operator(operator)
+            if operator == 'uv_tools.mark_seam':
+                props.clear = False
+            if icon is None:
+                button.icon = 'TEXTURE'
+            else:
+                button.icon_value = icon_id(icon)
+            button.draw_options = set()
+            button.icon_scale = 1.6
+            button.scale_basis = 18
+            button.alpha = button.alpha_highlight = 1.0
+            button.color = (0.8, 0.85, 0.9)
+            button.color_highlight = (1, 1, 1)
+            button.use_tooltip = True
+            button.show_drag = False
+            self.buttons.append((button, props))
+        # The gizmo map builds its draw list in reverse creation order.
+        self.background = self.gizmos.new('UVTOOLS_GT_toolbar_background')
+        self.background.hide_select = True
+        self.background.scale_basis = 110
 
     def draw_prepare(self, context):
-        scale = context.preferences.system.ui_scale
-        toolbar = next((r for r in context.area.regions if r.type == 'TOOLS'), None)
-        left = toolbar.width if toolbar else 0
-        self.button.matrix_basis.translation = (left + 40 * scale, context.region.height - 40 * scale, 0)
-        self.button.color = (0.3, 0.6, 1.0) if context.scene.uv_tools_checker else (0.7, 0.7, 0.7)
+        x, y, scale = _quick_toolbar_origin(context)
+        self.background.matrix_basis.translation = (x+108*scale, y+24*scale, 0)
+        editing = context.mode == 'EDIT_MESH'
+        for i, (button, props) in enumerate(self.buttons):
+            button.matrix_basis.translation = (x+(24+i*42)*scale, y+24*scale, 0)
+            button.hide_select = i > 0 and not editing
+            if i == 4:
+                settings = context.scene.uv_tools_texel_pack
+                for key in TEXEL_PACK_SETTINGS:
+                    setattr(props, key, getattr(settings, key))
+
+
+def _quick_toolbar_origin(context):
+    scale = context.preferences.system.ui_scale
+    toolbar = next((r for r in context.area.regions if r.type == 'TOOLS'), None)
+    left = toolbar.width if toolbar else 0
+    return left + 12*scale, context.region.height - 66*scale, scale
+
+
+def _draw_quick_toolbar():
+    context = bpy.context
+    if context.area.ui_type != 'UV' or not context.space_data.show_gizmo:
+        return
+    x, y, scale = _quick_toolbar_origin(context)
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    def rounded(left, bottom, width, height, radius, color):
+        points = []
+        for cx, cy, start in ((left+width-radius,bottom+height-radius,0),
+                              (left+radius,bottom+height-radius,90),
+                              (left+radius,bottom+radius,180),
+                              (left+width-radius,bottom+radius,270)):
+            for step in range(9):
+                angle = math.radians(start + step*90/8)
+                points.append((cx+math.cos(angle)*radius,cy+math.sin(angle)*radius))
+        shader.bind()
+        shader.uniform_float('color', color)
+        batch_for_shader(shader,'TRI_FAN',{'pos':points}).draw(shader)
+    blend, depth = gpu.state.blend_get(), gpu.state.depth_test_get()
+    try:
+        gpu.state.blend_set('ALPHA')
+        gpu.state.depth_test_set('NONE')
+        rounded(x,y,216*scale,48*scale,8*scale,(0.035,0.04,0.05,.97))
+        if context.scene.uv_tools_checker:
+            rounded(x+5*scale,y+5*scale,38*scale,38*scale,5*scale,(.08,.25,.4,1))
+        # Separate the checker toggle from the four mesh operations.
+        shader.bind()
+        shader.uniform_float('color',(.16,.18,.21,1))
+        batch_for_shader(shader,'TRI_FAN',{'pos':((x+44*scale,y+8*scale),(x+45*scale,y+8*scale),
+            (x+45*scale,y+40*scale),(x+44*scale,y+40*scale))}).draw(shader)
+    finally:
+        gpu.state.blend_set(blend)
+        gpu.state.depth_test_set(depth)
 
 
 def _get_checker_shader():
@@ -470,6 +544,29 @@ def _draw_histogram():
     context = bpy.context
     if context.area.ui_type != 'UV' or context.region.width < 240 * context.preferences.system.ui_scale:
         return
+    if bpy.ops.uv.texel_pack_control.poll():
+        scale = context.preferences.system.ui_scale
+        lines = ['Texel Pack — Live Search'] + context.scene.get('uv_texel_pack_progress', 'Preparing').split('; ')
+        width = min(320 * scale, context.region.width - 32 * scale)
+        height = (len(lines) * 18 + 16) * scale
+        x, y = 16 * scale, 16 * scale
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        blend, depth = gpu.state.blend_get(), gpu.state.depth_test_get()
+        try:
+            gpu.state.blend_set('ALPHA')
+            gpu.state.depth_test_set('NONE')
+            shader.bind()
+            shader.uniform_float('color', (0.025, 0.035, 0.045, 0.94))
+            batch_for_shader(shader, 'TRI_FAN', {'pos': ((x,y),(x+width,y),(x+width,y+height),(x,y+height))}).draw(shader)
+            blf.size(0, int(12*scale))
+            for i, line in enumerate(lines):
+                blf.color(0, *( (0.3, 0.85, 1.0, 1.0) if i == 0 else (0.9, 0.93, 0.96, 1.0)))
+                blf.position(0, x+8*scale, y+height-(i+1)*18*scale, 0)
+                blf.draw(0, line)
+        finally:
+            gpu.state.blend_set(blend)
+            gpu.state.depth_test_set(depth)
+        return
     data = _cache.get(_key(context))
     region_key = context.region.as_pointer()
     signature = (context.region.width, context.preferences.system.ui_scale,
@@ -502,78 +599,35 @@ def _draw_histogram():
 
 
 def icon_id(name):
-    """Small colored vector-style icons rasterized into Blender's preview system."""
+    """Load pre-baked artwork once; never rasterize pixels in a UI draw callback.
+
+    Regenerate resources with tools/utils/generate_uv_tools_icons.py.
+    """
     global _icons
     if _icons is None:
         from bpy.utils import previews
         _icons = previews.new()
-        size, samples = 64, 4
-
-        def line(x, y, a, b, r):
-            dx, dy = b[0] - a[0], b[1] - a[1]
-            t = max(0, min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy)))
-            return math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) <= r
-        for kind in ('cut', 'stitch', 'unwrap', 'pack', 'texel_pack'):
-            pixels = []
-            for iy in range(size):
-                for ix in range(size):
-                    accum = [0.0] * 4
-                    for sy in range(samples):
-                        for sx in range(samples):
-                            x, y = (ix + (sx + .5) / samples) * 32 / size, (iy + (sy + .5) / samples) * 32 / size
-                            c = (0, 0, 0, 0)
-                            if kind == 'cut':
-                                if line(x, y, (10, 11), (25, 28), 1.3) or line(x, y, (22, 11), (7, 28), 1.3):
-                                    c = (.85, .92, 1, 1)
-                                if any(abs(math.hypot(x - cx, y - 8) - 4) < 1.5 for cx in (8, 24)):
-                                    c = (1, .35, .08, 1)
-                                if math.hypot(x - 16, y - 18) < 2:
-                                    c = (.1, .8, .9, 1)
-                            elif kind == 'stitch':
-                                if line(x, y, (10, 4), (10, 28), .8) or line(x, y, (22, 4), (22, 28), .8):
-                                    c = (.12, .76, .94, 1)
-                                for yy in (7, 13, 19, 25):
-                                    if line(x, y, (7, yy - 2), (25, yy + 2), 1.1):
-                                        c = (1, .64, .15, 1)
-                            elif kind == 'unwrap':
-                                # Six panels of an unfolded cube; warm top panel, cyan sides.
-                                for index, (ox, oy) in enumerate(((12, 3), (12, 10), (12, 17), (12, 24), (5, 17), (19, 17))):
-                                    if ox <= x <= ox + 7 and oy <= y <= oy + 7:
-                                        c = (1, .58, .12, 1) if index == 3 else (.12, .7, .95, 1)
-                                        if min(x-ox, ox+7-x, y-oy, oy+7-y) < .65:
-                                            c = (.88, .95, 1, 1)
-                            elif kind == 'pack':
-                                # A tight atlas, distinct from the unfolded cube icon.
-                                if 3 <= x <= 29 and 3 <= y <= 29 and min(x-3, 29-x, y-3, 29-y) < 1:
-                                    c = (.88, .95, 1, 1)
-                                for ox, oy, w, h, color in (
-                                        (6, 6, 8, 19, (.12, .7, .95, 1)),
-                                        (16, 6, 10, 8, (1, .58, .12, 1)),
-                                        (16, 16, 10, 9, (.3, .85, .48, 1))):
-                                    if ox <= x <= ox+w and oy <= y <= oy+h:
-                                        c = color
-                            elif kind == 'texel_pack':
-                                # Islands snapped to a texel grid, with a stacked pair.
-                                if 3 <= x <= 29 and 3 <= y <= 29 and (min(x-3, 29-x, y-3, 29-y) < 1 or (
-                                        (x - 3) % 6.5 < .45 or (y - 3) % 6.5 < .45)):
-                                    c = (.45, .52, .6, 1)
-                                for ox, oy, w, h, color in (
-                                        (5, 5, 11, 11, (.12, .7, .95, 1)),
-                                        (18, 5, 9, 17, (1, .58, .12, 1)),
-                                        (7, 18, 8, 8, (.3, .85, .48, 1)),
-                                        (5, 16, 8, 8, (.2, .62, .36, 1))):
-                                    if ox <= x <= ox+w and oy <= y <= oy+h:
-                                        c = color
-                                        if min(x-ox, ox+w-x, y-oy, oy+h-y) < .7:
-                                            c = (.9, .96, 1, 1)
-                            for j in range(4):
-                                accum[j] += c[j] / (samples * samples)
-                    pixels.extend(accum)
-            preview = _icons.new(kind)
-            preview.image_size = (size, size)
-            preview.image_pixels_float = pixels
-            preview.icon_size = (size, size)
-            preview.icon_pixels_float = pixels
+    if name not in _icons:
+        import os
+        import struct
+        import sys
+        import zlib
+        from array import array
+        path = os.path.join(os.path.dirname(__file__), 'data', 'uv_tools_icons', name + '.rgba.zlib')
+        with open(path, 'rb') as resource:
+            data = zlib.decompress(resource.read())
+        size, = struct.unpack_from('<I', data)
+        if size != 64 or len(data) != 4 + size * size * 4 * 4:
+            raise ValueError('Invalid UV icon resource: ' + name)
+        pixels = array('f')
+        pixels.frombytes(data[4:])
+        if sys.byteorder != 'little':
+            pixels.byteswap()
+        preview = _icons.new(name)
+        preview.image_size = (size, size)
+        preview.image_pixels_float = pixels
+        preview.icon_size = (size, size)
+        preview.icon_pixels_float = pixels
     return _icons[name].icon_id
 
 
@@ -603,11 +657,17 @@ TEXEL_PACK_SETTINGS = (
     'match_locked_density', 'rotation', 'allow_flip', 'use_stacking', 'stack_mirrored',
     'stack_tolerance', 'stack_offset', 'target', 'udim_tile', 'max_tiles', 'group_layout',
     'only_selected', 'keep_unselected',
+    'heuristic_search', 'search_time', 'no_improvement_time',
 )
 
 
 class UVToolsTexelPackSettings(bpy.types.PropertyGroup):
     """Scene settings of the Texel Packing panel, stored in the blend file."""
+    heuristic_search: BoolProperty(name='Heuristic Search', default=False)
+    search_time: FloatProperty(name='Search Time', default=600.0, min=0.0, max=86400.0,
+        description='Additional search seconds after baseline; 0 disables this limit', subtype='TIME')
+    no_improvement_time: FloatProperty(name='No Improvement Time', default=20.0, min=0.0, max=86400.0,
+        description='Stop after this many seconds without a better result; 0 disables this limit', subtype='TIME')
     resolution_preset: EnumProperty(
         name='Texture Size',
         items=[(str(size), str(size), '') for size in (512, 1024, 2048, 4096, 8192)] +
@@ -735,6 +795,11 @@ class UVTOOLS_OT_mark_seam(bpy.types.Operator):
     bl_label = 'Mark Seam'
     bl_description = 'Mark selected mesh or UV edges as seams (undoable)'
     bl_options = {'REGISTER', 'UNDO'}
+    clear: BoolProperty(name='Clear Seam', default=False, options={'SKIP_SAVE'})
+
+    @classmethod
+    def description(cls, context, properties):
+        return 'Clear seams from selected UV or mesh edges' if properties.clear else 'Mark selected UV or mesh edges as seams'
 
     @classmethod
     def poll(cls, context):
@@ -744,8 +809,8 @@ class UVTOOLS_OT_mark_seam(bpy.types.Operator):
         area = _uv_area(context)
         if area and not context.scene.tool_settings.use_uv_select_sync:
             with context.temp_override(area=area, region=next(r for r in area.regions if r.type == 'WINDOW')):
-                return bpy.ops.uv.mark_seam('EXEC_DEFAULT', clear=False)
-        return bpy.ops.mesh.mark_seam('EXEC_DEFAULT', clear=False)
+                return bpy.ops.uv.mark_seam('EXEC_DEFAULT', clear=self.clear)
+        return bpy.ops.mesh.mark_seam('EXEC_DEFAULT', clear=self.clear)
 
 
 class UVTOOLS_OT_stitch(bpy.types.Operator):
@@ -852,7 +917,48 @@ def _migrate_uv_selection_keymaps():
     return None
 
 
+_xm_disabled_keys = {}
+
+
+def _restore_xm_addon_keys():
+    for item in _xm_disabled_keys.values():
+        try:
+            item.active = True
+        except ReferenceError:
+            pass
+    _xm_disabled_keys.clear()
+
+
+def _sync_xm_seam_keymap():
+    """Addon keymaps precede the preset: reserve C/Shift-C for seams only in XM."""
+    configs = bpy.context.window_manager.keyconfigs
+    if configs.active is None or configs.active.name != 'XM_KeyMapping':
+        if _xm_disabled_keys:
+            _restore_xm_addon_keys()
+            configs.update()
+        return 1.0
+    if configs.addon is None:
+        return 1.0
+    changed = False
+    for keymap in configs.addon.keymaps:
+        if keymap.name not in {'Mesh', '3D View', 'UV Editor', 'Image'}:
+            continue
+        for item in keymap.keymap_items:
+            if item.type != 'C' or item.value != 'PRESS' or any((item.ctrl,item.alt,item.oskey)):
+                continue
+            circle = item.idname in {'mesh.select_circle_xray','view3d.select_circle_xray','view3d.select_circle','uv.select_circle'}
+            tool = item.idname == 'wm.tool_set_by_id' and getattr(item.properties, 'name', '') in {'builtin.select_circle','builtin.cursor'}
+            if item.active and (circle or tool):
+                _xm_disabled_keys[item.as_pointer()] = item
+                item.active = False
+                changed = True
+    if changed:
+        configs.update()
+    return 1.0
+
+
 def register():
+    bpy.utils.register_class(UVTOOLS_GT_toolbar_background)
     bpy.utils.register_class(UVTOOLS_GGT_checker)
     bpy.types.Scene.uv_tools_checker = BoolProperty(
         name='UV Checker', default=False, update=_checker_redraw,
@@ -878,12 +984,17 @@ def register():
         ])
         bpy.app.timers.register(_tick, first_interval=.3, persistent=True)
         bpy.app.timers.register(_migrate_uv_selection_keymaps, first_interval=1.0)
+        bpy.app.timers.register(_sync_xm_seam_keymap, first_interval=1.2, persistent=True)
 
 
 def unregister():
     global _shader, _icons, _overlay_shader
     global _checker_shader
+    if bpy.app.timers.is_registered(_sync_xm_seam_keymap):
+        bpy.app.timers.unregister(_sync_xm_seam_keymap)
+    _restore_xm_addon_keys()
     bpy.utils.unregister_class(UVTOOLS_GGT_checker)
+    bpy.utils.unregister_class(UVTOOLS_GT_toolbar_background)
     del bpy.types.Scene.uv_tools_checker
     _checker_shader = None
     if bpy.app.timers.is_registered(_migrate_uv_selection_keymaps):

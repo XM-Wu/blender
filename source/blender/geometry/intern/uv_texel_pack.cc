@@ -17,6 +17,9 @@
 #include <bit>
 #include <cmath>
 #include <numeric>
+#include <chrono>
+#include <random>
+#include <tuple>
 
 #include "BLI_convexhull_2d.hh"
 #include "BLI_index_range.hh"
@@ -25,6 +28,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_task.hh"
+#include "BLI_function_ref.hh"
 
 #include "GEO_uv_texel_pack.hh"
 
@@ -376,7 +380,8 @@ struct Spot {
  * First fitting position (lowest row, then lowest column) of `shape` with its raw origin
  * inside `region`.
  */
-static Spot find_spot(const Occupancy &occ, const Shape &shape, const Region &region, const int m)
+static Spot find_spot(const Occupancy &occ, const Shape &shape, const Region &region, const int m,
+                      FunctionRef<bool()> interrupted)
 {
   Spot spot;
   const Raster &grid = occ.grid;
@@ -385,6 +390,9 @@ static Spot find_spot(const Occupancy &occ, const Shape &shape, const Region &re
   const int key_start = shape.run_start[k];
 
   for (int ry = region.y0; ry <= region.y1; ry++) {
+    if ((ry & 31) == 0 && interrupted()) {
+      return spot;
+    }
     const int oy = ry - m;
     /* Every row of the mask needs a free run at least as long as its longest run
      * (minus what may hang outside the grid). */
@@ -406,6 +414,9 @@ static Spot find_spot(const Occupancy &occ, const Shape &shape, const Region &re
     const int gy_key = oy + k;
     auto try_range = [&](const int lo, const int hi) {
       for (int rx = std::max(lo, region.x0); rx <= std::min(hi, region.x1); rx++) {
+        if ((rx & 255) == 0 && interrupted()) {
+          return false;
+        }
         if (!occ.collides(shape, rx, ry, m)) {
           spot = {rx, ry, true};
           return true;
@@ -546,19 +557,18 @@ static void sort_for_placement(Vector<Prepared> &order,
   });
 }
 
-struct Placement {
-  bool placed = false;
-  int tile = 0;
-  float scale = 1.0f;
-  float2x2 matrix;
-  float2 translation;
-};
+using Placement = Transform;
 
 struct Layout {
   bool complete = false;
   Vector<Placement> placements;
   int placed = 0;
 };
+
+static double search_clock()
+{
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 struct Packer {
   MutableSpan<Island> islands;
@@ -572,10 +582,22 @@ struct Packer {
   /** Occupancy of locked islands per tile, copied by every attempt. */
   Vector<Occupancy> locked_occupancy;
   Vector<Prepared> order_base;
+  bool searching = false;
+  double deadline = 0.0;
+  int orientation_offset = 0;
+  int placement_strategy = 0;
 
   bool cancelled() const
   {
-    return params.stop && *params.stop;
+    return (params.stop && *params.stop) ||
+           (params.cancel_request && params.cancel_request->load(std::memory_order_relaxed));
+  }
+
+  bool interrupted() const
+  {
+    return cancelled() || (searching &&
+        ((params.finish_search && params.finish_search->load(std::memory_order_relaxed)) ||
+         (deadline > 0.0 && search_clock() >= deadline)));
   }
 
   /** Try `scale` then the shrunken scales allowed by the tolerance. */
@@ -599,7 +621,7 @@ struct Packer {
     Map<std::pair<int, int>, Region> group_bounds;
 
     for (const Prepared &prep : order_base) {
-      if (cancelled()) {
+      if (interrupted()) {
         return layout;
       }
       const Island &island = islands[prep.index];
@@ -613,8 +635,9 @@ struct Packer {
         Array<Shape> shapes(count);
         threading::parallel_for(IndexRange(count), 1, [&](const IndexRange range) {
           for (const int o : range) {
-            const float angle = prep.pre_angle + float(o % prep.angle_count) * float(M_PI_2);
-            const float2x2 matrix = orientation_matrix(angle, o >= prep.angle_count, scale);
+            const int orientation = (o + orientation_offset) % count;
+            const float angle = prep.pre_angle + float(orientation % prep.angle_count) * float(M_PI_2);
+            const float2x2 matrix = orientation_matrix(angle, orientation >= prep.angle_count, scale);
             shapes[o] = build_shape(
                 island.triangles, matrix, cell, margin_cells, params.pixel_snap);
           }
@@ -658,7 +681,7 @@ struct Packer {
                 if (region.x0 > region.x1 || region.y0 > region.y1) {
                   continue;
                 }
-                spots[o] = find_spot(occ, shapes[o], region, margin_cells);
+                spots[o] = find_spot(occ, shapes[o], region, margin_cells, [&]() { return interrupted(); });
               }
             });
 
@@ -673,7 +696,18 @@ struct Packer {
               }
               const int top = spots[o].ry + shapes[o].raw.height;
               const int best_top = spots[best].ry + shapes[best].raw.height;
-              if (top < best_top || (top == best_top && spots[o].rx < spots[best].rx)) {
+              const int right = spots[o].rx + shapes[o].raw.width;
+              const int best_right = spots[best].rx + shapes[best].raw.width;
+              auto score = [&](int t, int r, int x) -> std::pair<int64_t, int> {
+                if (placement_strategy == 1) {
+                  return {r, t};
+                }
+                if (placement_strategy == 2) {
+                  return {int64_t(t) * r, t};
+                }
+                return {t, x};
+              };
+              if (score(top, right, spots[o].rx) < score(best_top, best_right, spots[best].rx)) {
                 best = o;
               }
             }
@@ -855,6 +889,46 @@ Result pack(MutableSpan<Island> islands, const Params &params)
   }
 
   Layout best;
+  float best_global = 1.0f;
+  SearchProgress live;
+  const double pack_started = search_clock();
+  auto publish = [&](bool changed, bool searching, float elapsed, float idle) {
+    if (!params.on_update) {
+      return;
+    }
+    live.searching = searching;
+    live.elapsed = elapsed;
+    live.idle = idle;
+    live.attempts = result.search_iterations;
+    live.total = int(packer.order_base.size());
+    if (changed) {
+      live.improvements++;
+      live.placed = best.placed;
+      live.tiles = 0;
+      double area = 0.0;
+      Vector<float> density;
+      for (const Prepared &p : packer.order_base) {
+        if (best.placements.is_empty() || !best.placements[p.index].placed) {
+          continue;
+        }
+        const Placement &v = best.placements[p.index];
+        live.tiles = std::max(live.tiles, v.tile + 1);
+        area += double(p.area_px) * v.scale * v.scale;
+        if (p.density > 0.0f) {
+          density.append(p.density * v.scale / std::max(islands[p.index].density_weight, 1e-6f));
+        }
+      }
+      for (const Island &island : islands) {
+        if (island.locked && island.locked_tile >= 0 && island.locked_tile < live.tiles) {
+          area += pixel_area(island.triangles);
+        }
+      }
+      live.density = median(density);
+      live.utilization = live.tiles ? float(area / (double(params.width) * params.height * live.tiles)) : 0.0f;
+    }
+    params.on_update(changed ? &best.placements : nullptr, live);
+  };
+
   /* Islands that can shrink go after those that cannot. */
   const bool fixed_first = params.density_tolerance > 0.0f;
   const bool fill = params.density_mode != DensityMode::Target &&
@@ -875,6 +949,7 @@ Result pack(MutableSpan<Island> islands, const Params &params)
     }
     sort_for_placement(packer.order_base, global, params.group_layout, fixed_first);
     best = packer.attempt(global, true);
+    best_global = global;
   }
   else {
     /* Bracket the largest global scale that packs everything, evaluating several candidates in
@@ -886,6 +961,9 @@ Result pack(MutableSpan<Island> islands, const Params &params)
     float hi = 0.0f;
     const int max_rounds = 16;
     for (int round = 0; round < max_rounds; round++) {
+      if (best.complete && params.finish_search && params.finish_search->load(std::memory_order_relaxed)) {
+        break;
+      }
       if (packer.cancelled()) {
         break;
       }
@@ -922,6 +1000,8 @@ Result pack(MutableSpan<Island> islands, const Params &params)
         if (layouts[c].complete && candidates[c] > lo) {
           lo = candidates[c];
           best = std::move(layouts[c]);
+          best_global = lo;
+          publish(true, false, float(search_clock()-pack_started), 0.0f);
         }
       }
       float new_hi = 0.0f;
@@ -939,7 +1019,7 @@ Result pack(MutableSpan<Island> islands, const Params &params)
         break; /* Even tiny islands don't fit, locked or fixed scale islands take the space. */
       }
       if (params.progress) {
-        *params.progress = 0.05f + 0.9f * float(round + 1) / float(max_rounds);
+        *params.progress = 0.05f + (params.heuristic_search ? 0.4f : 0.9f) * float(round + 1) / float(max_rounds);
       }
     }
 
@@ -948,12 +1028,122 @@ Result pack(MutableSpan<Island> islands, const Params &params)
       const float global = hi > 0.0f ? hi : guess;
       sort_for_placement(packer.order_base, global, params.group_layout, fixed_first);
       best = packer.attempt(global, true);
+      best_global = global;
       }
   }
 
   if (packer.cancelled()) {
     result.cancelled = true;
     return result;
+  }
+
+  publish(true, false, float(search_clock()-pack_started), 0.0f);
+
+  if (params.heuristic_search && !packer.order_base.is_empty()) {
+    const double started = search_clock();
+    double improved = started;
+    /* Lexicographic quality: membership, tile count, minimum actual density,
+     * density consistency, then occupied area. Never reward tolerance abuse. */
+    auto quality = [&](const Layout &layout) {
+      int tiles = 0;
+      float minimum = FLT_MAX, maximum = 0.0f;
+      double area = 0.0;
+      for (const Prepared &p : packer.order_base) {
+        if (layout.placements.is_empty() || !layout.placements[p.index].placed) {
+          continue;
+        }
+        const Placement &v = layout.placements[p.index];
+        tiles = std::max(tiles, v.tile + 1);
+        area += double(p.area_px) * v.scale * v.scale;
+        if (!p.fixed_scale) {
+          const float density = v.scale / std::max(p.factor, 1e-20f);
+          minimum = std::min(minimum, density);
+          maximum = std::max(maximum, density);
+        }
+      }
+      const float deviation = maximum > 0.0f ? maximum / std::max(minimum, 1e-20f) - 1.0f : 0.0f;
+      return std::make_tuple(layout.placed, -tiles, minimum == FLT_MAX ? 0.0f : minimum, -deviation, area);
+    };
+    std::mt19937 random(0x5458504b);
+    int iteration = 0;
+    while (!packer.cancelled() &&
+           !(params.finish_search && params.finish_search->load(std::memory_order_relaxed)))
+    {
+      const double now = search_clock();
+      double deadline = 0.0;
+      if (params.search_time > 0.0f) {
+        deadline = started + params.search_time;
+      }
+      if (params.no_improvement_time > 0.0f) {
+        const double idle_deadline = improved + params.no_improvement_time;
+        deadline = deadline > 0.0 ? std::min(deadline, idle_deadline) : idle_deadline;
+      }
+      if (deadline > 0.0 && now >= deadline) {
+        break;
+      }
+      constexpr int batch_size = 4;
+      Array<Layout> candidates(batch_size);
+      Array<uint32_t> seeds(batch_size);
+      Array<float> scales(batch_size);
+      for (int i = 0; i < batch_size; i++) {
+        seeds[i] = random();
+        /* Keep one candidate at the incumbent scale; probe progressively larger ones. */
+        scales[i] = best_global * ((fill && best.complete) ? (1.0f + 0.0025f * i) : 1.0f);
+      }
+      threading::parallel_for(IndexRange(batch_size), 1, [&](const IndexRange range) {
+        for (const int i : range) {
+          Packer local = packer;
+          local.searching = true;
+          local.deadline = deadline;
+          local.orientation_offset = int(seeds[i] % 8);
+          local.placement_strategy = int(seeds[i] % 3);
+          std::mt19937 rng(seeds[i]);
+          std::uniform_real_distribution<float> jitter(0.25f, 4.0f);
+          Array<float> priorities(islands.size());
+          Map<int, uint32_t> groups;
+          for (const Prepared &p : local.order_base) {
+            priorities[p.index] = ((iteration + i) % 4 == 0 ? 1.0f : p.area_px * p.factor * p.factor) * jitter(rng);
+            if (!groups.contains(p.group)) {
+              groups.add(p.group, rng());
+            }
+          }
+          std::stable_sort(local.order_base.begin(), local.order_base.end(), [&](const Prepared &a, const Prepared &b) {
+            if (params.group_layout != GroupLayout::Mixed && a.group != b.group) {
+              return std::make_pair(groups.lookup(a.group), a.group) < std::make_pair(groups.lookup(b.group), b.group);
+            }
+            if (fixed_first && a.fixed_scale != b.fixed_scale) {
+              return a.fixed_scale;
+            }
+            return priorities[a.index] > priorities[b.index];
+          });
+          if (!local.interrupted()) {
+            candidates[i] = local.attempt(scales[i], true);
+          }
+        }
+      });
+      for (int i = 0; i < batch_size; i++) {
+        if (!candidates[i].placements.is_empty()) {
+          result.search_iterations++;
+          if (quality(candidates[i]) > quality(best)) {
+            best = std::move(candidates[i]);
+            best_global = scales[i];
+            improved = search_clock();
+            publish(true, true, float(improved-started), 0.0f);
+          }
+        }
+      }
+      iteration += batch_size;
+      publish(false, true, float(search_clock()-started), float(search_clock()-improved));
+      if (params.progress) {
+        *params.progress = params.search_time > 0.0f ?
+            0.5f + 0.49f * float(std::min(1.0, (search_clock()-started)/params.search_time)) : 0.5f;
+      }
+    }
+    result.search_seconds = float(search_clock() - started);
+    if (packer.cancelled()) {
+      result.cancelled = true;
+      return result;
+    }
   }
 
   /* Write results and statistics. */

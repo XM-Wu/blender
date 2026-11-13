@@ -349,6 +349,7 @@ float ED_uvedit_get_aspect_y(Object *obedit);
  *   `kind, id, face count, any face selected, u_min, v_min, u_max, v_max`.
  * - 2: largest group or stack id of all faces: `kind, id`.
  * - 3: number of selected faces.
+ * - 4: group/stack membership across all faces: `kind, id, face count, hidden face count`.
  *
  * `kind` is 0 rotation, 1 flip, 2 keep scale, 3 density, 4 group, 5 stack, 6 lock.
  */

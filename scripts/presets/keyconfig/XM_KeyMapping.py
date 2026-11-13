@@ -79,6 +79,21 @@ def _keymap_items(keyconfig_data, km_name):
 
 
 def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
+    # C marks seams and Shift-C clears them. Remove inherited conflicting bindings
+    # from 3D View as it can intercept the mesh-mode shortcut.
+    for name in ('UV Editor', 'Mesh', '3D View', 'Image'):
+        items = _keymap_items(keyconfig_data, name)
+        items[:] = [item for item in items if not (
+            item[1].get('type') == 'C' and
+            not any(item[1].get(mod, False) for mod in ('ctrl','alt','oskey','hyper')))]
+    _append_item(keyconfig_data, 'UV Editor',
+                 ('uv_tools.mark_seam', {'type':'C', 'value':'PRESS'}, {'properties':[('clear',False)]}))
+    _append_item(keyconfig_data, 'Mesh',
+                 ('mesh.mark_seam', {'type':'C', 'value':'PRESS'}, {'properties':[('clear',False)]}))
+    _append_item(keyconfig_data, 'UV Editor',
+                 ('uv_tools.mark_seam', {'type':'C', 'value':'PRESS', 'shift':True}, {'properties':[('clear',True)]}))
+    _append_item(keyconfig_data, 'Mesh',
+                 ('mesh.mark_seam', {'type':'C', 'value':'PRESS', 'shift':True}, {'properties':[('clear',True)]}))
     if remember_last_tool:
         for _name, _args, content in keyconfig_data:
             for operator, _event, options in content["items"]:

@@ -634,6 +634,14 @@ class MeshUVs : Overlay {
           select_edge_ = (sel_mode_2d == UV_SELECT_EDGE);
           select_face_dots_ = (sel_mode_2d & UV_SELECT_FACE) && !hide_faces;
         }
+        /* Island selection uses faces internally, but should display like edge
+         * selection without per-face dots or individual UV vertices. */
+        if (tool_setting->uv_flag & UV_FLAG_SELECT_ISLAND)
+        {
+          select_vert_ = false;
+          select_edge_ = true;
+          select_face_dots_ = false;
+        }
       }
 
       if (show_mesh_analysis_) {

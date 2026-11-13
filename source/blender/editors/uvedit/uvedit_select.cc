@@ -2273,7 +2273,7 @@ static void uv_select_edgeloop_single_side_tag(const Scene *scene,
   }
 }
 
-static int uv_select_edgeloop(Scene *scene, Object *obedit, UvNearestHit *hit, const bool extend)
+static int uv_select_edgeloop(Scene *scene, Object *obedit, UvNearestHit *hit, const bool extend, const bool toggle)
 {
   const ToolSettings *ts = scene->toolsettings;
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
@@ -2284,7 +2284,7 @@ static int uv_select_edgeloop(Scene *scene, Object *obedit, UvNearestHit *hit, c
    * So these need to be ensured even though the layers aren't used afterwards. */
   const BMUVOffsets offsets = BM_uv_map_offsets_get(bm);
 
-  if (extend) {
+  if (extend && toggle) {
     select = !uvedit_edge_select_test(scene, bm, hit->l, offsets);
   }
   else {
@@ -2369,7 +2369,7 @@ static int uv_select_edgeloop(Scene *scene, Object *obedit, UvNearestHit *hit, c
 /** \name Face Loop Select
  * \{ */
 
-static int uv_select_faceloop(Scene *scene, Object *obedit, UvNearestHit *hit, const bool extend)
+static int uv_select_faceloop(Scene *scene, Object *obedit, UvNearestHit *hit, const bool extend, const bool toggle)
 {
   const ToolSettings *ts = scene->toolsettings;
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(obedit);
@@ -2389,7 +2389,7 @@ static int uv_select_faceloop(Scene *scene, Object *obedit, UvNearestHit *hit, c
 
   BM_mesh_elem_hflag_disable_all(bm, BM_FACE, BM_ELEM_TAG, false);
 
-  if (extend) {
+  if (extend && toggle) {
     select = !uvedit_face_select_test(scene, bm, hit->l->f);
   }
   else {
@@ -4042,7 +4042,8 @@ static wmOperatorStatus uv_mouse_select_loop_generic_multi(bContext *C,
                                                            const Span<Object *> objects,
                                                            const float co[2],
                                                            const bool extend,
-                                                           enum eUVLoopGenericType loop_type)
+                                                           enum eUVLoopGenericType loop_type,
+                                                     const bool toggle = true)
 {
   const ARegion *region = CTX_wm_region(C);
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
@@ -4070,10 +4071,10 @@ static wmOperatorStatus uv_mouse_select_loop_generic_multi(bContext *C,
 
   if (loop_type == UV_LOOP_SELECT) {
     if (ED_uvedit_select_mode_get(scene) == UV_SELECT_FACE) {
-      flush = uv_select_faceloop(scene, obedit, &hit, extend);
+      flush = uv_select_faceloop(scene, obedit, &hit, extend, toggle);
     }
     else {
-      flush = uv_select_edgeloop(scene, obedit, &hit, extend);
+      flush = uv_select_edgeloop(scene, obedit, &hit, extend, toggle);
     }
   }
   else if (loop_type == UV_RING_SELECT) {
@@ -4108,14 +4109,15 @@ static wmOperatorStatus uv_mouse_select_loop_generic_multi(bContext *C,
 static wmOperatorStatus uv_mouse_select_loop_generic(bContext *C,
                                                      const float co[2],
                                                      const bool extend,
-                                                     enum eUVLoopGenericType loop_type)
+                                                     enum eUVLoopGenericType loop_type,
+                                                     const bool toggle = true)
 {
   const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
       *bmain, scene, view_layer, nullptr);
-  wmOperatorStatus ret = uv_mouse_select_loop_generic_multi(C, objects, co, extend, loop_type);
+  wmOperatorStatus ret = uv_mouse_select_loop_generic_multi(C, objects, co, extend, loop_type, toggle);
   return ret;
 }
 
@@ -4132,7 +4134,7 @@ static wmOperatorStatus uv_select_loop_exec(bContext *C, wmOperator *op)
   RNA_float_get_array(op->ptr, "location", co);
   const bool extend = RNA_boolean_get(op->ptr, "extend");
 
-  return uv_mouse_select_loop_generic(C, co, extend, UV_LOOP_SELECT);
+  return uv_mouse_select_loop_generic(C, co, extend, UV_LOOP_SELECT, RNA_boolean_get(op->ptr, "toggle"));
 }
 
 static wmOperatorStatus uv_select_loop_invoke(bContext *C, wmOperator *op, const wmEvent *event)
@@ -4142,6 +4144,12 @@ static wmOperatorStatus uv_select_loop_invoke(bContext *C, wmOperator *op, const
 
   ui::view2d_region_to_view(&region->v2d, event->mval[0], event->mval[1], &co[0], &co[1]);
   RNA_float_set_array(op->ptr, "location", co);
+
+  /* The first Shift-click may already have selected the seed. A double-click
+   * adds the loop instead of toggling it back off based on that seed. */
+  if (event->val == KM_DBL_CLICK && RNA_boolean_get(op->ptr, "extend")) {
+    RNA_boolean_set(op->ptr, "toggle", false);
+  }
 
   const wmOperatorStatus retval = uv_select_loop_exec(C, op);
 
@@ -4160,6 +4168,10 @@ void UV_OT_select_loop(wmOperatorType *ot)
   ot->exec = uv_select_loop_exec;
   ot->invoke = uv_select_loop_invoke;
   ot->poll = ED_operator_uvedit; /* requires space image */
+
+  PropertyRNA *toggle_prop = RNA_def_boolean(
+      ot->srna, "toggle", true, "Toggle", "Toggle the loop when extending selection");
+  RNA_def_property_flag(toggle_prop, PROP_SKIP_SAVE);
 
   /* properties */
   PropertyRNA *prop;

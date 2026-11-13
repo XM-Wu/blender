@@ -3,6 +3,18 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from bpy.types import Panel
+import bpy
+
+
+def draw_search_controls(layout):
+    if bpy.ops.uv.texel_pack_control.poll():
+        box = layout.box()
+        box.label(text='Packing Progress', icon='TIME')
+        status = bpy.context.scene.get('uv_texel_pack_progress', 'Preparing')
+        for line in status.split('; '):
+            box.label(text=line)
+        box.label(text='Enter: Stop & Apply Best', icon='CHECKMARK')
+        box.label(text='Esc: Cancel / Restore UVs', icon='CANCEL')
 
 
 class UVToolsPanel:
@@ -54,6 +66,7 @@ class UVTOOLS_PT_texel_pack(UVToolsPanel, Panel):
 
         layout = self.layout
         draw_icon_buttons(layout, (("uv.texel_pack", "texel_pack"),), setup)
+        draw_search_controls(layout)
         layout.label(text="Island constraints: UV Editor sidebar > Texel Pack", icon='INFO')
         report = context.scene.get("uv_texel_pack_report")
         if report:
@@ -104,6 +117,20 @@ class UVTOOLS_PT_texel_pack_margin(UVToolsTexelPackSubPanel, Panel):
         layout.label(text="Safe up to mip level {:d}".format(mips), icon='INFO')
 
 
+class UVTOOLS_PT_texel_pack_search(UVToolsTexelPackSubPanel, Panel):
+    bl_label = 'Heuristic Search'
+
+    def draw_settings(self, layout, settings):
+        layout.prop(settings, 'heuristic_search')
+        col = layout.column()
+        col.enabled = settings.heuristic_search
+        col.prop(settings, 'search_time')
+        col.prop(settings, 'no_improvement_time')
+        col.label(text='0 disables a time limit', icon='INFO')
+        col.label(text='Enter applies best; Esc cancels')
+        draw_search_controls(layout)
+
+
 class UVTOOLS_PT_texel_pack_rotation(UVToolsTexelPackSubPanel, Panel):
     bl_label = "Rotation & Stacking"
 
@@ -146,6 +173,51 @@ class TexelPackSidebarPanel:
         return context.mode == 'EDIT_MESH' and context.space_data.show_uvedit
 
 
+class IMAGE_PT_texel_pack_transform(TexelPackSidebarPanel, Panel):
+    bl_label = 'Transform'
+    bl_order = -10
+
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.mode == 'UV'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.enabled = context.mode == 'EDIT_MESH'
+        draw_search_controls(layout)
+        from bl_operators.uv_tools import icon_id
+        def buttons(parent, items):
+            row = parent.row(align=True)
+            row.scale_y = 2.0
+            row.scale_x = 1.3
+            for mode, icon in items:
+                row.operator('uv_tools.transform', text='', icon_value=icon_id(mode.lower()), icon_scale=1.5).mode = mode
+        orientation = layout.box()
+        orientation.label(text='Orientation')
+        settings = context.scene.uv_tools_orientation
+        orientation.prop(settings, 'reference', text='')
+        if settings.reference == 'GEOMETRY':
+            orientation.prop(settings, 'space')
+            orientation.prop(settings, 'axis')
+            orientation.prop(settings, 'fallback_axis')
+            orientation.row(align=True).prop(settings, 'target', expand=True)
+            row = orientation.row()
+            row.scale_y = 1.8
+            row.operator('uv_tools.transform', text='Align to 3D', icon_value=icon_id('orient_v')).mode = 'ORIENT_3D'
+        else:
+            if settings.reference == 'EDGES':
+                orientation.label(text='Selected edges orient the whole island')
+            buttons(orientation, (('ORIENT_H', ''), ('ORIENT_V', '')))
+        rotations = orientation.row(align=True)
+        rotations.scale_y = 1.8
+        for mode, label in (('ROTATE_CW', '90°'), ('ROTATE_CCW', '90°'), ('ROTATE_180', '180°')):
+            rotations.operator('uv_tools.transform', text=label, icon_value=icon_id(mode.lower()), icon_scale=1.6).mode = mode
+        box = layout.box()
+        box.label(text='Straighten')
+        buttons(box, (('STRAIGHT', 'IPO_LINEAR'), ('STRAIGHT_H', 'ALIGN_JUSTIFY'), ('STRAIGHT_V', 'ALIGN_FLUSH')))
+        buttons(box, (('RECT_H', 'MESH_PLANE'), ('RECT_V', 'UV_FACESEL')))
+
+
 class IMAGE_PT_texel_pack_island(TexelPackSidebarPanel, Panel):
     bl_label = "Island Constraints"
 
@@ -176,6 +248,91 @@ class IMAGE_PT_texel_pack_island(TexelPackSidebarPanel, Panel):
         layout.operator("uv.texel_pack_constraint_clear", text="Reset Constraints", icon='LOOP_BACK').kind = 'ALL'
 
 
+class IMAGE_PT_texel_pack_fit_align(TexelPackSidebarPanel, Panel):
+    bl_label = 'Fit & Align'
+    bl_order = -9
+
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.mode == 'UV'
+
+    def draw(self, context):
+        from bl_operators.uv_tools import icon_id
+        layout = self.layout
+        settings = context.scene.uv_tools_fit_align
+        layout.label(text='Match to')
+        for targets in (('SELECTION','PIXEL','GRID'), ('TILE','TRIM','BOX')):
+            row = layout.row(align=True)
+            for target in targets:
+                row.prop_enum(settings, 'target', target)
+        snap = layout.row()
+        snap.enabled = settings.target in {'PIXEL', 'GRID'}
+        snap.prop(settings, 'snapping')
+        layout.prop(settings, 'grouping')
+        if settings.target == 'GRID':
+            row = layout.row(align=True)
+            row.prop(settings, 'grid_u')
+            row.prop(settings, 'grid_v')
+        elif settings.target == 'PIXEL':
+            image = context.space_data.image
+            if image and all(image.size):
+                layout.label(text='Image: {} × {}'.format(*image.size))
+            else:
+                row = layout.row(align=True)
+                row.prop(settings, 'resolution_x')
+                row.prop(settings, 'resolution_y')
+        elif settings.target == 'TILE':
+            layout.prop(settings, 'tile')
+        elif settings.target == 'BOX':
+            layout.prop(settings, 'box_min')
+            layout.prop(settings, 'box_max')
+            row = layout.row()
+            row.enabled = context.mode == 'EDIT_MESH'
+            row.operator('uv_tools.fit_target', text='From Selection', icon='SELECT_SET').operation = 'BOX'
+        elif settings.target == 'TRIM':
+            layout.template_list('UI_UL_list', 'uv_fit_trims', settings, 'trims', settings, 'trim_index', rows=2)
+            row = layout.row(align=True)
+            add = row.row()
+            add.enabled = context.mode == 'EDIT_MESH'
+            add.operator('uv_tools.fit_target', text='From Selection', icon='ADD').operation = 'ADD_TRIM'
+            row.operator('uv_tools.fit_target', text='', icon='REMOVE').operation = 'REMOVE_TRIM'
+            if settings.trim_index < len(settings.trims):
+                trim = settings.trims[settings.trim_index]
+                layout.prop(trim, 'name')
+                layout.prop(trim, 'minimum')
+                layout.prop(trim, 'maximum')
+        controls = layout.column()
+        controls.enabled = context.mode == 'EDIT_MESH'
+        for proportional in (False, True):
+            group = controls.box()
+            group.label(text='Proportional Fit' if proportional else 'Fit')
+            buttons = group.row(align=True)
+            buttons.enabled = settings.grouping != 'VERTEX'
+            buttons.scale_y = 1.8
+            buttons.scale_x = 1.7
+            for axis in ('U','BOTH','V'):
+                props = buttons.operator('uv_tools.fit_align', text='', icon_value=icon_id(('pfit_' if proportional else 'fit_') + axis.lower()), icon_scale=1.4)
+                props.action, props.axes, props.proportional = 'FIT', axis, proportional
+        align = controls.box()
+        align.label(text='Align')
+        def align_button(parent, anchor, axes='BOTH'):
+            props = parent.operator('uv_tools.fit_align', text='', icon_value=icon_id('align_' + (anchor.lower() if axes == 'BOTH' else axes.lower())), icon_scale=2.0)
+            props.action, props.anchor, props.axes = 'ALIGN', anchor, axes
+        for index, anchors in enumerate((('TL','T','TR'),('L','C','R'),('BL','B','BR'))):
+            row = align.row(align=True)
+            row.alignment = 'LEFT'
+            row.scale_y = 2.0
+            for column in range(5):
+                cell = row.column(align=True)
+                cell.ui_units_x = 2.0
+                if 1 <= column <= 3:
+                    align_button(cell, anchors[column-1])
+                elif index == 1:
+                    align_button(cell, 'C', 'U' if column == 0 else 'V')
+                else:
+                    cell.label(text='')
+
+
 class TexelPackIdListPanel(TexelPackSidebarPanel):
     """List of the group or stack ids in use, with selection and assignment."""
     kind = 'GROUP'
@@ -185,31 +342,60 @@ class TexelPackIdListPanel(TexelPackSidebarPanel):
     def draw_header(self, context):
         self.layout.prop(context.scene.uv_tools_texel_pack, self.show_prop, text="", icon='OVERLAY')
 
-    def draw(self, context):
-        from bl_operators.uv_tools_texel_pack import id_icon, island_state
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.mode == 'UV'
 
+    def draw(self, context):
+        from bl_operators.uv_tools_texel_pack import id_icon, group_entries, group_name, group_hidden
         layout = self.layout
-        entries = island_state(context)['lists'][self.kind]
-        value_prop = self.kind.lower()
-        col = layout.column(align=True)
-        if not entries:
-            col.label(text="No {:s}s".format(self.noun.lower()))
+        entries = group_entries(context, kind=self.kind)
+        editing = context.mode == 'EDIT_MESH'
+        layout.label(text='Editing Meshes' if editing else 'All Scene ' + self.noun + 's')
         for index, entry in sorted(entries.items()):
-            row = col.box().row(align=True)
-            row.label(text="{:s} {:d}".format(self.noun, index), icon=id_icon(index, self.kind))
-            sub = row.row(align=True)
-            sub.alignment = 'RIGHT'
-            sub.label(text="{:d} faces{:s}".format(entry['faces'], "  •" if entry['selected'] else ""))
-            props = row.operator("uv.texel_pack_constraint_select", text="", icon='RESTRICT_SELECT_OFF')
-            props.kind = self.kind
-            setattr(props, value_prop, index)
-            props = row.operator("uv.texel_pack_constraint_set", text="", icon='ADD')
-            props.kind = self.kind
-            setattr(props, value_prop, index)
+            row = layout.box().row(align=True)
+            row.label(text=group_name(context.scene, index, self.kind), icon=id_icon(index, self.kind))
+            def action(operator, icon):
+                props = row.operator(operator, text='', icon=icon)
+                props.kind, props.group = self.kind, index
+                if operator == 'uv_tools.group_membership':
+                    # UI invocations otherwise inherit New/Remove from the last run.
+                    props.operation = 'ASSIGN'
+                    props.choose = False
+            action('uv_tools.group_rename', 'GREASEPENCIL')
+            row.label(text=str(entry['faces']))
+            action('uv_tools.group_visibility', 'HIDE_ON' if group_hidden(context, index, self.kind) else 'HIDE_OFF')
+            if editing:
+                props = row.operator('uv.texel_pack_constraint_select', text='', icon='RESTRICT_SELECT_OFF')
+                props.kind = self.kind
+                setattr(props, self.kind.lower(), index)
+            else:
+                action('uv_tools.group_select_objects', 'RESTRICT_SELECT_OFF')
+            action('uv_tools.group_membership', 'ADD')
+            if self.kind == 'GROUP':
+                material_button = row.row(align=True)
+                material_button.operator_context = 'INVOKE_DEFAULT'
+                material_button.operator('uv_tools.group_material', text='', icon='MATERIAL').group = index
+            action('uv_tools.group_delete', 'TRASH')
+        if not entries:
+            layout.label(text='No ' + self.noun.lower() + 's')
         row = layout.row(align=True)
-        row.operator("uv_tools.texel_pack_new_id", text="New", icon='ADD').kind = self.kind
-        row.operator("uv.texel_pack_constraint_clear", text="Remove", icon='REMOVE').kind = self.kind
-        self.draw_extra(layout)
+        props = row.operator('uv_tools.group_membership', text='New', icon='ADD')
+        props.kind, props.operation = self.kind, 'NEW'
+        props.choose, props.group = False, 0
+        props = row.operator('uv_tools.group_membership', text='Assign…', icon='FORWARD')
+        props.kind, props.choose = self.kind, True
+        props.operation, props.group = 'ASSIGN', 0
+        props = layout.operator('uv_tools.group_membership', text='Remove Selection from Group', icon='REMOVE')
+        props.kind, props.operation = self.kind, 'REMOVE'
+        props.choose, props.group = False, 0
+        if self.kind == 'GROUP':
+            material_button = layout.row()
+            material_button.operator_context = 'INVOKE_DEFAULT'
+            material_button.operator('uv_tools.group_material', text='Assign Material by Group', icon='MATERIAL').group = 0
+        extra = layout.column()
+        extra.enabled = editing
+        self.draw_extra(extra)
 
     def draw_extra(self, layout):
         pass
@@ -217,6 +403,10 @@ class TexelPackIdListPanel(TexelPackSidebarPanel):
 
 class IMAGE_PT_texel_pack_groups(TexelPackIdListPanel, Panel):
     bl_label = "Groups"
+
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.mode == 'UV'
 
 
 class IMAGE_PT_texel_pack_stacks(TexelPackIdListPanel, Panel):
@@ -232,15 +422,27 @@ class IMAGE_PT_texel_pack_stacks(TexelPackIdListPanel, Panel):
         layout.label(text="Unassigned: stacked automatically", icon='INFO')
 
 
+class IMAGE_PT_texel_pack_search(TexelPackSidebarPanel, Panel):
+    bl_label = 'Heuristic Search'
+    bl_order = 20
+
+    def draw(self, context):
+        UVTOOLS_PT_texel_pack_search.draw_settings(self, self.layout, context.scene.uv_tools_texel_pack)
+
+
 classes = (
     UVTOOLS_PT_seam,
     UVTOOLS_PT_unwrap,
     UVTOOLS_PT_texel_pack,
     UVTOOLS_PT_texel_pack_density,
     UVTOOLS_PT_texel_pack_margin,
+    UVTOOLS_PT_texel_pack_search,
     UVTOOLS_PT_texel_pack_rotation,
     UVTOOLS_PT_texel_pack_target,
+    IMAGE_PT_texel_pack_transform,
+    IMAGE_PT_texel_pack_fit_align,
     IMAGE_PT_texel_pack_island,
     IMAGE_PT_texel_pack_groups,
     IMAGE_PT_texel_pack_stacks,
+    IMAGE_PT_texel_pack_search,
 )

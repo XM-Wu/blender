@@ -43,6 +43,8 @@ _modules = [
     "userpref",
     "uv_tools",
     "uv_tools_texel_pack",
+    "uv_tools_transform",
+    "uv_tools_fit_align",
     "uvcalc_follow_active",
     "uvcalc_lightmap",
     "uvcalc_transform",
@@ -83,6 +85,8 @@ def register():
     workplane.register()
     uv_tools.register()
     uv_tools_texel_pack.register()
+    uv_tools_fit_align.register()
+    uv_tools_transform.register()
 
 
 def unregister():
@@ -99,6 +103,8 @@ def unregister():
     project.unregister()
     workplane.unregister()
     uv_tools_texel_pack.unregister()
+    uv_tools_fit_align.unregister()
+    uv_tools_transform.unregister()
     uv_tools.unregister()
 
     for mod in reversed(_modules_loaded):

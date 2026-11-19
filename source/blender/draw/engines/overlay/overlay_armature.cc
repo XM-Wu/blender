@@ -1966,9 +1966,14 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   float3x3 rotation;
   vec_roll_to_mat3_normalized(direction, 0.0f, rotation.ptr());
   float4x4 link(rotation);
-  link.x_axis() *= 0.6f * length;
+  /* Size the base from the parent joint, independently of child placement. */
+  const EditBone *parent_edit = bone.is_editbone() ? bone.as_editbone()->parent : nullptr;
+  const float parent_size = parent_edit ? len_v3v3(parent_edit->head, parent_edit->tail) :
+                                          bone.posebone_bone()->parent->length;
+  const float width_scale = 0.6f * parent_size;
+  link.x_axis() *= width_scale;
   link.y_axis() = offset;
-  link.z_axis() *= 0.6f * length;
+  link.z_axis() *= width_scale;
   link.location() = float3(parent_origin);
   draw_octahedral_shape(ctx,
                         ctx->ob->object_to_world() * link,

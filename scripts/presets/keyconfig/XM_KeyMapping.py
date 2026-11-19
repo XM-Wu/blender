@@ -144,6 +144,11 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
          {"properties": [("release_confirm", True)]}),
     )
 
+    # Armatures take precedence over the inherited object-to-face-selection shortcut.
+    for name in ("Object Mode", "Armature", "Pose"):
+        _keymap_items(keyconfig_data, name).insert(
+            0, ("object.xm_enter_pose_mode", {"type": 'THREE', "value": 'PRESS'}, None))
+
     # Explicit edit toggle avoids per-object restore_mode history.
     mode_items = _keymap_items(keyconfig_data, "Object Non-modal")
     mode_items[:] = [

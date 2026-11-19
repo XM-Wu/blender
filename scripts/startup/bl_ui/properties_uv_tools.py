@@ -217,6 +217,9 @@ class IMAGE_PT_texel_pack_transform(TexelPackSidebarPanel, Panel):
         rotations.scale_y = 1.8
         for mode, label in (('ROTATE_CW', '90°'), ('ROTATE_CCW', '90°'), ('ROTATE_180', '180°')):
             rotations.operator('uv_tools.transform', text=label, icon_value=icon_id(mode.lower()), icon_scale=1.6).mode = mode
+        flips = orientation.row(align=True)
+        for mode, label in (('FLIP_U', 'Flip U'), ('FLIP_V', 'Flip V')):
+            flips.operator('uv_tools.transform', text=label).mode = mode
         box = layout.box()
         box.label(text='Straighten')
         buttons(box, (('STRAIGHT', 'IPO_LINEAR'), ('STRAIGHT_H', 'ALIGN_JUSTIFY'), ('STRAIGHT_V', 'ALIGN_FLUSH')))

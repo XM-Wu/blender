@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""UV orientation, edge-chain straightening and regular quad rectangularization."""
+"""UV orientation, mirror, edge-chain straightening and island rectangularization."""
 import math
 import bpy
 import bmesh
@@ -21,8 +21,10 @@ MODES = (
     ('STRAIGHT', 'Straighten', 'Straighten selected open edge chains between their endpoints'),
     ('STRAIGHT_H', 'Straighten Horizontally', 'Straighten selected open edge chains along U'),
     ('STRAIGHT_V', 'Straighten Vertically', 'Straighten selected open edge chains along V'),
-    ('RECT_H', 'Rectangularize Horizontally', 'Make regular quad islands rectangular, long side along U'),
-    ('RECT_V', 'Rectangularize Vertically', 'Make regular quad islands rectangular, long side along V'),
+    ('RECT_H', 'Rectangularize Horizontally', 'Rectify islands along U, pick four boundary corners, or straighten an open selection along U'),
+    ('RECT_V', 'Rectangularize Vertically', 'Rectify islands along V, pick four boundary corners, or straighten an open selection along V'),
+    ('FLIP_U', 'Flip U', 'Mirror selected UVs horizontally around their bounds center per island'),
+    ('FLIP_V', 'Flip V', 'Mirror selected UVs vertically around their bounds center per island'),
 )
 
 AXES = (('X','+X',''),('Y','+Y',''),('Z','+Z',''),
@@ -213,6 +215,154 @@ def rectangle(faces, layer):
     return loops, result
 
 
+def disk_rectangle(faces, layer, triangles, corners=None):
+    """Map a triangulated disk to a rectangular boundary with uniform barycentric weights."""
+    ids, loops, old = nodes_for(faces, layer)
+    tris = [tuple(ids[l] for l in tri) for face in faces for tri in triangles[face]]
+    directed = set()
+    graph = defaultdict(set)
+    signed_area = 0.0
+    for a, b, c in tris:
+        signed_area += (old[b] - old[a]).cross(old[c] - old[a]) * 0.5
+        for start, end in ((a, b), (b, c), (c, a)):
+            if start == end or (start, end) in directed:
+                raise ValueError('Cut the non-manifold or inconsistently wound UV island first')
+            directed.add((start, end))
+            graph[start].add(end)
+            graph[end].add(start)
+    boundary = [(a, b) for a, b in directed if (b, a) not in directed]
+    successor = dict(boundary)
+    if (len(successor) != len(boundary) or len(boundary) < 3 or
+            set(successor) != set(successor.values()) or
+            len(old) - sum(map(len, graph.values())) // 2 + len(tris) != 1):
+        raise ValueError('Rect needs a disk with one closed UV boundary')
+    ring = []
+    node = min(successor)
+    while node in successor:
+        ring.append(node)
+        node = successor.pop(node)
+    if successor or node != ring[0]:
+        raise ValueError('Cut a seam to give the UV island a single boundary')
+    if abs(signed_area) < 1e-16:
+        raise ValueError('Island has zero signed UV area')
+
+    lengths = []
+    for i, node in enumerate(ring):
+        nxt = ring[(i + 1) % len(ring)]
+        lengths.append((loops[node][0].vert.co - loops[nxt][0].vert.co).length)
+    if min(lengths) <= 0:
+        raise ValueError('Boundary contains a zero-length mesh edge')
+    if corners is None:
+        # A degree-two ear would collapse if both its edges landed on one side.
+        def corner_priority(i):
+            n = ring[i]
+            incoming = old[ring[i-1]] - old[n]
+            outgoing = old[ring[(i+1) % len(ring)]] - old[n]
+            return (len(graph[n]) != 2, incoming.angle(outgoing, math.pi), i)
+        indices = sorted(sorted(range(len(ring)), key=corner_priority)[:4])
+    else:
+        indices = [i for i, n in enumerate(ring) if n in corners]
+        if len(indices) != 4:
+            raise ValueError('Select four distinct corners on the island boundary')
+
+    sides = []
+    for i, start in enumerate(indices):
+        end = indices[(i + 1) % len(indices)]
+        sides.append(list(range(start, end)) if end > start else
+                     list(range(start, len(ring))) + list(range(end)))
+    spans = [sum(lengths[i] for i in side) for side in sides]
+    if len(sides) == 3:
+        # Three boundary vertices admit a right triangle without splitting a UV.
+        # Keep the longest mesh edge opposite the right angle.
+        longest = spans.index(max(spans))
+        shift = (longest + 2) % 3
+        sides = sides[shift:] + sides[:shift]
+        spans = spans[shift:] + spans[:shift]
+        width, height = spans[0], spans[2]
+        box = ((0, 0), (width, 0), (0, height))
+        box_area = width * height / 2
+    else:
+        width, height = (spans[0] + spans[2]) / 2, (spans[1] + spans[3]) / 2
+        box = ((0, 0), (width, 0), (width, height), (0, height))
+        box_area = width * height
+    scale = math.sqrt(abs(signed_area) / box_area)
+    box = [Vector((x * scale, y * math.copysign(scale, signed_area))) for x, y in box]
+    result = {}
+    for k, side in enumerate(sides):
+        distance = 0.0
+        for i in side:
+            result[ring[i]] = box[k].lerp(box[(k+1) % len(box)], distance / spans[k])
+            distance += lengths[i]
+
+    interior = sorted(set(old) - result.keys())
+    if interior:
+        # Dirichlet graph Laplacian. Store only neighbor indices, even for large islands.
+        import numpy as np
+        index = {n: i for i, n in enumerate(interior)}
+        rows, cols = [], []
+        rhs = np.zeros((len(interior), 2))
+        degree = np.array([len(graph[n]) for n in interior])
+        for i, n in enumerate(interior):
+            for neighbor in graph[n]:
+                if neighbor in index:
+                    rows.append(i)
+                    cols.append(index[neighbor])
+                else:
+                    rhs[i] += result[neighbor]
+        rows = np.asarray(rows, dtype=np.intp)
+        cols = np.asarray(cols, dtype=np.intp)
+        solution = np.zeros_like(rhs)
+        for axis in range(2):
+            residual = rhs[:, axis].copy()
+            direction = residual.copy()
+            norm = residual @ residual
+            tolerance = norm * 1e-20
+            for _ in range(len(interior)):
+                if norm <= tolerance:
+                    break
+                product = degree * direction - np.bincount(rows, weights=direction[cols], minlength=len(interior))
+                step = norm / (direction @ product)
+                solution[:, axis] += step * direction
+                residual -= step * product
+                next_norm = residual @ residual
+                direction = residual + (next_norm / norm) * direction
+                norm = next_norm
+            if not math.isfinite(norm) or norm > tolerance:
+                raise ValueError('Interior UV solve did not converge')
+        result.update((n, Vector(uv)) for n, uv in zip(interior, solution))
+    for a, b, c in tris:
+        if (result[b] - result[a]).cross(result[c] - result[a]) * signed_area <= 0:
+            raise ValueError('These corners collapse a face; select four other boundary UVs or split the island')
+    offset = (sum(old.values(), Vector((0, 0))) - sum(result.values(), Vector((0, 0)))) / len(old)
+    return loops, {n: p + offset for n, p in result.items()}
+
+
+def transform_selection(ts, bm, faces, ids, edge_selected, face_selected):
+    sync_mesh = ts.use_uv_select_sync and not bm.uv_select_sync_valid
+    select_mode = ts.uv_select_mode
+    if ts.use_uv_select_sync:
+        select_mode = ('FACE' if ts.mesh_select_mode[2] else
+                       'EDGE' if ts.mesh_select_mode[1] else 'VERTEX')
+    chosen = set()
+    edges = set()
+    for face in faces:
+        if face.hide or (not ts.use_uv_select_sync and not face.select):
+            continue
+        for loop in face.loops:
+            a, b = ids[loop], ids[loop.link_loop_next]
+            if select_mode == 'EDGE':
+                if edge_selected(loop):
+                    edges.add(tuple(sorted((a, b))))
+                    chosen.update((a, b))
+            elif select_mode == 'VERTEX':
+                selected = loop.vert.select if sync_mesh else loop.uv_select_vert
+                if selected:
+                    chosen.add(a)
+            elif face_selected(face, False):
+                chosen.add(a)
+    return select_mode, chosen, edges
+
+
 class UVTOOLS_OT_transform(bpy.types.Operator):
     bl_idname = 'uv_tools.transform'
     bl_label = 'UV Transform'
@@ -248,20 +398,53 @@ class UVTOOLS_OT_transform(bpy.types.Operator):
                 face_selected = is_face_uv_selected_fn_from_context(context.scene, bm)
                 edge_selected = is_loop_edge_uv_selected_fn_from_context(context.scene, bm)
                 triangles_by_face = defaultdict(list)
-                if self.mode == 'ORIENT_3D':
+                if self.mode == 'ORIENT_3D' or self.mode.startswith('RECT'):
                     for tri in bm.calc_loop_triangles():
                         triangles_by_face[tri[0].face].append(tri)
                 for faces in bmesh_linked_uv_islands(bm, layer):
-                    if any(f.hide for f in faces):
+                    if self.mode.startswith('FLIP'):
+                        faces = [f for f in faces if not f.hide and
+                                 (context.scene.tool_settings.use_uv_select_sync or f.select)]
+                    elif any(f.hide for f in faces):
                         continue
-                    if self.mode.startswith('STRAIGHT'):
+                    mode = self.mode
+                    corners = None
+                    if mode.startswith(('RECT', 'FLIP')):
                         ids, nodes, points = nodes_for(faces, layer)
+                        select_mode, chosen, edges = transform_selection(
+                            context.scene.tool_settings, bm, faces, ids, edge_selected, face_selected)
+                        if not chosen:
+                            continue
+                        if mode.startswith('FLIP'):
+                            axis = int(mode == 'FLIP_V')
+                            middle_twice = min(points[n][axis] for n in chosen) + max(points[n][axis] for n in chosen)
+                            for n in chosen:
+                                value = points[n].copy()
+                                value[axis] = middle_twice - value[axis]
+                                plans.extend((loop, layer, value) for loop in nodes[n])
+                            continue
+                        if select_mode in {'EDGE', 'VERTEX'}:
+                            counts = defaultdict(int)
+                            for loop, a in ids.items():
+                                b = ids[loop.link_loop_next]
+                                counts[tuple(sorted((a, b)))] += 1
+                            border = {edge for edge, count in counts.items() if count == 1}
+                            if select_mode == 'VERTEX':
+                                edges = {edge for edge in counts if all(n in chosen for n in edge)}
+                            if select_mode == 'VERTEX' and len(chosen) == 4 and chosen <= {n for e in border for n in e}:
+                                corners = chosen
+                            elif edges != border and edges != set(counts):
+                                if not edges or chosen != {n for e in edges for n in e}:
+                                    raise ValueError('Select a connected point chain or four boundary corners')
+                                mode = 'STRAIGHT' + mode[-2:]
+                    if mode.startswith('STRAIGHT'):
                         graph = defaultdict(set)
-                        for face in faces:
-                            for loop in face.loops:
-                                if edge_selected(loop):
-                                    a, b = ids[loop], ids[loop.link_loop_next]
-                                    graph[a].add(b); graph[b].add(a)
+                        if self.mode.startswith('STRAIGHT'):
+                            ids, nodes, points = nodes_for(faces, layer)
+                            edges = {(ids[l], ids[l.link_loop_next]) for l in ids if edge_selected(l)}
+                        for a, b in edges:
+                            graph[a].add(b)
+                            graph[b].add(a)
                         remaining = set(graph)
                         while remaining:
                             component, todo = set(), [next(iter(remaining))]
@@ -281,9 +464,9 @@ class UVTOOLS_OT_transform(bpy.types.Operator):
                             if distance < 1e-12:
                                 raise ValueError('Chain endpoints overlap')
                             direction = (b-a).normalized()
-                            if self.mode == 'STRAIGHT_H':
+                            if mode == 'STRAIGHT_H':
                                 direction = Vector((1 if b.x >= a.x else -1, 0))
-                            elif self.mode == 'STRAIGHT_V':
+                            elif mode == 'STRAIGHT_V':
                                 direction = Vector((0, 1 if b.y >= a.y else -1))
                             lengths = [(points[y]-points[x]).length for x, y in zip(chain, chain[1:])]
                             total, offset = sum(lengths), 0.0
@@ -292,9 +475,15 @@ class UVTOOLS_OT_transform(bpy.types.Operator):
                                 value = start + direction*(distance*offset/total)
                                 plans.extend((loop, layer, value) for loop in nodes[node])
                                 if i < len(lengths): offset += lengths[i]
-                    elif any(face_selected(f, True) for f in faces):
+                    elif mode.startswith('RECT') or any(face_selected(f, True) for f in faces):
                         if self.mode.startswith('RECT'):
-                            nodes, points = rectangle(faces, layer)
+                            if corners is None and all(len(f.verts) == 4 for f in faces):
+                                try:
+                                    nodes, points = rectangle(faces, layer)
+                                except ValueError:
+                                    nodes, points = disk_rectangle(faces, layer, triangles_by_face)
+                            else:
+                                nodes, points = disk_rectangle(faces, layer, triangles_by_face, corners)
                         else:
                             _, nodes, points = nodes_for(faces, layer)
                         ordered = list(points)
@@ -318,6 +507,11 @@ class UVTOOLS_OT_transform(bpy.types.Operator):
                             c, s = math.cos(angle), math.sin(angle)
                             result = [center + Vector((c*(p.x-center.x)-s*(p.y-center.y),
                                                        s*(p.x-center.x)+c*(p.y-center.y))) for p in values]
+                        elif mode.startswith('RECT'):
+                            width = max(p.x for p in values) - min(p.x for p in values)
+                            height = max(p.y for p in values) - min(p.y for p in values)
+                            turn = width > height if mode == 'RECT_V' else height > width
+                            result = rotate_points(values, math.pi / 2) if turn else values
                         else:
                             result = orient(values, self.mode.endswith('_V'))
                         plans.extend((loop, layer, value) for n, value in zip(ordered, result) for loop in nodes[n])

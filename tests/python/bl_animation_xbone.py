@@ -47,6 +47,7 @@ def verify_edit_rotation(rig):
                                             rest[driver].to_3x3()).to_quaternion()
             else:
                 bpy.ops.transform.rotate(value=0.7, orient_axis='Y', orient_type='LOCAL')
+                near(parent.matrix.col[1], rest[driver].col[1])
             delta = parent.matrix @ rest[driver].inverted()
             assert abs(delta.to_quaternion().angle - 0.7) < 0.0001
             near(parent.head, rest[driver].translation)

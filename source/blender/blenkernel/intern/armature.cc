@@ -544,6 +544,10 @@ static void fix_empty_bone_names(bArmature &armature)
 static void armature_blend_read_data(BlendDataReader *reader, ID *id)
 {
   bArmature *arm = id_cast<bArmature *>(id);
+  /* Older files predate the per-armature XBone display multiplier. */
+  if (arm->xbone_thickness == 0.0f) {
+    arm->xbone_thickness = 1.0f;
+  }
   BLO_read_struct_list(reader, Bone, &arm->bonebase);
   arm->bonehash = nullptr;
   arm->edbo = nullptr;

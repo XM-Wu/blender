@@ -63,6 +63,8 @@ class DATA_PT_display(ArmatureButtonsPanel, Panel):
         arm = context.armature
 
         layout.prop(arm, "display_type", text="Display As")
+        if arm.is_xbone:
+            layout.prop(arm, "xbone_thickness", text="Thickness")
 
         col = layout.column(heading="Show")
         col.prop(arm, "show_names", text="Names")

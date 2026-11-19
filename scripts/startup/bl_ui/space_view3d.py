@@ -788,6 +788,9 @@ class VIEW3D_HT_header(Header):
             else:
                 layout.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
 
+        if obj and obj.type == 'ARMATURE' and object_mode in {'OBJECT', 'EDIT', 'POSE'}:
+            layout.prop(obj, "show_in_front", text="In Front", icon='XRAY', toggle=True)
+
         if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
             layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",
                         icon='CON_CHILDOF', toggle=True)

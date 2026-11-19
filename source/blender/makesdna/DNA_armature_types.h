@@ -488,6 +488,9 @@ struct bArmature {
 
   /** Relative position of the axes on the bone, from head (0.0f) to tail (1.0f). */
   float axes_position = 0;
+  /** Uniform display multiplier for XBone pivots and links. */
+  float xbone_thickness = 1.0f;
+  char _pad_xbone[4] = {};
 
   /** Keep last, for consistency with the position of other DNA runtime structures. */
   bke::bArmature_Runtime *runtime = nullptr;

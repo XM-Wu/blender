@@ -93,7 +93,7 @@ class XMEnterPoseMode(Operator):
 
 
 class XMEditModeToggle(Operator):
-    """Toggle edit mode without relying on the object's previous mode"""
+    """Leave Pose Mode for Object Mode, otherwise toggle Edit Mode"""
     bl_idname = "object.xm_edit_mode_toggle"
     bl_label = "XM Toggle Edit Mode"
     bl_options = set()
@@ -118,7 +118,9 @@ class XMEditModeToggle(Operator):
         }
         result = {'CANCELLED'}
         try:
-            if bpy.ops.object.editmode_toggle.poll():
+            if context.mode == 'POSE':
+                result = bpy.ops.object.mode_set(mode='OBJECT')
+            elif bpy.ops.object.editmode_toggle.poll():
                 result = bpy.ops.object.editmode_toggle('EXEC_DEFAULT')
             else:
                 record["reason"] = "editmode_toggle poll failed"

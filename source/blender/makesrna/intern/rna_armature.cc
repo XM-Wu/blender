@@ -2456,6 +2456,13 @@ static void rna_def_armature(BlenderRNA *brna)
   RNA_def_property_update(prop, 0, "rna_Armature_redraw_data");
   RNA_def_property_flag(prop, PROP_LIB_EXCEPTION);
 
+  prop = RNA_def_property(srna, "xbone_thickness", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_range(prop, 0.01f, 100.0f);
+  RNA_def_property_ui_range(prop, 0.05f, 4.0f, 1, 2);
+  RNA_def_property_ui_text(prop, "XBone Thickness", "Scale the display width of all joints and links");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, 0, "rna_Armature_redraw_data");
+
   prop = RNA_def_property(srna, "axes_position", PROP_FLOAT, PROP_FACTOR);
   RNA_def_property_float_sdna(prop, nullptr, "axes_position");
   RNA_def_property_range(prop, 0.0, 1.0);

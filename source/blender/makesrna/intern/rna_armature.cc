@@ -62,8 +62,10 @@ constexpr int COLOR_SETS_MAX_THEMED_INDEX = 20;
 
 #  include <fmt/format.h>
 
+#  include "BLI_math_matrix_c.hh"
 #  include "BLI_math_rotation_c.hh"
 #  include "BLI_math_vector_c.hh"
+#  include "BLI_multi_value_map.hh"
 #  include "BLI_string.hh"
 #  include "BLI_string_utf8.hh"
 
@@ -941,10 +943,36 @@ static void rna_EditBone_joint_orientation_get(PointerRNA *ptr, float *value)
 
 static void rna_EditBone_joint_orientation_set(PointerRNA *ptr, const float *value)
 {
+  EditBone *joint = static_cast<EditBone *>(ptr->data);
+  bArmature *arm = id_cast<bArmature *>(ptr->owner_id);
+  float4x4 before;
+  ED_armature_ebone_to_mat4(joint, before.ptr());
   float frame[3][3], quaternion[4];
   normalize_qt_qt(quaternion, value);
   quat_to_mat3(frame, quaternion);
-  ED_armature_ebone_from_mat3(static_cast<EditBone *>(ptr->data), frame);
+  ED_armature_ebone_from_mat3(joint, frame);
+
+  if ((arm->flag & ARM_XBONE) && !(arm->flag & ARM_XBONE_ROTATE_SELECTED_ONLY)) {
+    float4x4 after, inverse_before;
+    ED_armature_ebone_to_mat4(joint, after.ptr());
+    invert_m4_m4(inverse_before.ptr(), before.ptr());
+    const float4x4 delta = after * inverse_before;
+    MultiValueMap<EditBone *, EditBone *> children;
+    for (EditBone &child : *arm->edbo) {
+      if (child.parent && !(child.flag & BONE_EDITMODE_LOCKED)) {
+        children.add(child.parent, &child);
+      }
+    }
+    Vector<EditBone *> pending(children.lookup(joint));
+    while (!pending.is_empty()) {
+      EditBone *child = pending.pop_last();
+      float4x4 child_frame;
+      ED_armature_ebone_to_mat4(child, child_frame.ptr());
+      child_frame = delta * child_frame;
+      ED_armature_ebone_from_mat4(child, child_frame.ptr());
+      pending.extend(children.lookup(child));
+    }
+  }
 }
 
 static float rna_EditBone_length_get(PointerRNA *ptr)
@@ -2339,6 +2367,14 @@ static void rna_def_armature(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_LIB_EXCEPTION);
 
   /* flag */
+  prop = RNA_def_property(srna, "use_xbone_rotate_children", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "flag", ARM_XBONE_ROTATE_SELECTED_ONLY);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Rotate Child Joints", "Rotate the joint hierarchy when editing an XBone rest pose");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
   prop = RNA_def_property(srna, "is_xbone", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "flag", ARM_XBONE);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);

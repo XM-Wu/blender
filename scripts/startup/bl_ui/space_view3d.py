@@ -788,6 +788,10 @@ class VIEW3D_HT_header(Header):
             else:
                 layout.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
 
+        if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
+            layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",
+                        icon='CON_CHILDOF', toggle=True)
+
         # Snap
         show_snap = False
         if obj is None:

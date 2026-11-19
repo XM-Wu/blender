@@ -21,6 +21,47 @@ def near(actual, expected):
     assert (Vector(actual) - Vector(expected)).length < 0.0001, (actual, expected)
 
 
+def verify_edit_rotation(rig):
+    arm = rig.data
+    assert arm.use_xbone_rotate_children
+    joints = arm.edit_bones
+    rest = {j.name: j.matrix.copy() for j in joints}
+    area = next(a for a in bpy.context.window.screen.areas if a.type == 'VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    with bpy.context.temp_override(area=area, region=region):
+        for driver, selected, follow, numeric in (
+            ("Root", {"Root"}, True, False),
+            ("Trunk", {"Trunk", "Branch"}, True, False),
+            ("Trunk", {"Trunk"}, False, False),
+            ("Trunk", {"Trunk"}, True, True),
+        ):
+            for j in joints:
+                j.matrix = rest[j.name]
+                j.select = j.select_head = j.select_tail = j.name in selected
+            arm.use_xbone_rotate_children = follow
+            parent = joints[driver]
+            joints.active = parent
+            bpy.context.scene.tool_settings.transform_pivot_point = 'ACTIVE_ELEMENT'
+            if numeric:
+                parent.joint_orientation = (Matrix.Rotation(0.7, 3, 'Z') @
+                                            rest[driver].to_3x3()).to_quaternion()
+            else:
+                bpy.ops.transform.rotate(value=0.7, orient_axis='Y', orient_type='LOCAL')
+            delta = parent.matrix @ rest[driver].inverted()
+            assert abs(delta.to_quaternion().angle - 0.7) < 0.0001
+            near(parent.head, rest[driver].translation)
+            affected = selected | ({j.name for j in parent.children_recursive} if follow else set())
+            for j in joints:
+                expected = delta @ rest[j.name] if j.name in affected else rest[j.name]
+                for actual_row, expected_row in zip(j.matrix, expected):
+                    assert (actual_row - expected_row).length < 0.0001, (
+                        driver, selected, follow, numeric, j.name, actual_row, expected_row)
+            assert {j.name for j in joints if j.select} == selected
+    for j in joints:
+        j.matrix = rest[j.name]
+    bpy.context.scene.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
+
+
 def make_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.object.armature_add()
@@ -65,6 +106,7 @@ def make_scene():
     branch.joint_position = (3, 0, 2)
     near(branch.joint_orientation, frame)
     branch.joint_position = (2, 0, 2)
+    verify_edit_rotation(rig)
     bpy.ops.object.mode_set(mode='POSE')
     for name in ("Branch", "Trunk"):
         joint = rig.pose.bones[name]

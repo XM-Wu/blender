@@ -66,6 +66,7 @@ enum eArmature_Flag : int {
   /** Other objects are used for visualizing various states (hack for efficient updates). */
   ARM_HAS_VIZ_DEPS = (1 << 14),
   ARM_XBONE = (1 << 15),
+  ARM_XBONE_ROTATE_SELECTED_ONLY = (1 << 16),
 };
 ENUM_OPERATORS(eArmature_Flag);
 

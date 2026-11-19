@@ -63,9 +63,10 @@ static const EnumPropertyItem fbx_vertex_colors_mode[] = {
      "Vertex colors in the file are in linear color space"},
     {0, nullptr, 0, nullptr, nullptr}};
 
-static wmOperatorStatus wm_fbx_import_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus fbx_import_exec(bContext *C, wmOperator *op, const bool use_xbone)
 {
   FBXImportParams params;
+  params.use_xbone = use_xbone;
   params.global_scale = RNA_float_get(op->ptr, "global_scale");
   params.use_custom_normals = RNA_boolean_get(op->ptr, "use_custom_normals");
   params.use_custom_props = RNA_boolean_get(op->ptr, "use_custom_props");
@@ -99,6 +100,16 @@ static wmOperatorStatus wm_fbx_import_exec(bContext *C, wmOperator *op)
   ED_outliner_select_sync_from_object_tag(C);
 
   return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus wm_fbx_import_exec(bContext *C, wmOperator *op)
+{
+  return fbx_import_exec(C, op, false);
+}
+
+static wmOperatorStatus wm_xbone_fbx_import_exec(bContext *C, wmOperator *op)
+{
+  return fbx_import_exec(C, op, true);
 }
 
 static bool wm_fbx_import_check(bContext * /*C*/, wmOperator * /*op*/)
@@ -244,6 +255,15 @@ void WM_OT_fbx_import(wmOperatorType *ot)
   /* Only show `.fbx` files by default. */
   prop = RNA_def_string(ot->srna, "filter_glob", "*.fbx", 0, "Extension Filter", "");
   RNA_def_property_flag(prop, PROP_HIDDEN);
+}
+
+void WM_OT_xbone_fbx_import(wmOperatorType *ot)
+{
+  WM_OT_fbx_import(ot);
+  ot->name = "Import FBX as XBone";
+  ot->description = "Import an FBX scene using XBone joints with the source bind orientations";
+  ot->idname = "WM_OT_xbone_fbx_import";
+  ot->exec = wm_xbone_fbx_import_exec;
 }
 
 namespace ed::io {

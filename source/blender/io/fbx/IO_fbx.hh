@@ -46,6 +46,7 @@ struct FBXImportParams {
   bool use_custom_props = true;
   bool props_enum_as_string = true;
   bool ignore_leaf_bones = false;
+  bool use_xbone = false;
 
   bool use_anim = true;
   float anim_offset = 1.0f;

@@ -377,6 +377,14 @@ class TOPBAR_MT_templates_more(Menu):
         bpy.types.TOPBAR_MT_file_new.draw_ex(self.layout, context, use_more=True)
 
 
+class TOPBAR_MT_file_import_xbone(Menu):
+    bl_label = "XBone"
+
+    def draw(self, _context):
+        self.layout.operator_context = 'INVOKE_DEFAULT'
+        self.layout.operator("wm.xbone_fbx_import", text="FBX (.fbx)")
+
+
 class TOPBAR_MT_file_import(Menu):
     bl_idname = "TOPBAR_MT_file_import"
     bl_label = "Import"
@@ -411,6 +419,7 @@ class TOPBAR_MT_file_import(Menu):
         if bpy.app.build_options.io_fbx:
             self.layout.operator(
                 "wm.fbx_import", text=FileHandler.label_with_extensions("IO_FH_fbx"))
+            self.layout.menu("TOPBAR_MT_file_import_xbone", icon='ARMATURE_DATA')
 
 
 class TOPBAR_MT_file_export(Menu):
@@ -902,6 +911,7 @@ classes = (
     TOPBAR_MT_file_defaults,
     TOPBAR_MT_file_project,
     TOPBAR_MT_templates_more,
+    TOPBAR_MT_file_import_xbone,
     TOPBAR_MT_file_import,
     TOPBAR_MT_file_export,
     TOPBAR_MT_file_external_data,

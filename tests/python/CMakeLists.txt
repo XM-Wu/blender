@@ -769,6 +769,15 @@ add_blender_test(
   --testdir "${TEST_SRC_DIR}/animation"
 )
 
+if(WITH_IO_FBX)
+  add_blender_test(
+    bl_io_xbone_fbx
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_io_xbone_fbx.py
+    --
+    "${TEST_SRC_DIR}/io_tests/fbx"
+  )
+endif()
+
 add_blender_test(
   bl_animation_xbone
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_xbone.py

@@ -4596,7 +4596,13 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop,
       "Select Through",
-      "Box, circle and lasso select occluded mesh elements with temporary X-Ray display");
+      "Box and lasso select occluded mesh elements with temporary X-Ray display");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
+  prop = RNA_def_property(srna, "mesh_circle_select_through", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "mesh_circle_select_through", 1);
+  RNA_def_property_ui_text(
+      prop, "Select Through", "Circle select occluded mesh elements with temporary X-Ray display");
   RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
 
   prop = RNA_def_property(srna, "mesh_select_backfacing", PROP_BOOLEAN, PROP_NONE);

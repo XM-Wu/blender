@@ -438,14 +438,14 @@ class _defs_transform:
 class _defs_view3d_select:
 
     @staticmethod
-    def draw_select_through_settings(context, layout):
+    def draw_select_through_settings(context, layout, through_property="mesh_select_through"):
         if context.mode != 'EDIT_MESH':
             return
         settings = context.tool_settings
         row = layout.row(align=True)
-        row.prop(settings, "mesh_select_through", icon='XRAY', toggle=True)
+        row.prop(settings, through_property, icon='XRAY', toggle=True)
         sub = row.row(align=True)
-        sub.active = settings.mesh_select_through
+        sub.active = getattr(settings, through_property)
         sub.prop(settings, "mesh_select_backfacing", icon='NORMALS_FACE', toggle=True)
 
     @ToolDef.from_fn
@@ -499,7 +499,7 @@ class _defs_view3d_select:
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
-            _defs_view3d_select.draw_select_through_settings(context, row)
+            _defs_view3d_select.draw_select_through_settings(context, row, "mesh_circle_select_through")
             layout.prop(props, "radius")
 
         def draw_cursor(_context, tool, xy):

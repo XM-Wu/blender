@@ -63,7 +63,7 @@
 
 **XM KeyMapping**
 
-它和 Industry Compatible 相同，只是去掉了各模式里 `builtin.annotate` 的 **D** 快捷键。Annotate 仍可从工具栏选用。Ctrl+D 等带修饰键的绑定保留。
+XM 沿用 Industry Compatible 的鼠标操作，并去掉了各模式里 `builtin.annotate` 的 **D** 快捷键。Annotate 仍可从工具栏选用。Ctrl+D 等带修饰键的绑定保留。
 
 这套映射额外有这些网格编辑操作：
 
@@ -71,9 +71,26 @@
 - **Ctrl+中键**沿法线缩放（Shrink/Fatten），松开确认。不依赖当前是哪个工具。
 - **Shift+V** 开始顶点/边滑动。先尝试 Edge Slide，不行再 Vertex Slide。变换模态里原来的 `VERT_EDGE_SLIDE` 快捷键已去掉，只保留这一组 **Shift+V**。
 
+- 网格编辑模式下，**Delete** 按当前点、边、面选择模式直接溶解所选几何（`mesh.dissolve_mode`），**Backspace** 打开原生删除菜单。这两个键位由 XM 预设提供，无需 Interactive Tools 插件。
+- **Y** 切换到 Target Weld，**S** 调出 Loop Cut 工具组。工具组快捷键默认返回上次使用的子工具，可在 XM 预设中关闭 **Remember Last Tool in Group**。
+- **A** 在物体模式打开 Apply 菜单，在网格编辑模式应用物体变换；**Alt+F** 显示全部物体。**4** 在物体与编辑模式间切换。
+- 在网格或 UV 编辑中，**C** 标记接缝，**Shift+C** 清除接缝。XM 会处理 X-Ray Selection Tools 圆选快捷键对这两个键位的占用。
+
 已经加载过的用户键位是一份拷贝。改完后要在偏好设置里重新选择 XM KeyMapping，新快捷键才会写进去。
 
 默认 Blender 键位没有把 D 做成 Annotate 工具切换，D 仍是 Annotate 笔画的修饰键。3D 视图里额外绑了 `view3d.gizmo_pivot_edit`（D 按下和松开，`any`），只刷新视图并继续传递事件，所以点中 gizmo 时枢轴编辑优先生效，Annotate 笔画仍然可用。
+
+## 穿透选择与镜像边标记
+
+网格编辑模式下，框选、圈选和套索工具的顶栏提供 **Select Through**。开启后，拖选期间临时显示 X-Ray，可以选到被遮挡的几何；确认或取消后恢复之前的视口显示。关闭 **Select Backfacing** 可在穿透选择时排除背向元素；手动隐藏的几何仍跳过。
+
+圈选单独保存 **Select Through**，框选和套索沿用原来的设置；**Select Backfacing** 仍由三个工具共用。打开旧文件时，圈选继承文件里原有的穿透状态，之后可以分别调整并保存。例如，可以用框选选穿模型，再用圈选只选可见表面。
+
+网格编辑对称也适用于标记和清除 **Seam**、**Sharp**。启用多个对称轴时，可见的镜像边会一起更新。
+
+## 临时工作平面
+
+在网格编辑模式下选中活动面，打开 3D 视图侧栏 **View → Temporary World Coordinates → Set Workplane from Face**。工作平面以面中心为原点、面法线为 Z 轴，视口网格、导航和新建物体对齐到这一平面。**View Workplane from Above** 切到工作平面顶视图，**Restore Defaults** 恢复进入前的视图、游标、变换朝向和枢轴设置。
 
 ## 默认挤出
 
@@ -83,9 +100,9 @@
 
 - 面选择：沿各面法线挤出，侧壁间距均匀（`mesh.omni_outset_face`）。
 - 边选择：边等距向外挤出（`mesh.omni_outset_edge`）。
-- 只有顶点选择：没有对应的 outset，退回原来的 `view3d.edit_mesh_extrude_move_normal`。
+- 顶点模式中，完整选中的面或边也能走对应的挤出；只剩孤立选点时退回 `view3d.edit_mesh_extrude_move_normal`。
 
-拖动时对角线位移同时改挤出距离。按住 **Ctrl** 改的是向外偏移，按住 **Shift** 降低拖动灵敏度。右键或 Esc 取消并还原网格。工具设置里可以开关按选择尺寸自适应拖动，以及 HUD 和字号。设置记在 `WindowManager.omni_outset` 上，不是插件偏好。
+工具栏的 **Extrude** 使用原生变换手柄。拖动手柄先创建挤出几何，再按手柄约束平移；启用网格对称时会处理镜像侧。由菜单或快捷键调用的 Smart Face / Edge Extrude 还可调节偏移、分段和锥度。
 
 默认键位的 **E**，以及 Industry Compatible 的 **Ctrl+E**，都指向这个挤出。Alt+E 挤出菜单、边菜单和面菜单的第一项也是它。原来的区域挤出还在工具组里，标签是 **Extrude Region**。
 
@@ -105,7 +122,7 @@
 Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap 和 Texel Packing 模块。操作按钮使用大号方形彩色图标；`UILayout.operator()` 增加独立的 `icon_scale` 参数，默认值为 1，原有按钮大小不变。
 
 - **Mark Seam / Stitch UVs**：标记接缝、按当前顶点或边选择模式缝合；UV 已连续时清除选中接缝，没有可缝合的边界时提示。支持撤销、重做。
-- **Unwrap**：调用 Blender 原生展开操作。UV Tools 移除旧 Packing 入口，仅保留 Texel Packing；原生 Pack 仍可从 Blender 原菜单使用。
+- **Unwrap**：调用 Blender 原生展开操作。UV Tools 提供 Texel Packing 和 Pack to Others，原生 Pack Islands 保留在 UV 菜单中。
 - **诊断显示**：入口位于 UV 编辑器顶栏，不在 UV Tools 中重复显示。UV 与模型同步着色，底部统计按模型表面积加权。
   - **Distortion（默认）**：`sqrt((面 UV 面积 / 面 3D 面积) / (岛 UV 总面积 / 岛 3D 总面积))`。先汇总原始多边形的三角形面积，按 UV 连通岛归一化。1 为中性，红色相对压缩，蓝色相对膨胀；整体等比缩放不改变结果。该公式与本机 RizomUV 2027 的九组平面实验匹配，但不宣称覆盖其所有退化或非平面处理细节。
   - **Shape Stretch**：雅可比最大/最小主伸缩比，1 为保形，灰→黄→红表示方向性畸变增强；能发现面积不变的非等比拉伸，不检测镜像方向。
@@ -114,7 +131,7 @@ Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap 和 Tex
 - Sync Selection 使用 UV 编辑器原生入口，不在 UV Tools 内重复放置。
 - UV 顶栏和选择菜单提供点、边、面、岛四个互斥模式。默认与工业兼容（含 XM）键位的 1/2/3/4 统一调用 `uv_tools.select_mode`；切到点、边、面时清除岛选择标记，同步模式同时更新网格和 UV 选择类型。启动时迁移旧 UV Editor 的无修饰键模式绑定，避免只改变 3D 模式。
 - 打包算法的设计要点、原生实现现状与改进方向见 [doc/uv_pack_design.md](doc/uv_pack_design.md)。
-- **Texel Packing**（`uv.texel_pack`）：UV Tools 中唯一的打包入口，原生 Pack 算法与原菜单入口不变。
+- **Texel Packing**（`uv.texel_pack`）：按所选纹素密度策略安排 UV 岛。
   - 在纹素栅格上打包，间距、边缘留白都按像素计算，支持像素对齐。
   - TD 有三种模式：统一并填满、保持相对比例、指定 px/m；可设 TD 容差和逐岛密度权重。容差大于零时优先安排 Keep Scale 岛，其余岛再按容差缩小；没有额外新增 Mixed Scale 控件。
   - 自动堆叠相同的岛，可把副本偏移若干 tile 用于烘焙。
@@ -129,7 +146,16 @@ Properties 编辑器新增 **UV Tools** 上下文，提供 Seam、Unwrap 和 Tex
   - 侧栏和叠加显示通过 `Mesh.texel_pack_info()` 只读取编辑网格，不在绘制时创建 Python `bmesh` 元素。创建这些元素会重新分配网格数据，在拖动 UV 时导致崩溃。
   - 测试命令：`blender --background --factory-startup --python-exit-code 1 --python tests/python/bl_uv_texel_pack.py`
 
-本机配置过的左 3D、中 UV、右下工具区布局不随此仓库分发：`release/datafiles/startup.blend` 的修改已按要求排除，避免向公共 fork 上传新的 LFS 对象。工具代码可单独使用；需要该布局时在用户启动文件中配置。
+### UV 编辑与打包的后续改动
+
+- **Checker Preview** 在所选网格和 UV 画布上显示棋盘格。切换时保留原图、材质和视图取景；预览与诊断热图绘制在原生选择边线下方。
+- UV 边、面模式下，追加环选保留已有选择，同步选择开关两种状态都支持。朝向工具可参照 UV 包围框、所选边或模型的 3D 方向。
+- UV 快捷工具栏集中了接缝、缝合、展开和打包。变换工具支持横向或纵向定向、拉直、旋转、沿 U/V 翻转、矩形化（Rect），以及适配和对齐。Rect 可处理不规则岛、指定的四角和局部选择的点链、边链或边界环。
+- **Heuristic Search** 先生成基准排布，再搜索满足相同约束的候选，视口实时显示当前最好结果。可设置总搜索时间和无改善时限；**Enter** 接受最好结果，**Esc** 恢复启动前的 UV。
+- **Pack to Others** 以未选中或锁定的岛作为纹素密度参照和固定障碍，将选中岛排入剩余空间。已有布局可以作为新增岛的密度基准。
+- 分组可命名、选择、隐藏或显示成员，并可按组分配同名材质。堆叠检测可在尚未分配的选中岛中找出多组匹配形状，为每组分别建立堆叠。
+
+出厂的 **UV Editing** 工作区将 3D 视图放在左侧、UV 编辑器放在中间，右侧保留大纲视图，并在下方显示 UV Tools。该布局由启动默认值代码生成，普通 Layout 工作区保留完整的 Properties 标签。
 
 ## 快速晶格与 Apply All
 
@@ -213,4 +239,13 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `tests/python/bl_quick_lattice.py`
 - `tests/python/CMakeLists.txt`
 
-UV 诊断与选择模式回归：`tests/python/bl_uv_tools.py`（11 项）；Texel Pack 回归：`tests/python/bl_uv_texel_pack.py`（13 项）。另已在真实窗口中验证默认及 XM 键位下的 1/2/3/4 按键和 UV 实际拾取结果。
+## 回归测试与历史索引
+
+- 穿透选择的 GPU 回归见 `tests/python/view3d_select_through.py`。它在独立 Blender 窗口中将圈选和框选设为相反状态，用前后重叠的面检查透视和正交视图中的点、边、面选择。
+- UV 诊断、预览、变换、打包的回归分别见 `tests/python/bl_uv_tools.py`、`bl_uv_preview_render.py`、`bl_uv_transform.py` 和 `bl_uv_texel_pack.py`。参考密度打包和堆叠检测分别见同目录下的 `bl_uv_pack_to_others.py` 和 `bl_uv_stack_detect.py`。
+
+已有提交可按以下顺序追溯：
+
+- `69550036a16` 智能挤出、对称和原生手柄，XM 记住工具组选择；`f2c838f2366` 穿透选择、镜像边标记和 XM 编辑快捷键；`de6c2c4bbf4` 临时工作平面。
+- `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
+- `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。

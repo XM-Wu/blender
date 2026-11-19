@@ -157,10 +157,11 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
     mesh_items = _keymap_items(keyconfig_data, "Mesh")
     # Mesh-only overrides; global framing and transform modal keys stay intact.
     mesh_items[:] = [item for item in mesh_items if not (
-        item[1].get("type") in {'Y', 'A', 'S'}
+        item[1].get("type") in {'Y', 'A', 'S', 'DEL'}
         and not any(item[1].get(mod, False) for mod in ("ctrl", "shift", "alt", "oskey", "hyper"))
     )]
     mesh_items.extend([
+        ("mesh.dissolve_mode", {"type": 'DEL', "value": 'PRESS'}, None),
         ("wm.tool_set_by_id", {"type": 'Y', "value": 'PRESS'},
          {"properties": [("name", "builtin.target_weld")]}),
         ("mesh.apply_all_transforms", {"type": 'A', "value": 'PRESS'}, None),

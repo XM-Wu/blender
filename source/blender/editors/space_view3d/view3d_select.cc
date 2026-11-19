@@ -441,13 +441,13 @@ static void view3d_region_select_xray_properties(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
 }
 
-static void view3d_region_select_xray_begin(bContext *C, wmOperator *op)
+static void view3d_region_select_xray_begin(bContext *C, wmOperator *op, bool circle)
 {
   Object *obedit = CTX_data_edit_object(C);
   View3D *v3d = CTX_wm_view3d(C);
   const ToolSettings *ts = CTX_data_tool_settings(C);
   if (!v3d || !obedit || obedit->type != OB_MESH ||
-      !(ts->mesh_select_flags & MESH_SELECT_THROUGH) ||
+      !(circle ? ts->mesh_circle_select_through : ts->mesh_select_flags & MESH_SELECT_THROUGH) ||
       RNA_boolean_get(op->ptr, "temporary_xray_active"))
   {
     return;
@@ -484,7 +484,7 @@ static wmOperatorStatus view3d_region_select_xray_invoke(bContext *C,
                                                          wmOperator *op,
                                                          const wmEvent *event)
 {
-  view3d_region_select_xray_begin(C, op);
+  view3d_region_select_xray_begin(C, op, GestureFn == WM_gesture_circle_invoke);
   const wmOperatorStatus result = GestureFn(C, op, event);
   if (!(result & OPERATOR_RUNNING_MODAL)) {
     view3d_region_select_xray_end(C, op);
@@ -512,25 +512,21 @@ static void view3d_region_select_xray_cancel(bContext *C, wmOperator *op)
 }
 
 /** Selection-through is independent of X-Ray viewport drawing. */
-static bool mesh_region_select_use_zbuf(const ViewContext *vc)
+static bool mesh_region_select_use_zbuf(const ViewContext *vc, bool through)
 {
-  return !XRAY_FLAG_ENABLED(vc->v3d) &&
-         !(vc->scene->toolsettings->mesh_select_flags & MESH_SELECT_THROUGH);
+  return !XRAY_FLAG_ENABLED(vc->v3d) && !through;
 }
 
-static bool mesh_region_select_filter_backfacing(const ViewContext *vc)
+static bool mesh_region_select_filter_backfacing(const ViewContext *vc, bool through)
 {
   const char flags = vc->scene->toolsettings->mesh_select_flags;
-  return (flags & MESH_SELECT_THROUGH) && (flags & MESH_SELECT_EXCLUDE_BACKFACING);
+  return through && (flags & MESH_SELECT_EXCLUDE_BACKFACING);
 }
 
 static bool mesh_region_select_facing(const ViewContext *vc,
                                       const float co[3],
                                       const float normal[3])
 {
-  if (!mesh_region_select_filter_backfacing(vc)) {
-    return true;
-  }
   /* Transform the eye/ray into object space, preserving the normal dot product
    * with non-uniform object scales. Orthographic views use a constant ray. */
   float toward_eye[3];
@@ -545,14 +541,18 @@ static bool mesh_region_select_facing(const ViewContext *vc,
   return dot_v3v3(normal, toward_eye) > 0.0f;
 }
 
-static bool mesh_region_select_vert_facing(const ViewContext *vc, const BMVert *vert)
+static bool mesh_region_select_vert_facing(const ViewContext *vc,
+                                           const BMVert *vert,
+                                           bool filter_backfacing)
 {
-  return mesh_region_select_facing(vc, vert->co, vert->no);
+  return !filter_backfacing || mesh_region_select_facing(vc, vert->co, vert->no);
 }
 
-static bool mesh_region_select_face_facing(const ViewContext *vc, const BMFace *face)
+static bool mesh_region_select_face_facing(const ViewContext *vc,
+                                           const BMFace *face,
+                                           bool filter_backfacing)
 {
-  if (!mesh_region_select_filter_backfacing(vc)) {
+  if (!filter_backfacing) {
     return true;
   }
   float center[3];
@@ -561,6 +561,7 @@ static bool mesh_region_select_face_facing(const ViewContext *vc, const BMFace *
 }
 
 struct LassoSelectUserData {
+  bool filter_backfacing = false;
   const ViewContext *vc;
   const rcti *rect;
   const rctf *rect_fl;
@@ -860,7 +861,7 @@ static void do_lasso_select_mesh__doSelectVert(void *user_data,
 {
   LassoSelectUserData *data = static_cast<LassoSelectUserData *>(user_data);
   const bool is_select = BM_elem_flag_test(eve, BM_ELEM_SELECT);
-  const bool is_inside = mesh_region_select_vert_facing(data->vc, eve) &&
+  const bool is_inside = mesh_region_select_vert_facing(data->vc, eve, data->filter_backfacing) &&
                          (BLI_rctf_isect_pt_v(data->rect_fl, screen_co) &&
                           BLI_lasso_is_point_inside(
                               data->mcoords, screen_co[0], screen_co[1], IS_CLIPPED));
@@ -896,8 +897,8 @@ static void do_lasso_select_mesh__doSelectEdge_pass0(void *user_data,
 
   const bool is_select = BM_elem_flag_test(eed, BM_ELEM_SELECT);
   const bool is_inside =
-      (is_visible && mesh_region_select_vert_facing(data->vc, eed->v1) &&
-       mesh_region_select_vert_facing(data->vc, eed->v2) &&
+      (is_visible && mesh_region_select_vert_facing(data->vc, eed->v1, data->filter_backfacing) &&
+       mesh_region_select_vert_facing(data->vc, eed->v2, data->filter_backfacing) &&
        edge_fully_inside_rect(data->rect_fl, screen_co_a, screen_co_b) &&
        BLI_lasso_is_point_inside(data->mcoords, UNPACK2(screen_co_a), IS_CLIPPED) &&
        BLI_lasso_is_point_inside(data->mcoords, UNPACK2(screen_co_b), IS_CLIPPED));
@@ -928,8 +929,8 @@ static void do_lasso_select_mesh__doSelectEdge_pass1(void *user_data,
   }
 
   const bool is_select = BM_elem_flag_test(eed, BM_ELEM_SELECT);
-  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1);
-  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2);
+  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1, data->filter_backfacing);
+  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2, data->filter_backfacing);
   const bool is_inside =
       is_visible &&
       ((facing_a && facing_b &&
@@ -957,7 +958,7 @@ static void do_lasso_select_mesh__doSelectFace(void *user_data,
 {
   LassoSelectUserData *data = static_cast<LassoSelectUserData *>(user_data);
   const bool is_select = BM_elem_flag_test(efa, BM_ELEM_SELECT);
-  const bool is_inside = mesh_region_select_face_facing(data->vc, efa) &&
+  const bool is_inside = mesh_region_select_face_facing(data->vc, efa, data->filter_backfacing) &&
                          (BLI_rctf_isect_pt_v(data->rect_fl, screen_co) &&
                           BLI_lasso_is_point_inside(
                               data->mcoords, screen_co[0], screen_co[1], IS_CLIPPED));
@@ -983,7 +984,9 @@ static bool do_lasso_select_mesh(const ViewContext *vc,
 
   BLI_assert(vc->em == BKE_editmesh_from_object(vc->obedit));
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
-  if (mesh_region_select_filter_backfacing(vc)) {
+  const bool through = ts->mesh_select_flags & MESH_SELECT_THROUGH;
+  data.filter_backfacing = mesh_region_select_filter_backfacing(vc, through);
+  if (data.filter_backfacing) {
     BM_mesh_normals_update(bm);
   }
 
@@ -1008,7 +1011,7 @@ static bool do_lasso_select_mesh(const ViewContext *vc,
 
   GPU_matrix_set(vc->rv3d->viewmat);
 
-  const bool use_zbuf = mesh_region_select_use_zbuf(vc);
+  const bool use_zbuf = mesh_region_select_use_zbuf(vc, through);
 
   EditSelectBuf_Cache *esel = static_cast<EditSelectBuf_Cache *>(wm_userdata->data);
   if (use_zbuf) {
@@ -3874,6 +3877,7 @@ void VIEW3D_OT_select(wmOperatorType *ot)
  * \{ */
 
 struct BoxSelectUserData {
+  bool filter_backfacing = false;
   const ViewContext *vc;
   const rcti *rect;
   const rctf *rect_fl;
@@ -4144,7 +4148,7 @@ static void do_mesh_box_select__doSelectVert(void *user_data,
 {
   BoxSelectUserData *data = static_cast<BoxSelectUserData *>(user_data);
   const bool is_select = BM_elem_flag_test(eve, BM_ELEM_SELECT);
-  const bool is_inside = mesh_region_select_vert_facing(data->vc, eve) &&
+  const bool is_inside = mesh_region_select_vert_facing(data->vc, eve, data->filter_backfacing) &&
                          BLI_rctf_isect_pt_v(data->rect_fl, screen_co);
   const int sel_op_result = ED_select_op_action_deselected(data->sel_op, is_select, is_inside);
   if (sel_op_result != -1) {
@@ -4180,9 +4184,10 @@ static void do_mesh_box_select__doSelectEdge_pass0(void *user_data,
   }
 
   const bool is_select = BM_elem_flag_test(eed, BM_ELEM_SELECT);
-  const bool is_inside = (is_visible && mesh_region_select_vert_facing(data->vc, eed->v1) &&
-                          mesh_region_select_vert_facing(data->vc, eed->v2) &&
-                          edge_fully_inside_rect(data->rect_fl, screen_co_a, screen_co_b));
+  const bool is_inside =
+      (is_visible && mesh_region_select_vert_facing(data->vc, eed->v1, data->filter_backfacing) &&
+       mesh_region_select_vert_facing(data->vc, eed->v2, data->filter_backfacing) &&
+       edge_fully_inside_rect(data->rect_fl, screen_co_a, screen_co_b));
   const int sel_op_result = ED_select_op_action_deselected(data->sel_op, is_select, is_inside);
   if (sel_op_result != -1) {
     BM_edge_select_set(data->bm, eed, sel_op_result);
@@ -4213,8 +4218,8 @@ static void do_mesh_box_select__doSelectEdge_pass1(void *user_data,
   }
 
   const bool is_select = BM_elem_flag_test(eed, BM_ELEM_SELECT);
-  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1);
-  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2);
+  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1, data->filter_backfacing);
+  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2, data->filter_backfacing);
   const bool is_inside =
       is_visible &&
       ((facing_a && facing_b && edge_inside_rect(data->rect_fl, screen_co_a, screen_co_b)) ||
@@ -4237,7 +4242,7 @@ static void do_mesh_box_select__doSelectFace(void *user_data,
 {
   BoxSelectUserData *data = static_cast<BoxSelectUserData *>(user_data);
   const bool is_select = BM_elem_flag_test(efa, BM_ELEM_SELECT);
-  const bool is_inside = mesh_region_select_face_facing(data->vc, efa) &&
+  const bool is_inside = mesh_region_select_face_facing(data->vc, efa, data->filter_backfacing) &&
                          BLI_rctf_isect_pt_v(data->rect_fl, screen_co);
   const int sel_op_result = ED_select_op_action_deselected(data->sel_op, is_select, is_inside);
   if (sel_op_result != -1) {
@@ -4257,7 +4262,9 @@ static bool do_mesh_box_select(const ViewContext *vc,
   BoxSelectUserData data;
   ToolSettings *ts = vc->scene->toolsettings;
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
-  if (mesh_region_select_filter_backfacing(vc)) {
+  const bool through = ts->mesh_select_flags & MESH_SELECT_THROUGH;
+  data.filter_backfacing = mesh_region_select_filter_backfacing(vc, through);
+  if (data.filter_backfacing) {
     BM_mesh_normals_update(bm);
   }
 
@@ -4280,7 +4287,7 @@ static bool do_mesh_box_select(const ViewContext *vc,
 
   GPU_matrix_set(vc->rv3d->viewmat);
 
-  const bool use_zbuf = mesh_region_select_use_zbuf(vc);
+  const bool use_zbuf = mesh_region_select_use_zbuf(vc, through);
 
   EditSelectBuf_Cache *esel = static_cast<EditSelectBuf_Cache *>(wm_userdata->data);
   if (use_zbuf) {
@@ -4903,6 +4910,7 @@ void VIEW3D_OT_select_box(wmOperatorType *ot)
  * \{ */
 
 struct CircleSelectUserData {
+  bool filter_backfacing = false;
   const ViewContext *vc;
   bool select;
   int mval[2];
@@ -4948,7 +4956,7 @@ static void mesh_circle_doSelectVert(void *user_data,
 {
   CircleSelectUserData *data = static_cast<CircleSelectUserData *>(user_data);
 
-  if (mesh_region_select_vert_facing(data->vc, eve) &&
+  if (mesh_region_select_vert_facing(data->vc, eve, data->filter_backfacing) &&
       len_squared_v2v2(data->mval_fl, screen_co) <= data->radius_squared)
   {
     BM_vert_select_set(data->bm, eve, data->select);
@@ -4967,8 +4975,8 @@ static void mesh_circle_doSelectEdge(void *user_data,
 {
   CircleSelectUserData *data = static_cast<CircleSelectUserData *>(user_data);
 
-  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1);
-  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2);
+  const bool facing_a = mesh_region_select_vert_facing(data->vc, eed->v1, data->filter_backfacing);
+  const bool facing_b = mesh_region_select_vert_facing(data->vc, eed->v2, data->filter_backfacing);
   if ((facing_a && facing_b &&
        edge_inside_circle(data->mval_fl, data->radius, screen_co_a, screen_co_b)) ||
       (facing_a && !facing_b &&
@@ -4991,7 +4999,7 @@ static void mesh_circle_doSelectFace(void *user_data,
 {
   CircleSelectUserData *data = static_cast<CircleSelectUserData *>(user_data);
 
-  if (mesh_region_select_face_facing(data->vc, efa) &&
+  if (mesh_region_select_face_facing(data->vc, efa, data->filter_backfacing) &&
       len_squared_v2v2(data->mval_fl, screen_co) <= data->radius_squared)
   {
     BM_face_select_set(data->bm, efa, data->select);
@@ -5013,7 +5021,9 @@ static bool mesh_circle_select(const ViewContext *vc,
   CircleSelectUserData data;
   BLI_assert(vc->em == BKE_editmesh_from_object(vc->obedit));
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
-  if (mesh_region_select_filter_backfacing(vc)) {
+  const bool through = ts->mesh_circle_select_through;
+  data.filter_backfacing = mesh_region_select_filter_backfacing(vc, through);
+  if (data.filter_backfacing) {
     BM_mesh_normals_update(bm);
   }
 
@@ -5039,7 +5049,7 @@ static bool mesh_circle_select(const ViewContext *vc,
   view3d_userdata_circleselect_init(&data, vc, select, mval, rad);
   data.bm = bm;
 
-  const bool use_zbuf = mesh_region_select_use_zbuf(vc);
+  const bool use_zbuf = mesh_region_select_use_zbuf(vc, through);
 
   if (use_zbuf) {
     if (wm_userdata->data == nullptr) {

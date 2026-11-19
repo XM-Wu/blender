@@ -23,6 +23,7 @@ def run():
         assert not bpy.data.filepath, "Only run with --factory-startup"
         settings = bpy.context.tool_settings
         assert hasattr(settings, 'mesh_select_through'), "Build the new selection code first"
+        assert not settings.mesh_circle_select_through
         assert not settings.mesh_select_through
         assert settings.mesh_select_backfacing
 
@@ -79,7 +80,8 @@ def run():
                         for through, backfacing, expected in (
                                 (False, True, per_face), (True, True, per_face * 2),
                                 (True, False, per_face)):
-                            settings.mesh_select_through = through
+                            settings.mesh_select_through = through if tool != "CIRCLE" else not through
+                            settings.mesh_circle_select_through = through if tool == "CIRCLE" else not through
                             settings.mesh_select_backfacing = backfacing
                             bpy.ops.mesh.select_all(action='DESELECT')
                             select(tool)
@@ -99,6 +101,7 @@ def run():
             # Select Through bypasses occlusion, not explicit Hide visibility.
             bpy.ops.mesh.select_mode(type='FACE')
             settings.mesh_select_through = True
+            settings.mesh_circle_select_through = True
             settings.mesh_select_backfacing = True
             bpy.ops.mesh.select_all(action='DESELECT')
             bm.faces.ensure_lookup_table()

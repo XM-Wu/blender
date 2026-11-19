@@ -2410,7 +2410,8 @@ struct ToolSettings {
 
   /** Region selection options, independent of viewport X-Ray shading. */
   char mesh_select_flags = 0;
-  char _pad5[6] = {};
+  char mesh_circle_select_through = 0;
+  char _pad5[5] = {};
 
   /**
    * XXX: these `sculpt_paint_*` fields are deprecated, use the

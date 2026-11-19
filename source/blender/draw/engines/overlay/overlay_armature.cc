@@ -1967,7 +1967,17 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   float4x4 pivot = float4x4::identity();
   pivot.location() = float3(bone.disp_mat()[3]);
   pivot.x_axis().x = pivot.y_axis().y = pivot.z_axis().z = display_size;
-  drw_shgroup_bone_sphere(ctx, pivot.ptr(), solid, hint, wire, select_id | BONESEL_ANY);
+  /* Keep the solid picking volume even when the visible joint is hollow. */
+  const bool wire_only = ctx->drawtype == ARM_DRAW_TYPE_WIRE && !ctx->res->is_selection();
+  const float4 wire_color(UNPACK3(wire), 1.0f);
+  if (wire_only) {
+    const auto pivot_id = ctx->res->select_id(*ctx->ob_ref, select_id | BONESEL_ANY);
+    ctx->bone_buf->sphere_outline_buf.append({ctx->ob->object_to_world() * pivot, wire_color},
+                                             pivot_id);
+  }
+  else {
+    drw_shgroup_bone_sphere(ctx, pivot.ptr(), solid, hint, wire, select_id | BONESEL_ANY);
+  }
   /* The joint owns its outgoing links: selecting a shaft rotates it about its wide end. */
   const float3 origin(bone.disp_mat()[3]);
   const float cap_depth = 0.1f * reference_size;
@@ -1992,6 +2002,24 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
     half.location() = origin + cap_depth * direction;
 
     const auto sel_id = ctx->res->select_id(*ctx->ob_ref, id);
+    if (wire_only) {
+      /* Draw each real edge once, including the shared square between the cap and shaft. */
+      const float4x4 &world = ctx->ob->object_to_world();
+      const float3 start = math::transform_point(world, origin);
+      const float3 end = math::transform_point(world, child_origin);
+      const float3 x = half.x_axis(), z = half.z_axis();
+      const float3 center = half.location();
+      const float3 ring[4] = {math::transform_point(world, center + x + z),
+                              math::transform_point(world, center + x - z),
+                              math::transform_point(world, center - x - z),
+                              math::transform_point(world, center - x + z)};
+      for (int i = 0; i < 4; i++) {
+        ctx->bone_buf->wire_buf.append(start, ring[i], wire_color, sel_id);
+        ctx->bone_buf->wire_buf.append(ring[i], end, wire_color, sel_id);
+        ctx->bone_buf->wire_buf.append(ring[i], ring[(i + 1) % 4], wire_color, sel_id);
+      }
+      continue;
+    }
     /* The fill pass alone has no line data for overlay antialiasing. Give an
      * unselected solid link a neutral silhouette as well. */
     const float4 outline = wire[3] > 0.0f ? float4(wire) : float4(UNPACK3(hint), 1.0f);

@@ -54,6 +54,7 @@ void ED_operatortypes_armature()
   WM_operatortype_append(ARMATURE_OT_extrude);
   WM_operatortype_append(ARMATURE_OT_hide);
   WM_operatortype_append(ARMATURE_OT_reveal);
+  WM_operatortype_append(ARMATURE_OT_xbone_orient_joints);
   WM_operatortype_append(ARMATURE_OT_xbone_joint_add);
   WM_operatortype_append(ARMATURE_OT_xbone_finish_extrude);
   WM_operatortype_append(ARMATURE_OT_click_extrude);

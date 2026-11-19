@@ -67,6 +67,9 @@ enum eArmature_Flag : int {
   ARM_HAS_VIZ_DEPS = (1 << 14),
   ARM_XBONE = (1 << 15),
   ARM_XBONE_ROTATE_SELECTED_ONLY = (1 << 16),
+  ARM_XBONE_ORIENT_WORLD = (1 << 17),
+  ARM_XBONE_AUTO_SECONDARY = (1 << 18),
+  ARM_XBONE_ORIENT_CHILDREN = (1 << 19),
 };
 ENUM_OPERATORS(eArmature_Flag);
 
@@ -442,7 +445,10 @@ struct bArmature {
 
   /** ID data is older than edit-mode data (TODO: move to edit-mode struct). */
   char needs_flush_to_id = 0;
-  char _pad0[3] = {};
+  /** Zero-initialized settings also apply to older XBone files: X aim, Y up, world +Z. */
+  int8_t xbone_primary_axis = 0;   /* X, Y, Z. */
+  int8_t xbone_secondary_axis = 0; /* Y, Z, X, None. */
+  int8_t xbone_world_up = 0;       /* +Z, -Z, +X, -X, +Y, -Y. */
 
   eArmature_Flag flag = ARM_COL_CUSTOM;
   eArmature_Drawtype drawtype = ARM_DRAW_TYPE_OCTA;

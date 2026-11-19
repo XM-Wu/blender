@@ -779,6 +779,11 @@ if(WITH_IO_FBX)
 endif()
 
 add_blender_test(
+  bl_xbone_orient
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_orient.py
+)
+
+add_blender_test(
   bl_animation_xbone
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_xbone.py
 )

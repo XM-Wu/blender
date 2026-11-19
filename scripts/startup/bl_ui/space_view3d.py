@@ -791,6 +791,8 @@ class VIEW3D_HT_header(Header):
         if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
             layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",
                         icon='CON_CHILDOF', toggle=True)
+            layout.popover(panel="VIEW3D_PT_xbone_orientation", text="Joint Orient")
+
 
         # Snap
         show_snap = False
@@ -8071,6 +8073,36 @@ class VIEW3D_PT_proportional_edit(Panel):
         col.prop(tool_settings, "proportional_distance")
 
 
+class VIEW3D_PT_xbone_orientation(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_label = "Joint Orientation"
+    bl_ui_units_x = 15
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_ARMATURE' and context.edit_object.data.is_xbone
+
+    def draw(self, context):
+        arm = context.edit_object.data
+        layout = self.layout
+        layout.prop(arm, "xbone_orient_world")
+        col = layout.column()
+        col.enabled = not arm.xbone_orient_world
+        col.use_property_split = True
+        col.use_property_decorate = False
+        col.prop(arm, "xbone_primary_axis")
+        col.prop(arm, "xbone_secondary_axis")
+        up = col.column()
+        up.enabled = arm.xbone_secondary_axis != 'NONE'
+        up.prop(arm, "xbone_world_up", text="World Up")
+        up.prop(arm, "xbone_auto_secondary")
+        layout.separator()
+        layout.prop(arm, "xbone_orient_children")
+        layout.operator("armature.xbone_orient_joints")
+        layout.prop(arm, "show_axes", text="Show Local Axes")
+
+
 class VIEW3D_PT_transform_orientations(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
@@ -9662,6 +9694,7 @@ classes = (
     VIEW3D_PT_grease_pencil_origin,
     VIEW3D_PT_grease_pencil_lock,
     VIEW3D_PT_grease_pencil_guide,
+    VIEW3D_PT_xbone_orientation,
     VIEW3D_PT_transform_orientations,
     VIEW3D_PT_overlay_grease_pencil_options,
     VIEW3D_PT_overlay_grease_pencil_canvas_options,

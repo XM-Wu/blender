@@ -102,6 +102,10 @@ def make_scene():
     near(trunk.matrix.to_3x3().col[0], (0, 1, 0))
     near(root.matrix.to_3x3().col[0], (0, 0, 1))
     branch = edits["Branch"]
+    # A terminal inherits its parent when added. Give it an independent X twist
+    # axis for the skinning fixture below.
+    near(branch.matrix.to_3x3().col[0], trunk.matrix.to_3x3().col[0])
+    branch.joint_orientation = (1, 0, 0, 0)
     frame = branch.joint_orientation.copy()
     branch.joint_position = (3, 0, 2)
     near(branch.joint_orientation, frame)

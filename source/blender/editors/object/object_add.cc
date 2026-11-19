@@ -1448,7 +1448,7 @@ static wmOperatorStatus object_xbone_add_exec(bContext *C, wmOperator *op)
 void OBJECT_OT_xbone_add(wmOperatorType *ot)
 {
   ot->name = "Add XBone";
-  ot->description = "Create an armature of point joints with local +X as the aim axis";
+  ot->description = "Create an armature of point joints with configurable orientation axes";
   ot->idname = "OBJECT_OT_xbone_add";
   ot->exec = object_xbone_add_exec;
   ot->poll = ED_operator_objectmode;

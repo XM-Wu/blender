@@ -21,6 +21,7 @@
 #include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_multi_value_map.hh"
 #include "BLI_string.hh"
 #include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
@@ -129,32 +130,141 @@ EditBone *ED_armature_ebone_add_primitive(Object *obedit_arm,
   return bone;
 }
 
-static void xbone_aim_frame(bArmature &arm,
-                            EditBone *parent,
-                            const EditBone *child,
-                            const float direction[3],
-                            float frame[3][3])
+/* The stored frame is in armature space; the secondary-axis reference is a world
+ * direction. Ignore object scale when converting the reference coordinate frame. */
+static float3x3 xbone_world_axes(const Object &ob)
 {
-  /* Keep the previous up axis where possible, including for vertical chains. */
-  float side[3];
-  cross_v3_v3v3(side, frame[2], direction);
-  if (normalize_v3(side) < 1e-5f) {
-    cross_v3_v3v3(side, frame[1], direction);
-    normalize_v3(side);
-  }
-  copy_v3_v3(frame[0], direction);
-  copy_v3_v3(frame[1], side);
-  cross_v3_v3v3(frame[2], frame[0], frame[1]);
+  float rotation[4];
+  mat4_to_quat(rotation, ob.object_to_world().ptr());
+  invert_qt_normalized(rotation);
+  float3x3 axes;
+  quat_to_mat3(axes.ptr(), rotation);
+  return axes;
+}
 
-  bool first_child = true;
-  for (const EditBone &bone : *arm.edbo) {
-    if (&bone != child && bone.parent == parent) {
-      first_child = false;
-      break;
+static bool xbone_project_up(const float3 &aim, const float3 &reference, float3 &up)
+{
+  up = reference - aim * math::dot(aim, reference);
+  return normalize_v3(up) > 1e-6f;
+}
+
+static void xbone_orient_joint(const bArmature &arm,
+                               EditBone &joint,
+                               const EditBone *child,
+                               const EditBone *grandchild,
+                               const float3x3 &world_axes)
+{
+  if (arm.flag & ARM_XBONE_ORIENT_WORLD) {
+    ED_armature_ebone_from_mat3(&joint, world_axes.ptr());
+    return;
+  }
+  if (!child) {
+    if (joint.parent && arm.xbone_secondary_axis != 3 && (arm.flag & ARM_XBONE_AUTO_SECONDARY)) {
+      float frame[3][3];
+      ED_armature_ebone_to_mat3(joint.parent, frame);
+      ED_armature_ebone_from_mat3(&joint, frame);
+    }
+    return;
+  }
+  float3 aim = float3(child->head) - float3(joint.head);
+  if (normalize_v3(aim) < 1e-6f) {
+    return;
+  }
+
+  const int primary = arm.xbone_primary_axis;
+  const bool implicit_up = arm.xbone_secondary_axis == 3;
+  const int secondary = implicit_up ? (primary + 1) % 3 : (arm.xbone_secondary_axis + 1) % 3;
+  const int third = 3 - primary - secondary;
+  const bool cyclic = (primary + 1) % 3 == secondary;
+  const int world_axis = (arm.xbone_world_up / 2 + 2) % 3;
+  const float3 guide = (arm.xbone_world_up & 1) ? -world_axes[world_axis] : world_axes[world_axis];
+  float3 up;
+  bool have_up = false;
+  if (implicit_up) {
+    if (joint.parent) {
+      have_up = xbone_project_up(
+          aim, math::normalize(float3(joint.parent->head) - float3(joint.head)), up);
+    }
+    if (!have_up) {
+      /* At a root or a straight bend, choose a stable third axis. */
+      int best = 2;
+      for (int i = 1; i >= 0; i--) {
+        if (fabsf(math::dot(aim, world_axes[i])) < fabsf(math::dot(aim, world_axes[best]))) {
+          best = i;
+        }
+      }
+      up = math::normalize(math::cross(world_axes[best], aim));
+      have_up = true;
     }
   }
-  if (first_child) {
-    ED_armature_ebone_from_mat3(parent, frame);
+  else if (arm.flag & ARM_XBONE_AUTO_SECONDARY) {
+    /* Maya uses the bend-plane normal, signed towards the chosen world guide.
+     * A root uses its first child's first child to define the plane. */
+    if (joint.parent || grandchild) {
+      const float3 neighbor = joint.parent ? float3(joint.parent->head) - float3(joint.head) :
+                                             float3(grandchild->head) - float3(child->head);
+      up = math::cross(aim, math::normalize(neighbor));
+      have_up = normalize_v3(up) > 1e-6f;
+      if (have_up && math::dot(up, guide) < 0.0f) {
+        up = -up;
+      }
+    }
+  }
+  if (!have_up && !xbone_project_up(aim, guide, up)) {
+    /* At the pole Maya swings the primary world axis onto the aim without
+     * introducing twist. Opposite directions use the next cyclic axis. */
+    up = world_axes[secondary];
+    if (math::dot(world_axes[primary], aim) < -1.0f + 1e-6f) {
+      if (secondary != (primary + 1) % 3) {
+        up = -up;
+      }
+    }
+    else {
+      float swing[4];
+      rotation_between_vecs_to_quat(swing, world_axes[primary], aim);
+      mul_qt_v3(swing, up);
+    }
+  }
+
+  float3x3 frame;
+  frame[primary] = aim;
+  frame[secondary] = up;
+  frame[third] = cyclic ? math::cross(aim, up) : math::cross(up, aim);
+  ED_armature_ebone_from_mat3(&joint, frame.ptr());
+}
+
+static EditBone *xbone_first_child(bArmature &arm, const EditBone &joint)
+{
+  for (EditBone &candidate : *arm.edbo) {
+    if (candidate.parent == &joint) {
+      return &candidate;
+    }
+  }
+  return nullptr;
+}
+
+static void xbone_orient_new_child(Object &ob, EditBone &child)
+{
+  bArmature &arm = *id_cast<bArmature *>(ob.data);
+  EditBone &parent = *child.parent;
+  const float3x3 world_axes = xbone_world_axes(ob);
+  if (xbone_first_child(arm, parent) == &child) {
+    EditBone *root = parent.parent;
+    if (arm.xbone_secondary_axis != 3 && (arm.flag & ARM_XBONE_AUTO_SECONDARY) && root &&
+        !root->parent && xbone_first_child(arm, *root) == &parent &&
+        !(root->flag & BONE_EDITMODE_LOCKED))
+    {
+      xbone_orient_joint(arm, *root, &parent, &child, world_axes);
+    }
+    if (!(parent.flag & BONE_EDITMODE_LOCKED)) {
+      xbone_orient_joint(arm, parent, &child, nullptr, world_axes);
+    }
+  }
+  float frame[3][3];
+  ED_armature_ebone_to_mat3(&parent, frame);
+  ED_armature_ebone_from_mat3(&child, frame);
+  if (arm.flag & ARM_XBONE_ORIENT_WORLD) {
+    ED_armature_ebone_from_mat3(&child, world_axes.ptr());
   }
 }
 
@@ -169,6 +279,9 @@ static bool xbone_add_child(Object *ob, const float *position)
     STRNCPY_UTF8(root->name, "Joint");
     add_v3_v3(root->tail, position);
     copy_v3_v3(root->head, position);
+    if (arm->flag & ARM_XBONE_ORIENT_WORLD) {
+      ED_armature_ebone_from_mat3(root, xbone_world_axes(*ob).ptr());
+    }
     root->flag |= BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL;
     return true;
   }
@@ -178,13 +291,8 @@ static bool xbone_add_child(Object *ob, const float *position)
 
   float frame[3][3];
   ED_armature_ebone_to_mat3(parent, frame);
-  if (position) {
-    float direction[3];
-    sub_v3_v3v3(direction, position, parent->head);
-    if (normalize_v3(direction) < 1e-6f) {
-      return false;
-    }
-    xbone_aim_frame(*arm, parent, nullptr, direction, frame);
+  if (position && len_squared_v3v3(position, parent->head) < 1e-12f) {
+    return false;
   }
 
   ED_armature_edit_deselect_all(ob);
@@ -196,6 +304,9 @@ static bool xbone_add_child(Object *ob, const float *position)
   ED_armature_ebone_from_mat3(child, frame);
   child->flag |= BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL;
   arm->act_edbone = child;
+  if (position) {
+    xbone_orient_new_child(*ob, *child);
+  }
   return true;
 }
 
@@ -376,6 +487,65 @@ static bool xbone_edit_poll(bContext *C)
 {
   return ED_operator_editarmature(C) &&
          (id_cast<bArmature *>(CTX_data_edit_object(C)->data)->flag & ARM_XBONE);
+}
+
+static wmOperatorStatus xbone_orient_exec(bContext *C, wmOperator * /*op*/)
+{
+  Object *ob = CTX_data_edit_object(C);
+  bArmature &arm = *id_cast<bArmature *>(ob->data);
+  const float3x3 world_axes = xbone_world_axes(*ob);
+  MultiValueMap<EditBone *, EditBone *> children;
+  for (EditBone &joint : *arm.edbo) {
+    children.add(joint.parent, &joint);
+  }
+
+  /* Visit parents first so terminal joints can inherit the final parent frame. */
+  struct Visit {
+    EditBone *joint;
+    bool inherited;
+  };
+  Vector<Visit> pending;
+  for (EditBone *root : children.lookup(nullptr)) {
+    pending.append({root, false});
+  }
+  bool edited = false;
+  while (!pending.is_empty()) {
+    const Visit item = pending.pop_last();
+    EditBone &joint = *item.joint;
+    const bool selected = animrig::bone_is_visible(&arm, &joint) && (joint.flag & BONE_SELECTED);
+    const bool orient = selected || item.inherited;
+    const Span<EditBone *> descendants = children.lookup(&joint);
+    if (orient && !(joint.flag & BONE_EDITMODE_LOCKED)) {
+      EditBone *child = descendants.is_empty() ? nullptr : descendants.first();
+      const Span<EditBone *> grandchildren = child ? children.lookup(child).as_span() :
+                                                     Span<EditBone *>();
+      xbone_orient_joint(arm,
+                         joint,
+                         child,
+                         grandchildren.is_empty() ? nullptr : grandchildren.first(),
+                         world_axes);
+      edited = true;
+    }
+    for (EditBone *next : descendants) {
+      pending.append({next, orient && (arm.flag & ARM_XBONE_ORIENT_CHILDREN)});
+    }
+  }
+  if (!edited) {
+    return OPERATOR_CANCELLED;
+  }
+  DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+  WM_event_add_notifier(C, NC_OBJECT | ND_POSE, ob);
+  return OPERATOR_FINISHED;
+}
+
+void ARMATURE_OT_xbone_orient_joints(wmOperatorType *ot)
+{
+  ot->name = "Orient Joints";
+  ot->idname = "ARMATURE_OT_xbone_orient_joints";
+  ot->description = "Reorient selected XBone rest frames using this armature's axis settings";
+  ot->poll = xbone_edit_poll;
+  ot->exec = xbone_orient_exec;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 void ARMATURE_OT_xbone_joint_add(wmOperatorType *ot)
@@ -1949,12 +2119,10 @@ static wmOperatorStatus xbone_finish_extrude(bContext *C, wmOperator * /*op*/)
       continue;
     }
     EditBone *parent = child->parent;
-    float frame[3][3], direction[3];
+    float direction[3];
     sub_v3_v3v3(direction, child->head, parent->head);
     if (normalize_v3(direction) > 1e-6f) {
-      ED_armature_ebone_to_mat3(parent, frame);
-      xbone_aim_frame(*arm, parent, child, direction, frame);
-      ED_armature_ebone_from_mat3(child, frame);
+      xbone_orient_new_child(*ob, *child);
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
       WM_event_add_notifier(C, NC_OBJECT | ND_POSE, ob);
     }

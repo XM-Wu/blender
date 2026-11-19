@@ -10,6 +10,7 @@ On the Move tool, that drag vertex-slides in mesh edit mode.
 Shift+V starts vertex/edge slide. The modal map uses that same key and
 does not keep the previous slide shortcut.
 Ctrl and middle mouse shrink/fattens along normals in mesh edit mode.
+A opens Apply in the 3D View; Alt+F frames all objects.
 """
 
 import os
@@ -79,6 +80,24 @@ def _keymap_items(keyconfig_data, km_name):
 
 
 def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
+    # Move Frame All off A before assigning Apply, removing any Alt+F conflict.
+    view_items = _keymap_items(keyconfig_data, '3D View')
+    view_items[:] = [item for item in view_items if not (
+        item[1].get('type') == 'F' and item[1].get('alt', False)
+        and not any(item[1].get(mod, False) for mod in ('ctrl', 'shift', 'oskey', 'hyper'))
+    )]
+    view_items[:] = [
+        (operator, dict(event, type='F', alt=True), options)
+        if event.get('type') == 'A'
+        and not any(event.get(mod, False) for mod in ('ctrl', 'shift', 'alt', 'oskey', 'hyper'))
+        else (operator, event, options)
+        for operator, event, options in view_items
+    ]
+    view_items.append(
+        ('wm.call_menu', {'type': 'A', 'value': 'PRESS'},
+         {'properties': [('name', 'VIEW3D_MT_object_apply')]}),
+    )
+
     # C marks seams and Shift-C clears them. Remove inherited conflicting bindings
     # from 3D View as it can intercept the mesh-mode shortcut.
     for name in ('UV Editor', 'Mesh', '3D View', 'Image'):

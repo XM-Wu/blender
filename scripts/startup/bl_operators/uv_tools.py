@@ -65,7 +65,7 @@ class UVTOOLS_GGT_checker(bpy.types.GizmoGroup):
         self.buttons = []
         for operator, icon in (('uv_tools.checker', None), ('uv_tools.mark_seam', 'cut'),
                                ('uv_tools.stitch', 'stitch'), ('uv.unwrap', 'unwrap'),
-                               ('uv.texel_pack', 'texel_pack')):
+                               ('uv.texel_pack', 'texel_pack'), ('uv.pack_to_others', 'pack')):
             button = self.gizmos.new('GIZMO_GT_button_2d')
             props = button.target_set_operator(operator)
             if operator == 'uv_tools.mark_seam':
@@ -86,16 +86,16 @@ class UVTOOLS_GGT_checker(bpy.types.GizmoGroup):
         # The gizmo map builds its draw list in reverse creation order.
         self.background = self.gizmos.new('UVTOOLS_GT_toolbar_background')
         self.background.hide_select = True
-        self.background.scale_basis = 110
+        self.background.scale_basis = 131
 
     def draw_prepare(self, context):
         x, y, scale = _quick_toolbar_origin(context)
-        self.background.matrix_basis.translation = (x+108*scale, y+24*scale, 0)
+        self.background.matrix_basis.translation = (x+129*scale, y+24*scale, 0)
         editing = context.mode == 'EDIT_MESH'
         for i, (button, props) in enumerate(self.buttons):
             button.matrix_basis.translation = (x+(24+i*42)*scale, y+24*scale, 0)
             button.hide_select = i > 0 and not editing
-            if i == 4:
+            if i >= 4:
                 settings = context.scene.uv_tools_texel_pack
                 for key in TEXEL_PACK_SETTINGS:
                     setattr(props, key, getattr(settings, key))
@@ -130,10 +130,10 @@ def _draw_quick_toolbar():
     try:
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
-        rounded(x,y,216*scale,48*scale,8*scale,(0.035,0.04,0.05,.97))
+        rounded(x,y,258*scale,48*scale,8*scale,(0.035,0.04,0.05,.97))
         if context.scene.uv_tools_checker:
             rounded(x+5*scale,y+5*scale,38*scale,38*scale,5*scale,(.08,.25,.4,1))
-        # Separate the checker toggle from the four mesh operations.
+        # Separate the checker toggle from the mesh operations.
         shader.bind()
         shader.uniform_float('color',(.16,.18,.21,1))
         batch_for_shader(shader,'TRI_FAN',{'pos':((x+44*scale,y+8*scale),(x+45*scale,y+8*scale),

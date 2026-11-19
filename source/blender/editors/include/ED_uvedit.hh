@@ -407,7 +407,8 @@ int bm_mesh_calc_uv_islands(const Scene *scene,
                             const bool only_selected_uvs,
                             const bool use_seams,
                             const float aspect_y,
-                            const BMUVOffsets &offsets);
+                            const BMUVOffsets &offsets,
+                            bool include_hidden = false);
 
 /**
  * Returns true if UV coordinates lie on a valid tile in UDIM grid or tiled image.

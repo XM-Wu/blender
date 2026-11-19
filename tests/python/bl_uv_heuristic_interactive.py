@@ -9,9 +9,10 @@ import json
 import traceback
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
-from bl_uv_texel_pack import make_islands, all_uvs
+from bl_uv_texel_pack import make_islands, all_uvs, set_face_selection
 
 output=Path(sys.argv[sys.argv.index('--')+1])
+to_others='--pack-to-others' in sys.argv
 cases=['TIME','IDLE','ENTER','ESC']
 results=[]
 index=-1
@@ -32,7 +33,11 @@ def setup():
         return
     specs=[dict(size=size,uv=(2+i*.1,2),uv_size=(size[0]*.1,size[1]*.1))
            for i,size in enumerate(((3,1),(2,2),(1,4),(1,1),(2,1),(1,2),(3,2),(2,3)))]
-    obj,_=make_islands(specs)
+    if to_others:
+        specs.append(dict(size=(1,1),uv=(.8,.8),uv_size=(.1,.1)))
+    obj,ranges=make_islands(specs)
+    if to_others:
+        set_face_selection(obj, [f for r in ranges[:-1] for f in r])
     before=all_uvs(obj)
     preview_seen=False
     heartbeat_count=0
@@ -41,7 +46,8 @@ def setup():
     bpy.context.scene.uv_tools_distortion=False
     bpy.context.scene.uv_tools_checker=False
     case=cases[index]
-    result=bpy.ops.uv.texel_pack('INVOKE_DEFAULT',resolution_x=256,resolution_y=256,
+    operator=bpy.ops.uv.pack_to_others if to_others else bpy.ops.uv.texel_pack
+    result=operator('INVOKE_DEFAULT',resolution_x=256,resolution_y=256,
         precision='EXACT',rotation='CARDINAL',use_stacking=False,target='FIXED',udim_tile=1001,
         heuristic_search=True, search_time=.2 if case=='TIME' else 0,
         no_improvement_time=.1 if case=='IDLE' else 0)

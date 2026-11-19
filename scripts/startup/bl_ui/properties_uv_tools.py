@@ -66,6 +66,11 @@ class UVTOOLS_PT_texel_pack(UVToolsPanel, Panel):
 
         layout = self.layout
         draw_icon_buttons(layout, (("uv.texel_pack", "texel_pack"),), setup)
+        row = layout.row()
+        row.operator_context = 'INVOKE_DEFAULT'
+        row.scale_y = 1.5
+        props = row.operator('uv.pack_to_others', text='Pack to Others', icon='UV')
+        setup(props)
         draw_search_controls(layout)
         layout.label(text="Island constraints: UV Editor sidebar > Texel Pack", icon='INFO')
         report = context.scene.get("uv_texel_pack_report")
@@ -416,6 +421,7 @@ class IMAGE_PT_texel_pack_stacks(TexelPackIdListPanel, Panel):
     noun = "Stack"
 
     def draw_extra(self, layout):
+        layout.operator('uv_tools.stack_detect', text='Detect and Stack Groups', icon='UV_SYNC_SELECT')
         props = layout.operator("uv.texel_pack_constraint_set", text="Never Stack Selection", icon='CANCEL')
         props.kind = 'STACK'
         props.stack = -1

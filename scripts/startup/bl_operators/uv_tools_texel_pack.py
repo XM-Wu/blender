@@ -143,6 +143,31 @@ def write_mesh_membership(mesh, kind, value, matching=None):
         mesh.update()
 
 
+class UVTOOLS_OT_stack_detect(bpy.types.Operator):
+    bl_idname = 'uv_tools.stack_detect'
+    bl_label = 'Detect and Stack Groups'
+    bl_description = 'Find every matching set of selected unassigned UV islands and stack each set separately'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH' and bpy.ops.uv.texel_pack_stack_detect.poll()
+
+    def execute(self, context):
+        settings = context.scene.uv_tools_texel_pack
+        first_id = max(max(group_entries(context, all_meshes=True, kind='STACK'), default=0) + 1,
+                       context.scene.get('uvpack_stack_next_id', 1))
+        result = bpy.ops.uv.texel_pack_stack_detect(
+            first_id=first_id, resolution_x=settings.resolution_x, resolution_y=settings.resolution_y,
+            mirror=settings.stack_mirrored, tolerance=settings.stack_tolerance)
+        if result == {'FINISHED'}:
+            entries = group_entries(context, all_meshes=True, kind='STACK')
+            context.scene['uvpack_stack_next_id'] = max(entries, default=first_id) + 1
+            settings.show_stacks = True
+            invalidate()
+        return result
+
+
 class UVTOOLS_OT_group_membership(bpy.types.Operator):
     bl_idname = 'uv_tools.group_membership'
     bl_label = 'Assign UV Group / Stack'
@@ -817,4 +842,5 @@ def unregister():
 
 classes = (UVToolsIslandConstraints, UVTOOLS_OT_texel_pack_new_id, UVTOOLS_OT_group_rename,
            UVTOOLS_OT_group_select_objects, UVTOOLS_OT_group_visibility,
-           UVTOOLS_OT_group_membership, UVTOOLS_OT_group_delete, UVTOOLS_OT_group_material)
+           UVTOOLS_OT_group_membership, UVTOOLS_OT_group_delete, UVTOOLS_OT_group_material,
+           UVTOOLS_OT_stack_detect)

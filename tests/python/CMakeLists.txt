@@ -374,6 +374,11 @@ add_blender_test(
 )
 
 add_blender_test(
+  script_uv_stack_detect
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_stack_detect.py
+)
+
+add_blender_test(
   script_pyapi_bmesh
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_bmesh.py
 )

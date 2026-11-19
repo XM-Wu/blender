@@ -388,7 +388,8 @@ struct TexelIsland {
 static void gather_islands(const Scene *scene,
                            const Span<Object *> objects,
                            Vector<TexelIsland> &r_islands,
-                           const bool use_mesh_selection = false)
+                           const bool use_mesh_selection = false,
+                           const bool include_all = false)
 {
   const ToolSettings *ts = scene->toolsettings;
   const bool sync = (ts->uv_flag & UV_FLAG_SELECT_SYNC) != 0;
@@ -406,11 +407,11 @@ static void gather_islands(const Scene *scene,
     bm_mesh_calc_uv_islands(scene,
                             bm,
                             &island_list,
-                            !sync && !use_mesh_selection,
+                            !sync && !use_mesh_selection && !include_all,
                             false,
                             false,
                             1.0f,
-                            offsets);
+                            offsets, include_all);
 
     for (FaceIsland &face_island_ref : island_list.items_mutable()) {
       BLI_remlink(&island_list, &face_island_ref);
@@ -423,10 +424,13 @@ static void gather_islands(const Scene *scene,
 
       Map<float2, int> unique_index;
       float2 uv_min(FLT_MAX), uv_max(-FLT_MAX);
+      bool hidden = false;
       for (int i = 0; i < face_island->faces_len; i++) {
         BMFace *f = face_island->faces[i];
-        if (use_mesh_selection ? BM_elem_flag_test(f, BM_ELEM_SELECT) :
-                                 uvedit_face_select_test(scene, bm, f))
+        hidden |= BM_elem_flag_test(f, BM_ELEM_HIDDEN);
+        if (!BM_elem_flag_test(f, BM_ELEM_HIDDEN) &&
+            (use_mesh_selection ? BM_elem_flag_test(f, BM_ELEM_SELECT) :
+             (uvedit_face_visible_test(scene, f) && uvedit_face_select_test(scene, bm, f))))
         {
           island.selected = true;
         }
@@ -448,6 +452,9 @@ static void gather_islands(const Scene *scene,
       }
       island.uv_center = (uv_min + uv_max) * 0.5f;
       island.constraints = island_constraints(bm, *face_island, island.face_areas);
+      if (include_all && hidden) {
+        island.constraints.lock = true;
+      }
       r_islands.append(std::move(island));
     }
   }
@@ -776,6 +783,7 @@ enum {
 };
 
 struct TexelPackSettings {
+  bool to_others = false;
   bool heuristic_search;
   float search_time;
   float no_improvement_time;
@@ -1027,12 +1035,49 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
   if (s.target == TEXEL_PACK_TARGET_CLOSEST) {
     float2 min(FLT_MAX), max(-FLT_MAX);
     for (const TexelIsland &island : islands) {
-      if (island.role == ROLE_PACK) {
+      if (island.role == (s.to_others ? ROLE_OBSTACLE : ROLE_PACK)) {
         min = math::min(min, island.uv_center);
         max = math::max(max, island.uv_center);
       }
     }
-    start_tile = udim_tile_number((min + max) * 0.5f);
+    if (min.x != FLT_MAX) {
+      start_tile = udim_tile_number((min + max) * 0.5f);
+    }
+  }
+
+  float reference_density = 0.0f;
+  if (s.to_others) {
+    Vector<float> densities;
+    for (const TexelIsland &island : islands) {
+      if (island.role != ROLE_OBSTACLE) {
+        continue;
+      }
+      Vector<float2> triangles;
+      append_triangles(island, s.resolution, float2(0), triangles);
+      const float density = texel_pack::texel_density(triangles, island.area_3d);
+      if (density > 0.0f) {
+        densities.append(density);
+      }
+    }
+    if (densities.is_empty()) {
+      job.report = RPT_("Pack to Others needs an unselected or locked UV island as density reference");
+      job.warning = true;
+      return;
+    }
+    std::sort(densities.begin(), densities.end());
+    reference_density = densities[densities.size()/2];
+    for (const TexelIsland &island : islands) {
+      if (island.role == ROLE_PACK && island.constraints.keep_scale) {
+        Vector<float2> triangles;
+        append_triangles(island, s.resolution, float2(0), triangles);
+        const float density = texel_pack::texel_density(triangles, island.area_3d);
+        if (std::abs(density-reference_density) > reference_density*1e-4f) {
+          job.report = RPT_("Disable Keep Scale on islands whose density differs from the reference");
+          job.warning = true;
+          return;
+        }
+      }
+    }
   }
 
   job.start_tile = start_tile;
@@ -1049,6 +1094,27 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
     texel_pack::Island input;
     input.area_3d = island.area_3d;
     if (island.role == ROLE_OBSTACLE) {
+      if (s.to_others) {
+        /* An obstacle can straddle tiles: rasterize it in every overlapping target tile. */
+        float2 lo(FLT_MAX), hi(-FLT_MAX);
+        for (const float2 &uv : island.unique_uvs) {
+          lo = math::min(lo, uv);
+          hi = math::max(hi, uv);
+        }
+        for (int t = 0; t < s.max_tiles; t++) {
+          const float2 tile = float2(udim_tile_coords(start_tile+t));
+          if (hi.x < tile.x || lo.x > tile.x+1 || hi.y < tile.y || lo.y > tile.y+1) {
+            continue;
+          }
+          texel_pack::Island obstacle;
+          obstacle.locked = true;
+          obstacle.locked_tile = t;
+          obstacle.area_3d = island.area_3d;
+          append_triangles(island, s.resolution, tile, obstacle.triangles);
+          engine.append(std::move(obstacle));
+        }
+        continue;
+      }
       const int tile = udim_tile_number(island.uv_center);
       input.locked = true;
       input.locked_tile = tile - start_tile;
@@ -1103,6 +1169,11 @@ static void texel_pack_run(TexelPackJob &job, const bool *stop, float *progress)
   params.no_improvement_time = s.no_improvement_time;
   params.finish_search = &job.finish_search;
   params.cancel_request = &job.cancel_request;
+  if (s.to_others) {
+    params.density_mode = texel_pack::DensityMode::Target;
+    params.target_density = reference_density;
+    params.density_tolerance = 0.0f;
+  }
   params.on_update = [&](const Vector<texel_pack::Transform> *transforms,
                          const texel_pack::SearchProgress &live) {
     // Copy lightweight transforms before locking. The search never waits for UV redraws.
@@ -1278,6 +1349,12 @@ static TexelPackSettings texel_pack_settings_from_op(wmOperator *op)
   s.group_layout = texel_pack::GroupLayout(RNA_enum_get(op->ptr, "group_layout"));
   s.only_selected = RNA_boolean_get(op->ptr, "only_selected");
   s.keep_unselected = RNA_boolean_get(op->ptr, "keep_unselected");
+  s.to_others = STREQ(op->type->idname, "UV_OT_pack_to_others");
+  if (s.to_others) {
+    s.only_selected = true;
+    s.keep_unselected = true;
+    s.use_density_weights = false;
+  }
   return s;
 }
 
@@ -1370,7 +1447,7 @@ static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
   }
 
   // Snapshot original UVs and topology on the main thread before background work.
-  gather_islands(scene, job->objects, job->islands);
+  gather_islands(scene, job->objects, job->islands, false, job->settings.to_others);
 
   /* Needed even when jobs aren't used, see: #146195. */
   G.is_break = false;
@@ -1643,6 +1720,14 @@ void UV_OT_texel_pack(wmOperatorType *ot)
   texel_pack_def_settings(ot);
 }
 
+void UV_OT_pack_to_others(wmOperatorType *ot)
+{
+  UV_OT_texel_pack(ot);
+  ot->name = "Pack to Others";
+  ot->idname = "UV_OT_pack_to_others";
+  ot->description = "Pack selected UV islands around all other islands of the edited meshes, matching their median texel density without shrinking to fit";
+}
+
 static bool texel_pack_control_poll(bContext *C)
 {
   return WM_jobs_customdata_from_type(CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK) != nullptr;
@@ -1824,6 +1909,85 @@ static wmOperatorStatus constraint_apply(bContext *C, wmOperator *op, const bool
   }
   free_islands(islands);
   return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus stack_detect_exec(bContext *C, wmOperator *op)
+{
+  Scene *scene = CTX_data_scene(C);
+  Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
+      *CTX_data_main(C), scene, CTX_data_view_layer(C), CTX_wm_view3d(C));
+  Vector<TexelIsland> islands;
+  gather_islands(scene, objects, islands, CTX_wm_space_image(C) == nullptr);
+  int next_id = RNA_int_get(op->ptr, "first_id");
+  for (TexelIsland &island : islands) {
+    next_id = std::max(next_id, island.constraints.stack + 1);
+    if (island.selected && island.constraints.stack == 0 && !island.constraints.lock) {
+      island.role = ROLE_PACK;
+    }
+  }
+  const int stacked = detect_stacks(islands,
+                                    int2(RNA_int_get(op->ptr, "resolution_x"),
+                                         RNA_int_get(op->ptr, "resolution_y")),
+                                    true,
+                                    RNA_boolean_get(op->ptr, "mirror"),
+                                    RNA_float_get(op->ptr, "tolerance"));
+  if (stacked == 0) {
+    free_islands(islands);
+    BKE_report(op->reports, RPT_WARNING, "No matching unassigned UV islands selected");
+    return OPERATOR_CANCELLED;
+  }
+  Map<int, int> group_ids;
+  Set<Object *> changed;
+  auto assign = [&](const TexelIsland &island, const int id) {
+    BMesh *bm = island.bm;
+    BM_data_layer_ensure_named(bm, &bm->pdata, CD_PROP_INT32, ATTR_STACK);
+    const int offset = CustomData_get_offset_named(&bm->pdata, CD_PROP_INT32, ATTR_STACK);
+    for (int f = 0; f < island.face_island->faces_len; f++) {
+      BM_ELEM_CD_SET_INT(island.face_island->faces[f], offset, id);
+    }
+    changed.add(island.ob);
+  };
+  for (const TexelIsland &island : islands) {
+    if (island.stack_source == -1) {
+      continue;
+    }
+    const TexelIsland &source = islands[island.stack_source];
+    const int id = group_ids.lookup_or_add_cb(island.stack_source, [&]() {
+      const int id = next_id++;
+      assign(source, id);
+      return id;
+    });
+    assign(island, id);
+    Vector<float2> uvs;
+    for (const int index : island.stack_map) {
+      uvs.append(source.unique_uvs[index]);
+    }
+    write_island_uvs(island, uvs);
+  }
+  for (Object *ob : changed) {
+    DEG_id_tag_update(static_cast<ID *>(ob->data), ID_RECALC_GEOMETRY);
+    WM_event_add_notifier(C, NC_GEOM | ND_DATA, ob->data);
+  }
+  BKE_reportf(op->reports, RPT_INFO, "Created %d stack groups, stacked %d copies",
+              int(group_ids.size()), stacked);
+  free_islands(islands);
+  return OPERATOR_FINISHED;
+}
+
+void UV_OT_texel_pack_stack_detect(wmOperatorType *ot)
+{
+  ot->name = "Detect and Stack Groups";
+  ot->idname = "UV_OT_texel_pack_stack_detect";
+  ot->description = "Find all matching sets of selected unassigned UV islands and stack each set";
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->exec = stack_detect_exec;
+  ot->poll = texel_pack_poll;
+  RNA_def_int(ot->srna, "first_id", 1, 1, INT_MAX, "First ID", "First available stack ID", 1, INT_MAX);
+  RNA_def_int(ot->srna, "resolution_x", 1024, 1, 65536, "Width", "Texture width", 1, 65536);
+  RNA_def_int(ot->srna, "resolution_y", 1024, 1, 65536, "Height", "Texture height", 1, 65536);
+  RNA_def_boolean(ot->srna, "mirror", false, "Stack Mirrored", "Allow mirrored matches");
+  RNA_def_float(ot->srna, "tolerance", 0.01f, 0.0001f, 0.2f, "Tolerance",
+                "Shape difference allowed relative to island size", 0.0001f, 0.1f);
 }
 
 static wmOperatorStatus constraint_set_exec(bContext *C, wmOperator *op)

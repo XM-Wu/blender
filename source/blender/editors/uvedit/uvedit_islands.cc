@@ -116,7 +116,8 @@ int bm_mesh_calc_uv_islands(const Scene *scene,
                             const bool only_selected_uvs,
                             const bool use_seams,
                             const float aspect_y,
-                            const BMUVOffsets &uv_offsets)
+                            const BMUVOffsets &uv_offsets,
+                            const bool include_hidden)
 {
   BLI_assert(uv_offsets.uv >= 0);
   int island_added = 0;
@@ -130,8 +131,9 @@ int bm_mesh_calc_uv_islands(const Scene *scene,
   BMFace *f;
   BMIter iter;
   BM_ITER_MESH (f, &iter, bm, BM_FACES_OF_MESH) {
-    const bool face_affected = uvedit_is_face_affected_for_calc_uv_islands(
-        scene, bm, f, only_selected_faces, only_selected_uvs);
+    const bool face_affected = (include_hidden && !only_selected_faces && !only_selected_uvs) ||
+                              uvedit_is_face_affected_for_calc_uv_islands(
+                                  scene, bm, f, only_selected_faces, only_selected_uvs);
     BM_elem_flag_set(f, BM_ELEM_TAG, face_affected);
   }
 

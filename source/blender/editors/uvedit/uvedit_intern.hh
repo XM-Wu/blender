@@ -155,8 +155,10 @@ void UV_OT_smart_project(wmOperatorType *ot);
 /* `uvedit_texel_pack.cc` */
 
 void UV_OT_texel_pack(wmOperatorType *ot);
+void UV_OT_pack_to_others(wmOperatorType *ot);
 void UV_OT_texel_pack_control(wmOperatorType *ot);
 void UV_OT_texel_pack_constraint_set(wmOperatorType *ot);
+void UV_OT_texel_pack_stack_detect(wmOperatorType *ot);
 void UV_OT_texel_pack_constraint_clear(wmOperatorType *ot);
 void UV_OT_texel_pack_constraint_select(wmOperatorType *ot);
 

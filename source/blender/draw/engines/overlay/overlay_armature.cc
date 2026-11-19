@@ -1412,6 +1412,21 @@ static void bone_draw_custom_shape(const Armatures::DrawContext *ctx,
   }
 }
 
+static void draw_octahedral_shape(const Armatures::DrawContext *ctx,
+                                  const float4x4 &bone_mat,
+                                  const float col_solid[4],
+                                  const float col_hint[4],
+                                  const float col_wire[4],
+                                  const draw::select::ID sel_id)
+{
+  if (ctx->is_filled) {
+    ctx->bone_buf->octahedral_fill_buf.append({bone_mat, col_solid, col_hint}, sel_id);
+  }
+  if (col_wire[3] > 0.0f) {
+    ctx->bone_buf->octahedral_outline_buf.append({bone_mat, col_wire}, sel_id);
+  }
+}
+
 static void bone_draw_octa(const Armatures::DrawContext *ctx,
                            const UnifiedBonePtr bone,
                            const eBone_Flag boneflag,
@@ -1424,13 +1439,7 @@ static void bone_draw_octa(const Armatures::DrawContext *ctx,
   auto sel_id = ctx->res->select_id(*ctx->ob_ref, select_id | BONESEL_BONE);
   float4x4 bone_mat = ctx->ob->object_to_world() * float4x4(bone.disp_mat());
 
-  if (ctx->is_filled) {
-    ctx->bone_buf->octahedral_fill_buf.append({bone_mat, col_solid, col_hint}, sel_id);
-  }
-  if (col_wire[3] > 0.0f) {
-    ctx->bone_buf->octahedral_outline_buf.append({bone_mat, col_wire}, sel_id);
-  }
-
+  draw_octahedral_shape(ctx, bone_mat, col_solid, col_hint, col_wire, sel_id);
   draw_points(ctx, bone, boneflag, col_solid, select_id);
 }
 
@@ -1940,19 +1949,33 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   draw_bone_update_disp_matrix_default(bone);
   const float *wire = get_bone_wire_color(ctx, flags);
   const int id = select_id | BONESEL_BONE;
-  drw_shgroup_bone_sphere(ctx,
-                          bone.disp_mat(),
-                          get_bone_solid_with_consts_color(ctx, bone, flags),
-                          get_bone_hint_color(ctx, flags),
-                          wire,
-                          id);
-  if (parent_origin && !ctx->res->is_selection()) {
-    const float4x4 &world = ctx->ob->object_to_world();
-    ctx->bone_buf->wire_buf.append(math::transform_point(world, float3(parent_origin)),
-                                   math::transform_point(world, float3(bone.disp_mat()[3])),
-                                   float4(wire),
-                                   ctx->res->select_id(*ctx->ob_ref, id));
+  const float *solid = get_bone_solid_with_consts_color(ctx, bone, flags);
+  const float *hint = get_bone_hint_color(ctx, flags);
+  drw_shgroup_bone_sphere(ctx, bone.disp_mat(), solid, hint, wire, id);
+  if (!parent_origin || ctx->res->is_selection()) {
+    return;
   }
+
+  /* Fit the tapered link to the actual pivots, independently for each branch. */
+  const float3 offset = float3(bone.disp_mat()[3]) - float3(parent_origin);
+  float length;
+  const float3 direction = math::normalize_and_get_length(offset, length);
+  if (length <= 1e-8f) {
+    return;
+  }
+  float3x3 rotation;
+  vec_roll_to_mat3_normalized(direction, 0.0f, rotation.ptr());
+  float4x4 link(rotation);
+  link.x_axis() *= 0.6f * length;
+  link.y_axis() = offset;
+  link.z_axis() *= 0.6f * length;
+  link.location() = float3(parent_origin);
+  draw_octahedral_shape(ctx,
+                        ctx->ob->object_to_world() * link,
+                        solid,
+                        hint,
+                        wire,
+                        ctx->res->select_id(*ctx->ob_ref, id));
 }
 
 static void bone_draw_update_display_matrix(const eArmature_Drawtype drawtype,

@@ -2228,7 +2228,9 @@ def fbx_generate_leaf_bones(settings, data_bones):
     bone_radius_scale = settings.global_scale * 33.0
 
     # generate bone data
-    leaf_parents = [bo for bo, count in child_count.items() if count == 0]
+    # XBone leaves are already explicit point joints. Their internal edit tail
+    # encodes orientation, not another point in the exported skeleton.
+    leaf_parents = [bo for bo, count in child_count.items() if count == 0 and not bo.bdata.id_data.is_xbone]
     leaf_bones = []
     for parent in leaf_parents:
         node_name = parent.name + "_end"

@@ -113,8 +113,36 @@ def check_skin(path, directory):
     compare(snapshot(rig, mesh), reference)
 
 
+def check_export_leaf_policy(directory):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.object.armature_add()
+    bpy.context.object.data.bones[0].name = "Legacy"
+    bpy.ops.object.xbone_add(enter_editmode=True)
+    rig = bpy.context.edit_object
+    rig.data.edit_bones.active.name = "Root"
+    bpy.context.scene.cursor.location = (2, 1, 3)
+    bpy.ops.armature.xbone_joint_add()
+    leaf = rig.data.edit_bones.active
+    leaf.name = "Authored_end"
+    leaf.joint_orientation = (0.5, 0.5, 0.5, 0.5)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    rest = rig.data.bones["Authored_end"].matrix_local.copy()
+    path = str(directory / "mixed.fbx")
+    assert bpy.ops.export_scene.fbx(filepath=path, add_leaf_bones=True) == {'FINISHED'}
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.wm.xbone_fbx_import(filepath=path)
+    rigs = [obj.data for obj in bpy.data.objects if obj.type == 'ARMATURE']
+    legacy, = [arm for arm in rigs if "Legacy" in arm.bones]
+    xbone, = [arm for arm in rigs if "Authored_end" in arm.bones]
+    assert set(legacy.bones.keys()) == {"Legacy", "Legacy_end"}
+    assert set(xbone.bones.keys()) == {"Root", "Authored_end"}
+    for got, want in zip(xbone.bones["Authored_end"].matrix_local, rest):
+        near(got, want)
+
+
 with tempfile.TemporaryDirectory() as tmp:
     directory = Path(tmp)
+    check_export_leaf_policy(directory)
     check_authored_frames(directory)
     check_skin(Path(sys.argv[-1]) / "ufbx_maya_game_sausage_75b.fbx", directory)
 print("XBone FBX joint axes, hierarchy, animation, skin and reload passed")

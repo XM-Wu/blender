@@ -1412,21 +1412,6 @@ static void bone_draw_custom_shape(const Armatures::DrawContext *ctx,
   }
 }
 
-static void draw_octahedral_shape(const Armatures::DrawContext *ctx,
-                                  const float4x4 &bone_mat,
-                                  const float col_solid[4],
-                                  const float col_hint[4],
-                                  const float col_wire[4],
-                                  const draw::select::ID sel_id)
-{
-  if (ctx->is_filled) {
-    ctx->bone_buf->octahedral_fill_buf.append({bone_mat, col_solid, col_hint}, sel_id);
-  }
-  if (col_wire[3] > 0.0f) {
-    ctx->bone_buf->octahedral_outline_buf.append({bone_mat, col_wire}, sel_id);
-  }
-}
-
 static void bone_draw_octa(const Armatures::DrawContext *ctx,
                            const UnifiedBonePtr bone,
                            const eBone_Flag boneflag,
@@ -1439,7 +1424,13 @@ static void bone_draw_octa(const Armatures::DrawContext *ctx,
   auto sel_id = ctx->res->select_id(*ctx->ob_ref, select_id | BONESEL_BONE);
   float4x4 bone_mat = ctx->ob->object_to_world() * float4x4(bone.disp_mat());
 
-  draw_octahedral_shape(ctx, bone_mat, col_solid, col_hint, col_wire, sel_id);
+  if (ctx->is_filled) {
+    ctx->bone_buf->octahedral_fill_buf.append({bone_mat, col_solid, col_hint}, sel_id);
+  }
+  if (col_wire[3] > 0.0f) {
+    ctx->bone_buf->octahedral_outline_buf.append({bone_mat, col_wire}, sel_id);
+  }
+
   draw_points(ctx, bone, boneflag, col_solid, select_id);
 }
 
@@ -1965,22 +1956,38 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   }
   float3x3 rotation;
   vec_roll_to_mat3_normalized(direction, 0.0f, rotation.ptr());
-  float4x4 link(rotation);
-  /* Size the base from the parent joint, independently of child placement. */
   const EditBone *parent_edit = bone.is_editbone() ? bone.as_editbone()->parent : nullptr;
   const float parent_size = parent_edit ? len_v3v3(parent_edit->head, parent_edit->tail) :
                                           bone.posebone_bone()->parent->length;
-  const float width_scale = 0.6f * parent_size;
-  link.x_axis() *= width_scale;
-  link.y_axis() = offset;
-  link.z_axis() *= width_scale;
-  link.location() = float3(parent_origin);
-  draw_octahedral_shape(ctx,
-                        ctx->ob->object_to_world() * link,
-                        solid,
-                        hint,
-                        wire,
-                        ctx->res->select_id(*ctx->ob_ref, id));
+  const float cap_depth = 0.1f * parent_size;
+  if (length <= cap_depth || parent_size <= 0.0f) {
+    /* No room for a shaft between overlapping joints. */
+    return;
+  }
+
+  float4x4 half(rotation);
+  half.x_axis() *= 0.06f * parent_size;
+  half.z_axis() *= 0.06f * parent_size;
+  half.location() = float3(parent_origin) + cap_depth * direction;
+
+  const auto sel_id = ctx->res->select_id(*ctx->ob_ref, id);
+  auto draw_half = [&]() {
+    const float4x4 matrix = ctx->ob->object_to_world() * half;
+    if (ctx->is_filled) {
+      ctx->bone_buf->custom_shape_fill_get_buffer(ctx->res->shapes.joint_pyramid.get())
+          .append({matrix, solid, hint}, sel_id);
+    }
+    if (wire[3] > 0.0f) {
+      ctx->bone_buf->custom_shape_outline_get_buffer(ctx->res->shapes.joint_pyramid_wire.get())
+          .append({matrix, wire}, sel_id);
+    }
+  };
+  half.y_axis() = direction * (length - cap_depth);
+  draw_half();
+  /* Turn the pyramid around the common base, preserving face winding. */
+  half.x_axis() = -half.x_axis();
+  half.y_axis() = -direction * cap_depth;
+  draw_half();
 }
 
 static void bone_draw_update_display_matrix(const eArmature_Drawtype drawtype,

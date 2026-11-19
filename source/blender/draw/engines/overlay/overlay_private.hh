@@ -345,6 +345,8 @@ class ShapeCache {
   BatchPtr bone_envelope_wire;
   BatchPtr bone_octahedron;
   BatchPtr bone_octahedron_wire;
+  BatchPtr joint_pyramid;
+  BatchPtr joint_pyramid_wire;
   BatchPtr bone_sphere;
   BatchPtr bone_sphere_wire;
   BatchPtr bone_stick;

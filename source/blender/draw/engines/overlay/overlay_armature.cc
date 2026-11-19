@@ -1981,6 +1981,12 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   /* The joint owns its outgoing links: selecting a shaft rotates it about its wide end. */
   const float3 origin(bone.disp_mat()[3]);
   const float cap_depth = 0.1f * reference_size;
+  /* Build the link cross-section in the owning joint's frame. Deriving roll
+   * from armature-space direction alone makes a rigidly rotating fork twist. */
+  float joint_rotation[4];
+  mat4_to_quat(joint_rotation, bone.disp_mat());
+  float3x3 joint_axes;
+  quat_to_mat3(joint_axes.ptr(), joint_rotation);
   for (const float3 &child_origin : child_origins) {
     /* Fit the tapered link to the actual pivots, independently for each branch. */
     const float3 offset = child_origin - origin;
@@ -1989,14 +1995,16 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
     if (length <= 1e-8f) {
       continue;
     }
-    float3x3 rotation;
-    vec_roll_to_mat3_normalized(direction, 0.0f, rotation.ptr());
     if (length <= cap_depth) {
       /* No room for a shaft between overlapping joints. */
       continue;
     }
 
-    float4x4 half(rotation);
+    const float3 up = math::abs(math::dot(direction, joint_axes[2])) > 0.99f ? joint_axes[0] :
+                                                                               joint_axes[2];
+    float4x4 half = float4x4::identity();
+    half.x_axis() = math::normalize(math::cross(direction, up));
+    half.z_axis() = math::cross(half.x_axis(), direction);
     half.x_axis() *= 0.06f * display_size;
     half.z_axis() *= 0.06f * display_size;
     half.location() = origin + cap_depth * direction;

@@ -1942,8 +1942,11 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   const int id = select_id | BONESEL_BONE;
   const float *solid = get_bone_solid_with_consts_color(ctx, bone, flags);
   const float *hint = get_bone_hint_color(ctx, flags);
-  drw_shgroup_bone_sphere(ctx, bone.disp_mat(), solid, hint, wire, id);
-  if (!parent_origin || ctx->res->is_selection()) {
+  /* Mark a joint hit separately from its incoming link. Both endpoint bits
+   * select the entire joint when edit selection is synchronized. */
+  drw_shgroup_bone_sphere(
+      ctx, bone.disp_mat(), solid, hint, wire, select_id | BONESEL_ANY);
+  if (!parent_origin) {
     return;
   }
 
@@ -1971,16 +1974,17 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   half.location() = float3(parent_origin) + cap_depth * direction;
 
   const auto sel_id = ctx->res->select_id(*ctx->ob_ref, id);
+  /* The fill pass alone has no line data for overlay antialiasing. Give an
+   * unselected solid link a neutral silhouette as well. */
+  const float4 outline = wire[3] > 0.0f ? float4(wire) : float4(UNPACK3(hint), 1.0f);
   auto draw_half = [&]() {
     const float4x4 matrix = ctx->ob->object_to_world() * half;
     if (ctx->is_filled) {
       ctx->bone_buf->custom_shape_fill_get_buffer(ctx->res->shapes.joint_pyramid.get())
           .append({matrix, solid, hint}, sel_id);
     }
-    if (wire[3] > 0.0f) {
-      ctx->bone_buf->custom_shape_outline_get_buffer(ctx->res->shapes.joint_pyramid_wire.get())
-          .append({matrix, wire}, sel_id);
-    }
+    ctx->bone_buf->custom_shape_outline_get_buffer(ctx->res->shapes.joint_pyramid_wire.get())
+        .append({matrix, outline}, sel_id);
   };
   half.y_axis() = direction * (length - cap_depth);
   draw_half();

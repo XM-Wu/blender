@@ -360,7 +360,8 @@ ShapeCache::ShapeCache()
       verts.append({ring[i], VCLASS_NONE, normal});
       verts.append({ring[next], VCLASS_NONE, normal});
       /* Silhouette of a side edge, then the perimeter of the base. */
-      GPU_indexbuf_add_line_adj_verts(&edges, 3 * prev + 1, 3 * i, 3 * i + 1, 3 * next + 1);
+      /* Follow the outward winding: the outline shader rejects concave edges. */
+      GPU_indexbuf_add_line_adj_verts(&edges, 3 * next + 1, 3 * i, 3 * i + 1, 3 * prev + 1);
       GPU_indexbuf_add_line_adj_verts(&edges, 3 * i, 3 * i + 1, 3 * next + 1, 3 * prev + 1);
     }
     joint_pyramid = BatchPtr(

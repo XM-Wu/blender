@@ -327,6 +327,9 @@ static void write_bone(BlendWriter *writer, Bone *bone)
   bone->runtime = Bone_Runtime{};
   writer->write_struct(bone);
   bone->runtime = runtime_backup;
+  if (bone->xbone_joint) {
+    writer->write_struct(bone->xbone_joint);
+  }
 
   /* Write ID Properties -- and copy this comment EXACTLY for easy finding
    * of library blocks that implement this. */
@@ -415,6 +418,7 @@ static void direct_link_bones(BlendDataReader *reader, Bone *bone, bool *all_bon
     *all_bones_are_named = false;
   }
   BLO_read_struct(reader, Bone, &bone->parent);
+  BLO_read_struct(reader, XBoneJoint, &bone->xbone_joint);
 
   BLO_read_struct(reader, IDProperty, &bone->prop);
   IDP_BlendDataRead(reader, &bone->prop);
@@ -652,6 +656,7 @@ void BKE_armature_bonelist_free(ListBaseT<Bone> *lb, const bool do_id_user)
     if (bone.system_properties) {
       IDP_FreeProperty_ex(bone.system_properties, do_id_user);
     }
+    MEM_delete(bone.xbone_joint);
     bone.runtime.collections.free_no_destruct();
     BKE_armature_bonelist_free(&bone.childbase, do_id_user);
   }
@@ -685,6 +690,9 @@ static void copy_bonechildren(Bone *bone_dst,
     *r_bone_dst_act = bone_dst;
   }
 
+  if (bone_src->xbone_joint) {
+    bone_dst->xbone_joint = MEM_new<XBoneJoint>(__func__, *bone_src->xbone_joint);
+  }
   if (bone_src->prop) {
     bone_dst->prop = IDP_CopyProperty_ex(bone_src->prop, flag);
   }
@@ -736,6 +744,9 @@ static void copy_bonechildren_custom_handles(Bone *bone_dst, bArmature *arm_dst)
 
 static void copy_bone_transform(Bone *bone_dst, const Bone *bone_src)
 {
+  if (bone_src->xbone_joint && bone_dst->xbone_joint) {
+    *bone_dst->xbone_joint = *bone_src->xbone_joint;
+  }
   bone_dst->roll = bone_src->roll;
 
   copy_v3_v3(bone_dst->head, bone_src->head);
@@ -828,6 +839,17 @@ static void armature_transform_recurse(ListBaseT<Bone> *bonebase,
       bone.roll = atan2f(delta_mat3[2][0], delta_mat3[2][2]);
     }
 
+    if (XBoneJoint *joint = bone.xbone_joint) {
+      float axis[3], frame[3][3];
+      sub_v3_v3v3(axis, bone.tail, bone.head);
+      bone.length = len_v3(axis);
+      vec_roll_to_mat3(axis, bone.roll, frame);
+      mat3_to_quat(joint->orientation, frame);
+      copy_v3_v3(joint->position, bone.head);
+      if (bone_parent) {
+        joint->position[1] += bone_parent->length;
+      }
+    }
     BKE_armature_where_is_bone(&bone, bone_parent, false);
 
     {
@@ -2149,6 +2171,12 @@ void BKE_bone_offset_matrix_get(const Bone *bone, float offs_bone[4][4])
 {
   BLI_assert(bone->parent != nullptr);
 
+  if (const XBoneJoint *joint = bone->xbone_joint) {
+    quat_to_mat4(offs_bone, joint->orientation);
+    copy_v3_v3(offs_bone[3], joint->position);
+    return;
+  }
+
   /* Bone transform itself. */
   copy_m4_m3(offs_bone, bone->bone_mat);
 
@@ -2887,10 +2915,21 @@ void BKE_armature_where_is_bone(Bone *bone, const Bone *bone_parent, const bool 
 {
   float vec[3];
 
-  /* Bone Space */
-  sub_v3_v3v3(vec, bone->tail, bone->head);
-  bone->length = len_v3(vec);
-  vec_roll_to_mat3(vec, bone->roll, bone->bone_mat);
+  if (const XBoneJoint *joint = bone->xbone_joint) {
+    quat_to_mat3(bone->bone_mat, joint->orientation);
+    /* Adapt the point and frame for consumers of the segment API. */
+    copy_v3_v3(bone->head, joint->position);
+    if (bone_parent) {
+      bone->head[1] -= bone_parent->length;
+    }
+    madd_v3_v3v3fl(bone->tail, bone->head, bone->bone_mat[1], bone->length);
+    mat3_to_vec_roll(bone->bone_mat, nullptr, &bone->roll);
+  }
+  else {
+    sub_v3_v3v3(vec, bone->tail, bone->head);
+    bone->length = len_v3(vec);
+    vec_roll_to_mat3(vec, bone->roll, bone->bone_mat);
+  }
 
   /* this is called on old file reading too... */
   if (bone->xwidth == 0.0f) {
@@ -2910,6 +2949,14 @@ void BKE_armature_where_is_bone(Bone *bone, const Bone *bone_parent, const bool 
   else {
     copy_m4_m3(bone->arm_mat, bone->bone_mat);
     copy_v3_v3(bone->arm_mat[3], bone->head);
+  }
+
+  if (bone->xbone_joint) {
+    copy_v3_v3(bone->arm_head, bone->arm_mat[3]);
+    madd_v3_v3v3fl(bone->arm_tail, bone->arm_head, bone->arm_mat[1], bone->length);
+    float orientation[3][3];
+    copy_m3_m4(orientation, bone->arm_mat);
+    mat3_to_vec_roll(orientation, nullptr, &bone->arm_roll);
   }
 
   /* and the kiddies */

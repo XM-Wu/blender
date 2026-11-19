@@ -1882,7 +1882,9 @@ static void draw_bone_relations(const Armatures::DrawContext *ctx,
   }
 }
 
-static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBonePtr bone)
+static void draw_bone_name(const Armatures::DrawContext *ctx,
+                           const UnifiedBonePtr bone,
+                           bool xbone)
 {
   uchar color[4];
   float vec[3];
@@ -1902,7 +1904,12 @@ static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBoneP
 
   const float *head = is_pose ? pchan->pose_head : eBone->head;
   const float *tail = is_pose ? pchan->pose_tail : eBone->tail;
-  mid_v3_v3v3(vec, head, tail);
+  if (xbone) {
+    copy_v3_v3(vec, head);
+  }
+  else {
+    mid_v3_v3v3(vec, head, tail);
+  }
   mul_m4_v3(ctx->ob->object_to_world().ptr(), vec);
 
   DRW_text_cache_add(ctx->dt,
@@ -1921,6 +1928,32 @@ static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBoneP
 /* -------------------------------------------------------------------- */
 /** \name Main Draw Loops
  * \{ */
+
+/* XBone uses one pose channel per joint. Its pivot is selectable as a whole
+ * node in Edit Mode, so translation preserves the stored rest orientation. */
+static void draw_xbone_joint(const Armatures::DrawContext *ctx,
+                             UnifiedBonePtr bone,
+                             const eBone_Flag flags,
+                             const int select_id,
+                             const float *parent_origin)
+{
+  draw_bone_update_disp_matrix_default(bone);
+  const float *wire = get_bone_wire_color(ctx, flags);
+  const int id = select_id | BONESEL_BONE;
+  drw_shgroup_bone_sphere(ctx,
+                          bone.disp_mat(),
+                          get_bone_solid_with_consts_color(ctx, bone, flags),
+                          get_bone_hint_color(ctx, flags),
+                          wire,
+                          id);
+  if (parent_origin && !ctx->res->is_selection()) {
+    const float4x4 &world = ctx->ob->object_to_world();
+    ctx->bone_buf->wire_buf.append(math::transform_point(world, float3(parent_origin)),
+                                   math::transform_point(world, float3(bone.disp_mat()[3])),
+                                   float4(wire),
+                                   ctx->res->select_id(*ctx->ob_ref, id));
+  }
+}
 
 static void bone_draw_update_display_matrix(const eArmature_Drawtype drawtype,
                                             const bool use_custom_shape,
@@ -1955,6 +1988,7 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
 
   edbo_compute_bbone_child(&arm);
 
+  const bool xbone = (arm.flag & ARM_XBONE) != 0;
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
   for (eBone = arm.edbo->first(),
@@ -1987,19 +2021,30 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
       set_ctx_bcolor(ctx, bone);
     }
 
-    if (!is_select) {
+    if (!is_select && !xbone) {
       draw_bone_relations(ctx, bone, boneflag);
     }
 
-    const eArmature_Drawtype drawtype = eBone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
-                                            arm_drawtype :
-                                            eArmature_Drawtype(eBone->drawtype);
-    bone_draw_update_display_matrix(drawtype, false, bone, arm);
-    bone_draw(drawtype, false, ctx, bone, boneflag, select_id);
+    if (xbone) {
+      draw_xbone_joint(ctx,
+                       bone,
+                       boneflag,
+                       select_id,
+                       eBone->parent && animrig::bone_is_visible(&arm, eBone->parent) ?
+                           eBone->parent->head :
+                           nullptr);
+    }
+    else {
+      const eArmature_Drawtype drawtype = eBone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
+                                              arm_drawtype :
+                                              eArmature_Drawtype(eBone->drawtype);
+      bone_draw_update_display_matrix(drawtype, false, bone, arm);
+      bone_draw(drawtype, false, ctx, bone, boneflag, select_id);
+    }
 
     if (!is_select) {
       if (show_text && (arm.flag & ARM_DRAWNAMES)) {
-        draw_bone_name(ctx, bone);
+        draw_bone_name(ctx, bone, xbone);
       }
 
       if (arm.flag & ARM_DRAWAXES) {
@@ -2083,6 +2128,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
     }
   }
 
+  const bool xbone = (arm.flag & ARM_XBONE) != 0;
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
   for (bPoseChannel *pchan = ob->pose->chanbase.first(); pchan;
@@ -2123,15 +2169,27 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
     }
 
     const bool use_custom_shape = (pchan->custom) && !(arm.flag & ARM_NO_CUSTOM);
-    if (!is_pose_select) {
+    if (!is_pose_select && !xbone) {
       draw_bone_relations(ctx, bone_ptr, boneflag);
     }
 
-    const eArmature_Drawtype drawtype = bone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
-                                            arm_drawtype :
-                                            eArmature_Drawtype(bone->drawtype);
-    bone_draw_update_display_matrix(drawtype, use_custom_shape, bone_ptr, arm);
-    bone_draw(drawtype, use_custom_shape, ctx, bone_ptr, boneflag, select_id);
+    if (xbone) {
+      draw_xbone_joint(ctx,
+                       bone_ptr,
+                       boneflag,
+                       select_id,
+                       pchan->parent && animrig::bone_is_visible(
+                                            &arm, {pchan->parent, pchan->parent->bone_get(*ob)}) ?
+                           pchan->parent->pose_head :
+                           nullptr);
+    }
+    else {
+      const eArmature_Drawtype drawtype = bone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
+                                              arm_drawtype :
+                                              eArmature_Drawtype(bone->drawtype);
+      bone_draw_update_display_matrix(drawtype, use_custom_shape, bone_ptr, arm);
+      bone_draw(drawtype, use_custom_shape, ctx, bone_ptr, boneflag, select_id);
+    }
 
     /* Below this point nothing is used for selection queries. */
     if (is_pose_select) {
@@ -2142,7 +2200,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       draw_bone_degrees_of_freedom(ctx, pchan);
     }
     if (show_text && (arm.flag & ARM_DRAWNAMES)) {
-      draw_bone_name(ctx, bone_ptr);
+      draw_bone_name(ctx, bone_ptr, xbone);
     }
     if (arm.flag & ARM_DRAWAXES) {
       draw_axes(ctx, bone_ptr, arm);

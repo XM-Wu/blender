@@ -65,6 +65,7 @@ enum eArmature_Flag : int {
   ARM_DS_EXPAND = (1 << 13),
   /** Other objects are used for visualizing various states (hack for efficient updates). */
   ARM_HAS_VIZ_DEPS = (1 << 14),
+  ARM_XBONE = (1 << 15),
 };
 ENUM_OPERATORS(eArmature_Flag);
 
@@ -299,6 +300,12 @@ struct Bone_Runtime {
   ListBaseT<BoneCollectionReference> collections = {nullptr, nullptr};
 };
 
+/** Rigid rest transform relative to the parent joint (armature space for roots). */
+struct XBoneJoint {
+  float position[3] = {};
+  float orientation[4] = {1, 0, 0, 0};
+};
+
 struct Bone {
   DNA_DEFINE_CXX_METHODS(Bone)
 
@@ -308,7 +315,8 @@ struct Bone {
   IDProperty *prop = nullptr;
   /** System-Defined Properties storage. */
   IDProperty *system_properties = nullptr;
-  void *_pad0 = nullptr;
+  /** Optional point-joint rest data. Bone carries the shared name and hierarchy. */
+  XBoneJoint *xbone_joint = nullptr;
   /** Parent (IK parent if appropriate flag is set). */
   struct Bone *parent = nullptr;
   /** Children. */

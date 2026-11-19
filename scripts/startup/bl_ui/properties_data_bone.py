@@ -102,6 +102,12 @@ class BONE_PT_transform(BoneButtonsPanel, Panel):
         elif context.edit_bone:
             bone = context.edit_bone
             col = layout.column()
+            if bone.id_data.is_xbone:
+                col.prop(bone, "joint_position")
+                col.prop(bone, "joint_orientation")
+                col.prop(bone, "lock")
+                return
+
             col.prop(bone, "head")
             col.prop(bone, "tail")
 
@@ -239,7 +245,8 @@ class BONE_PT_relations(BoneButtonsPanel, Panel):
 
         sub = col.column()
         sub.active = (bone.parent is not None)
-        sub.prop(bone, "use_connect")
+        if not bone.id_data.is_xbone:
+            sub.prop(bone, "use_connect")
         sub = col.column()
         sub.active = (not bone.parent or not bone.use_connect)
         sub.prop(bone, "use_local_location")

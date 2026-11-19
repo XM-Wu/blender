@@ -1379,7 +1379,7 @@ void OBJECT_OT_text_add(wmOperatorType *ot)
 /** \name Add Armature Operator
  * \{ */
 
-static wmOperatorStatus object_armature_add_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus armature_add(bContext *C, wmOperator *op, const bool xbone)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
@@ -1398,7 +1398,7 @@ static wmOperatorStatus object_armature_add_exec(bContext *C, wmOperator *op)
   add_generic_get_opts(C, op, 'Z', loc, rot, nullptr, &enter_editmode, &local_view_bits, nullptr);
 
   if ((obedit == nullptr) || (obedit->type != OB_ARMATURE)) {
-    obedit = add_type(C, OB_ARMATURE, nullptr, loc, rot, true, local_view_bits);
+    obedit = add_type(C, OB_ARMATURE, xbone ? "XBone" : nullptr, loc, rot, true, local_view_bits);
     editmode_enter_ex(bmain, scene, obedit, 0);
     newob = true;
   }
@@ -1417,7 +1417,15 @@ static wmOperatorStatus object_armature_add_exec(bContext *C, wmOperator *op)
   ANIM_armature_bonecoll_active_set(armature, default_bonecoll);
 
   dia = RNA_float_get(op->ptr, "radius");
-  ED_armature_ebone_add_primitive(obedit, dia, view_aligned);
+  EditBone *root = ED_armature_ebone_add_primitive(obedit, dia, view_aligned);
+  if (xbone) {
+    armature->flag |= ARM_XBONE;
+    armature->deformflag &= ~ARM_DEF_ENVELOPE;
+    STRNCPY_UTF8(root->name, "Joint");
+    root->tail[1] = dia;
+    root->tail[2] = 0;
+    root->flag |= BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL;
+  }
 
   /* userdef */
   if (newob && !enter_editmode) {
@@ -1425,6 +1433,28 @@ static wmOperatorStatus object_armature_add_exec(bContext *C, wmOperator *op)
   }
 
   return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus object_armature_add_exec(bContext *C, wmOperator *op)
+{
+  return armature_add(C, op, false);
+}
+
+static wmOperatorStatus object_xbone_add_exec(bContext *C, wmOperator *op)
+{
+  return armature_add(C, op, true);
+}
+
+void OBJECT_OT_xbone_add(wmOperatorType *ot)
+{
+  ot->name = "Add XBone";
+  ot->description = "Create an armature of point joints with local +X as the aim axis";
+  ot->idname = "OBJECT_OT_xbone_add";
+  ot->exec = object_xbone_add_exec;
+  ot->poll = ED_operator_objectmode;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  add_unit_props_radius(ot);
+  add_generic_props(ot, true);
 }
 
 void OBJECT_OT_armature_add(wmOperatorType *ot)

@@ -129,6 +129,76 @@ EditBone *ED_armature_ebone_add_primitive(Object *obedit_arm,
   return bone;
 }
 
+static void xbone_aim_frame(bArmature &arm,
+                            EditBone *parent,
+                            const EditBone *child,
+                            const float direction[3],
+                            float frame[3][3])
+{
+  /* Keep the previous up axis where possible, including for vertical chains. */
+  float side[3];
+  cross_v3_v3v3(side, frame[2], direction);
+  if (normalize_v3(side) < 1e-5f) {
+    cross_v3_v3v3(side, frame[1], direction);
+    normalize_v3(side);
+  }
+  copy_v3_v3(frame[0], direction);
+  copy_v3_v3(frame[1], side);
+  cross_v3_v3v3(frame[2], frame[0], frame[1]);
+
+  bool first_child = true;
+  for (const EditBone &bone : *arm.edbo) {
+    if (&bone != child && bone.parent == parent) {
+      first_child = false;
+      break;
+    }
+  }
+  if (first_child) {
+    ED_armature_ebone_from_mat3(parent, frame);
+  }
+}
+
+/* For XBone the edit bone is a storage adapter for a pivot and an orthonormal
+ * frame. The unit Y vector encodes orientation only. Parent links join pivots. */
+static bool xbone_add_child(Object *ob, const float *position)
+{
+  bArmature *arm = id_cast<bArmature *>(ob->data);
+  EditBone *parent = arm->act_edbone;
+  if (position && arm->edbo->is_empty()) {
+    EditBone *root = ED_armature_ebone_add_primitive(ob, 1.0f, true);
+    STRNCPY_UTF8(root->name, "Joint");
+    add_v3_v3(root->tail, position);
+    copy_v3_v3(root->head, position);
+    root->flag |= BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL;
+    return true;
+  }
+  if (!parent || !(parent->flag & BONE_SELECTED) || !animrig::bone_is_visible(arm, parent)) {
+    return false;
+  }
+
+  float frame[3][3];
+  ED_armature_ebone_to_mat3(parent, frame);
+  if (position) {
+    float direction[3];
+    sub_v3_v3v3(direction, position, parent->head);
+    if (normalize_v3(direction) < 1e-6f) {
+      return false;
+    }
+    xbone_aim_frame(*arm, parent, nullptr, direction, frame);
+  }
+
+  ED_armature_edit_deselect_all(ob);
+  EditBone *child = ED_armature_ebone_add(arm, "Joint");
+  child->parent = parent;
+  BLI_duplicatelist(&child->bone_collections, &parent->bone_collections);
+  copy_v3_v3(child->head, position ? position : parent->head);
+  madd_v3_v3v3fl(child->tail, child->head, frame[1], len_v3v3(parent->head, parent->tail));
+  ED_armature_ebone_from_mat3(child, frame);
+  child->flag |= BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL;
+  arm->act_edbone = child;
+  return true;
+}
+
 /**
  * Note this is already ported to multi-objects as it is.
  * Since only the active bone is extruded even for single objects,
@@ -137,7 +207,7 @@ EditBone *ED_armature_ebone_add_primitive(Object *obedit_arm,
  * If we want the support to be expanded we should something like the
  * offset we do for mesh click extrude.
  */
-static wmOperatorStatus armature_click_extrude_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus armature_click_extrude_exec(bContext *C, wmOperator *op)
 {
   bArmature *arm;
   EditBone *ebone, *newbone, *flipbone;
@@ -149,6 +219,20 @@ static wmOperatorStatus armature_click_extrude_exec(bContext *C, wmOperator * /*
   scene = CTX_data_scene(C);
   obedit = CTX_data_edit_object(C);
   arm = id_cast<bArmature *>(obedit->data);
+
+  if (arm->flag & ARM_XBONE) {
+    float local[3];
+    mul_v3_m4v3(local, obedit->world_to_object().ptr(), scene->cursor.location);
+    if (!xbone_add_child(obedit, local)) {
+      BKE_report(
+          op->reports, RPT_WARNING, "Select a joint and move the cursor away from its pivot");
+      return OPERATOR_CANCELLED;
+    }
+    DEG_id_tag_update(&obedit->id, ID_RECALC_GEOMETRY | ID_RECALC_SELECT);
+    WM_event_add_notifier(C, NC_OBJECT | ND_BONE_SELECT, obedit);
+    ED_outliner_select_sync_from_edit_bone_tag(C);
+    return OPERATOR_FINISHED;
+  }
 
   /* find the active or selected bone */
   for (ebone = arm->edbo->first(); ebone; ebone = ebone->next) {
@@ -286,6 +370,22 @@ static wmOperatorStatus armature_click_extrude_invoke(bContext *C,
     retval |= OPERATOR_PASS_THROUGH;
   }
   return WM_operator_flag_only_pass_through_on_press(retval, event);
+}
+
+static bool xbone_edit_poll(bContext *C)
+{
+  return ED_operator_editarmature(C) &&
+         (id_cast<bArmature *>(CTX_data_edit_object(C)->data)->flag & ARM_XBONE);
+}
+
+void ARMATURE_OT_xbone_joint_add(wmOperatorType *ot)
+{
+  ot->name = "Add XBone Joint at Cursor";
+  ot->idname = "ARMATURE_OT_xbone_joint_add";
+  ot->description = "Add a child of the active joint at the 3D cursor";
+  ot->poll = xbone_edit_poll;
+  ot->exec = armature_click_extrude_exec;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 void ARMATURE_OT_click_extrude(wmOperatorType *ot)
@@ -1651,6 +1751,14 @@ static wmOperatorStatus armature_extrude_exec(bContext *C, wmOperator *op)
 
   for (Object *ob : objects) {
     bArmature *arm = id_cast<bArmature *>(ob->data);
+    if (arm->flag & ARM_XBONE) {
+      if (xbone_add_child(ob, nullptr)) {
+        changed_multi = true;
+        DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY | ID_RECALC_SELECT);
+        WM_event_add_notifier(C, NC_OBJECT | ND_BONE_SELECT, ob);
+      }
+      continue;
+    }
     bool forked_iter = forked;
 
     EditBone *newbone = nullptr, *ebone, *flipbone, *first = nullptr;
@@ -1825,6 +1933,43 @@ static wmOperatorStatus armature_extrude_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+/* The normal E macro translates the new pivot interactively. Its final
+ * position becomes available after the transform operator finishes. */
+static wmOperatorStatus xbone_finish_extrude(bContext *C, wmOperator * /*op*/)
+{
+  const Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
+      *CTX_data_main(C), CTX_data_scene(C), CTX_data_view_layer(C), CTX_wm_view3d(C));
+  for (Object *ob : objects) {
+    bArmature *arm = id_cast<bArmature *>(ob->data);
+    if (!(arm->flag & ARM_XBONE)) {
+      continue;
+    }
+    EditBone *child = arm->act_edbone;
+    if (!child || !child->parent || !(child->flag & BONE_SELECTED)) {
+      continue;
+    }
+    EditBone *parent = child->parent;
+    float frame[3][3], direction[3];
+    sub_v3_v3v3(direction, child->head, parent->head);
+    if (normalize_v3(direction) > 1e-6f) {
+      ED_armature_ebone_to_mat3(parent, frame);
+      xbone_aim_frame(*arm, parent, child, direction, frame);
+      ED_armature_ebone_from_mat3(child, frame);
+      DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+      WM_event_add_notifier(C, NC_OBJECT | ND_POSE, ob);
+    }
+  }
+  return OPERATOR_FINISHED;
+}
+
+void ARMATURE_OT_xbone_finish_extrude(wmOperatorType *ot)
+{
+  ot->name = "Orient Extruded XBone Joint";
+  ot->idname = "ARMATURE_OT_xbone_finish_extrude";
+  ot->exec = xbone_finish_extrude;
+  ot->flag = OPTYPE_INTERNAL;
+}
+
 void ARMATURE_OT_extrude(wmOperatorType *ot)
 {
   /* identifiers */
@@ -1853,6 +1998,9 @@ enum class BoneSpace { OBJECT = 0, WORLD = 1 };
 static wmOperatorStatus armature_bone_primitive_add_exec(bContext *C, wmOperator *op)
 {
   Object *obedit = CTX_data_edit_object(C);
+  if (id_cast<bArmature *>(obedit->data)->flag & ARM_XBONE) {
+    return armature_click_extrude_exec(C, op);
+  }
 
   invert_m4_m4(obedit->runtime->world_to_object.ptr(), obedit->object_to_world().ptr());
   const float3x3 imat = float3x3(obedit->world_to_object());

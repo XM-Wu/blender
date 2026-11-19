@@ -66,6 +66,8 @@ void ARMATURE_OT_symmetrize(wmOperatorType *ot);
 void ARMATURE_OT_extrude(wmOperatorType *ot);
 void ARMATURE_OT_hide(wmOperatorType *ot);
 void ARMATURE_OT_reveal(wmOperatorType *ot);
+void ARMATURE_OT_xbone_joint_add(wmOperatorType *ot);
+void ARMATURE_OT_xbone_finish_extrude(wmOperatorType *ot);
 void ARMATURE_OT_click_extrude(wmOperatorType *ot);
 void ARMATURE_OT_fill(wmOperatorType *ot);
 void ARMATURE_OT_separate(wmOperatorType *ot);

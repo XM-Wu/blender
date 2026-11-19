@@ -770,6 +770,11 @@ add_blender_test(
 )
 
 add_blender_test(
+  bl_animation_xbone
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_xbone.py
+)
+
+add_blender_test(
   bl_animation_bake
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_bake.py
 )

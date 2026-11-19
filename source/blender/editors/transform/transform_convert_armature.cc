@@ -950,8 +950,9 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
              * causes problem with snapping (see #45974).
              * However, in rotation mode, we want to keep that 'rotate bone around root with
              * only its tip selected' behavior (see #46325). */
-            if ((t->around == V3D_AROUND_LOCAL_ORIGINS) &&
-                ((t->mode == TFM_ROTATION) || (ebo.flag & BONE_ROOTSEL)))
+            if ((arm->flag & ARM_XBONE) ||
+                ((t->around == V3D_AROUND_LOCAL_ORIGINS) &&
+                 ((t->mode == TFM_ROTATION) || (ebo.flag & BONE_ROOTSEL))))
             {
               copy_v3_v3(td->center, ebo.head);
             }

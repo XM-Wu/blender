@@ -2702,10 +2702,13 @@ class TOPBAR_MT_edit_armature_add(Menu):
     bl_label = "Armature"
     bl_options = {'SEARCH_ON_KEY_PRESS'}
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
 
         layout.operator_context = 'EXEC_REGION_WIN'
+        if context.edit_object.data.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            return
         layout.operator("armature.bone_primitive_add", text="Single Bone", icon='BONE_DATA')
 
 
@@ -2864,6 +2867,8 @@ class VIEW3D_MT_add(Menu):
             layout.menu("VIEW3D_MT_armature_add", icon='OUTLINER_OB_ARMATURE')
         else:
             layout.operator("object.armature_add", text="Armature", icon='OUTLINER_OB_ARMATURE')
+
+        layout.operator("object.xbone_add", text="XBone", icon='ARMATURE_DATA').enter_editmode = True
 
         layout.menu("VIEW3D_MT_lattice_add", icon='OUTLINER_OB_LATTICE')
 
@@ -5762,6 +5767,12 @@ class VIEW3D_MT_edit_armature(Menu):
         edit_object = context.edit_object
         arm = edit_object.data
 
+        if arm.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.delete", text="Delete Joints")
+            return
+
         layout.menu("VIEW3D_MT_transform_armature")
         layout.menu("VIEW3D_MT_mirror")
         layout.menu("VIEW3D_MT_snap")
@@ -5823,6 +5834,12 @@ class VIEW3D_MT_armature_context_menu(Menu):
         arm = edit_object.data
 
         layout.operator_context = 'INVOKE_REGION_WIN'
+
+        if arm.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.delete", text="Delete Joints")
+            return
 
         # Add
         layout.operator("armature.subdivide", text="Subdivide")

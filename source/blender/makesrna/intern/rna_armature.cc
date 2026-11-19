@@ -62,6 +62,7 @@ constexpr int COLOR_SETS_MAX_THEMED_INDEX = 20;
 
 #  include <fmt/format.h>
 
+#  include "BLI_math_rotation_c.hh"
 #  include "BLI_math_vector_c.hh"
 #  include "BLI_string.hh"
 #  include "BLI_string_utf8.hh"
@@ -922,6 +923,30 @@ static void rna_EditBone_matrix_set(PointerRNA *ptr, const float *values)
   ED_armature_ebone_from_mat4(ebone, reinterpret_cast<float (*)[4]>(const_cast<float *>(values)));
 }
 
+static void rna_EditBone_joint_position_set(PointerRNA *ptr, const float *value)
+{
+  EditBone *edit = static_cast<EditBone *>(ptr->data);
+  float delta[3];
+  sub_v3_v3v3(delta, value, edit->head);
+  add_v3_v3(edit->tail, delta);
+  copy_v3_v3(edit->head, value);
+}
+
+static void rna_EditBone_joint_orientation_get(PointerRNA *ptr, float *value)
+{
+  float frame[3][3];
+  ED_armature_ebone_to_mat3(static_cast<EditBone *>(ptr->data), frame);
+  mat3_to_quat(value, frame);
+}
+
+static void rna_EditBone_joint_orientation_set(PointerRNA *ptr, const float *value)
+{
+  float frame[3][3], quaternion[4];
+  normalize_qt_qt(quaternion, value);
+  quat_to_mat3(frame, quaternion);
+  ED_armature_ebone_from_mat3(static_cast<EditBone *>(ptr->data), frame);
+}
+
 static float rna_EditBone_length_get(PointerRNA *ptr)
 {
   EditBone *ebone = static_cast<EditBone *>(ptr->data);
@@ -1719,12 +1744,24 @@ static void rna_def_bone(BlenderRNA *brna)
   StructRNA *srna;
   PropertyRNA *prop;
 
+  srna = RNA_def_struct(brna, "XBoneJoint", nullptr);
+  RNA_def_struct_ui_text(srna, "XBone Joint", "Point joint rest transform in parent joint space");
+  prop = RNA_def_property(srna, "position", PROP_FLOAT, PROP_TRANSLATION);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+  prop = RNA_def_property(srna, "orientation", PROP_FLOAT, PROP_QUATERNION);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+
   srna = RNA_def_struct(brna, "Bone", nullptr);
   RNA_def_struct_ui_text(srna, "Bone", "Bone in an Armature data-block");
   RNA_def_struct_ui_icon(srna, ICON_BONE_DATA);
   RNA_def_struct_path_func(srna, "rna_Bone_path");
   RNA_def_struct_idprops_func(srna, "rna_Bone_idprops");
   RNA_def_struct_system_idprops_func(srna, "rna_Bone_system_idprops");
+
+  prop = RNA_def_property(srna, "xbone_joint", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "XBoneJoint");
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "XBone Joint", "Parent-relative rest transform of this joint");
 
   /* pointers/collections */
   /* parent (pointer) */
@@ -1864,6 +1901,22 @@ static void rna_def_edit_bone(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop, "Parent", "Parent edit bone (in same Armature)");
   RNA_def_property_update(prop, 0, "rna_Armature_redraw_data");
+
+  prop = RNA_def_property(srna, "joint_position", PROP_FLOAT, PROP_TRANSLATION);
+  RNA_def_property_float_sdna(prop, nullptr, "head");
+  RNA_def_property_array(prop, 3);
+  RNA_def_property_float_funcs(prop, nullptr, "rna_EditBone_joint_position_set", nullptr);
+  RNA_def_property_ui_text(prop, "Position", "Joint pivot in armature space");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, 0, "rna_Armature_editbone_transform_update");
+
+  prop = RNA_def_property(srna, "joint_orientation", PROP_FLOAT, PROP_QUATERNION);
+  RNA_def_property_array(prop, 4);
+  RNA_def_property_float_funcs(
+      prop, "rna_EditBone_joint_orientation_get", "rna_EditBone_joint_orientation_set", nullptr);
+  RNA_def_property_ui_text(prop, "Orientation", "Rest orientation in armature space");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, 0, "rna_Armature_editbone_transform_update");
 
   prop = RNA_def_property(srna, "roll", PROP_FLOAT, PROP_ANGLE);
   RNA_def_property_float_sdna(prop, nullptr, "roll");
@@ -2286,6 +2339,11 @@ static void rna_def_armature(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_LIB_EXCEPTION);
 
   /* flag */
+  prop = RNA_def_property(srna, "is_xbone", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", ARM_XBONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE | PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "XBone", "Use point joints with local +X as the aim axis");
+
   prop = RNA_def_property(srna, "show_axes", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "flag", ARM_DRAWAXES);
   RNA_def_property_ui_text(prop, "Display Axes", "Display bone axes");

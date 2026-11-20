@@ -295,36 +295,40 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
     hit = VIEW3D_OT_remesh_stroke.hit
     cancel = VIEW3D_OT_remesh_stroke.cancel
 
-    def anchor_at(self, obj, pixel, radius):
+    def visible_boundaries(self, obj):
         if obj is None:
-            return None
+            return []
         def project(co):
             return view.location_3d_to_region_2d(self.region, self.rv, obj.matrix_world @ co)
-        best = None
+        result = []
         with mesh_buffer(obj.data) as bm:
             for edge in bm.edges:
                 if not edge.is_boundary or edge.hide:
                     continue
-                a, b = edge.verts
+                loop = next(iter(edge.link_loops))
+                a, b = loop.vert, loop.link_loop_next.vert
                 p, q = project(a.co), project(b.co)
-                if p is None or q is None:
+                inside = project(loop.face.calc_center_median())
+                if p is None or q is None or inside is None or (q - p).length < 3:
                     continue
-                axis = q - p
-                if axis.length < 3:
-                    continue
-                t = max(0, min(1, (pixel - p).dot(axis) / axis.length_squared))
-                distance = (pixel - p.lerp(q, t)).length
-                if distance >= radius:
-                    continue
-                # Ignore a boundary on the far side of the source.
-                hit = self.hit(p.lerp(q, t))
-                if hit is None or (hit - a.co.lerp(b.co, t)).length > (a.co - b.co).length * 0.25:
-                    continue
-                inside = project(edge.link_faces[0].calc_center_median())
-                if inside is None:
-                    continue
-                radius = distance
-                best = ((a.index, b.index), (p, q), inside)
+                result.append(((a.index, b.index), (p, q), inside, (a.co.copy(), b.co.copy())))
+        return result
+
+    def anchor_at(self, pixel):
+        best = None
+        radius = self.snap_radius
+        for ids, (p, q), inside, (a, b) in self.boundaries:
+            axis = q - p
+            t = max(0, min(1, (pixel - p).dot(axis) / axis.length_squared))
+            near = p.lerp(q, t)
+            distance = (pixel - near).length
+            if distance >= radius:
+                continue
+            hit = self.hit(near)
+            if hit is None or (hit - a.lerp(b, t)).length > (a - b).length * 0.25:
+                continue
+            radius = distance
+            best = ids, (p, q), inside
         return best
 
     def invoke(self, context, event):
@@ -339,7 +343,9 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
             return {'CANCELLED'}
         scale = context.preferences.system.ui_scale
         self.first_normal = self.normal.copy()
-        self.anchor = self.anchor_at(obj, press, 10 * scale)
+        self.snap_radius = 10 * scale
+        self.boundaries = self.visible_boundaries(obj)
+        self.anchor = self.anchor_at(press)
         self.width = (self.anchor[1][0] - self.anchor[1][1]).length if self.anchor else context.scene.remesh_strip_width * scale
         self.path = [press]
         self.shift = self.anchor[1][0].lerp(self.anchor[1][1], 0.5) - press if self.anchor else Vector((0, 0))
@@ -359,6 +365,10 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
         centers = [p + self.shift for p in sample_path(self.path, self.width)]
         self.rows, self.lines = [], []
         self.valid = len(centers) >= 2
+        self.end_ids = None
+        target = self.anchor_at(pixel) if centers else None
+        if target and self.anchor and set(target[0]).intersection(self.anchor[0]):
+            target = None
         previous = None
         direction_sign = 1
         for i, center in enumerate(centers):
@@ -373,6 +383,15 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
                 direction_sign = 1 if (left - right).dot(side) >= 0 else -1
             else:
                 left, right = center + side * direction_sign, center - side * direction_sign
+            if target and i == len(centers) - 1:
+                ids, (p, q), inside = target
+                axis = q - p
+                if axis.cross(previous[0].lerp(previous[1], 0.5) - p) * axis.cross(inside - p) >= 0:
+                    self.valid = False
+                if (left - right).dot(p - q) < 0:
+                    ids, p, q = ids[::-1], q, p
+                self.end_ids = ids
+                left, right = p, q
             self.lines.extend((left, right))
             if previous:
                 a, b = previous
@@ -395,6 +414,8 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
             return
         color = (0.12, 1, 0.65, 1) if self.valid else (1, 0.25, 0.1, 1)
         draw_lines([(p.x, p.y, 0) for p in self.lines], color)
+        if self.end_ids and self.valid:
+            draw_lines([(p.x, p.y, 0) for p in self.lines[-6:-4]], (1, 0.65, 0.12, 1), width=3)
 
     def modal(self, context, event):
         if (event.type in {'ESC', 'RIGHTMOUSE', 'WINDOW_DEACTIVATE'} or
@@ -421,8 +442,22 @@ class VIEW3D_OT_remesh_ribbon(RemeshEdit, Operator):
             else:
                 a, b = [bm.verts.new(co) for co in self.rows[0]]
                 flip = None
-            for left, right in self.rows[1:]:
-                c, d = bm.verts.new(left), bm.verts.new(right)
+            bm.verts.ensure_lookup_table()
+            end = [bm.verts[i] for i in self.end_ids] if self.end_ids else None
+            for i, (left, right) in enumerate(self.rows[1:], start=1):
+                if end and i == len(self.rows) - 1:
+                    c, d = end
+                    seam = bm.edges.get((c, d))
+                    if (not seam or not seam.is_boundary or bm.edges.get((a, c)) or bm.edges.get((b, d))):
+                        return {'CANCELLED'}
+                    # The two incident faces must traverse the welded edge in opposite directions.
+                    required_flip = next(iter(seam.link_loops)).vert == d
+                    if flip is not None and required_flip != flip:
+                        self.report({'WARNING'}, "Strip would reverse winding at the target edge")
+                        return {'CANCELLED'}
+                    flip = required_flip
+                else:
+                    c, d = bm.verts.new(left), bm.verts.new(right)
                 face = bm.faces.new((a, b, d, c))
                 if flip is None:
                     face.normal_update()
@@ -496,6 +531,57 @@ class MESH_OT_remesh_relax(RemeshEdit, Operator):
         return {'FINISHED'}
 
 
+class MESH_OT_remesh_fill(RemeshEdit, Operator):
+    bl_idname = "mesh.remesh_fill"
+    bl_label = "Fill Quad Opening"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        obj = output_object(context)
+        if obj is None:
+            return {'CANCELLED'}
+        with mesh_buffer(obj.data) as bm:
+            row = boundary_row(bm)
+            if not row or not row[1] or len(row[0]) != 4:
+                self.report({'WARNING'}, "Select the four boundary edges around one opening")
+                return {'CANCELLED'}
+            verts = row[0]
+            if bm.faces.get(verts):
+                self.report({'WARNING'}, "This opening already has a face")
+                return {'CANCELLED'}
+            flips = set()
+            for a, b in pairs(verts, True):
+                edge = bm.edges.get((a, b))
+                if not edge.is_boundary:
+                    self.report({'WARNING'}, "Each edge must border exactly one face")
+                    return {'CANCELLED'}
+                flips.add(next(iter(edge.link_loops)).vert == a)
+            if len(flips) != 1:
+                self.report({'WARNING'}, "Inconsistent winding around opening")
+                return {'CANCELLED'}
+            bm.faces.new(verts[::-1] if True in flips else verts)
+            store_mesh(bm, obj.data)
+        return {'FINISHED'}
+
+
+class OBJECT_OT_remesh_finish(RemeshEdit, Operator):
+    bl_idname = "object.remesh_finish"
+    bl_label = "Finish and Select Retopo Mesh"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        output = output_object(context)
+        if output is None:
+            self.report({'WARNING'}, "Draw topology before finishing")
+            return {'CANCELLED'}
+        bpy.ops.object.mode_set(mode='OBJECT')
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        output.select_set(True)
+        context.view_layer.objects.active = output
+        return {'FINISHED'}
+
+
 class VIEW3D_PT_remesh_mode(Panel):
     bl_label = "Remesh Mode"
     bl_space_type = 'VIEW_3D'
@@ -512,6 +598,9 @@ class VIEW3D_PT_remesh_mode(Panel):
         layout.operator("view3d.remesh_stroke", text="Extrude Surface Strip").strip = True
         layout.operator("mesh.remesh_lock")
         layout.operator("mesh.remesh_relax")
+        layout.operator("mesh.remesh_fill")
+        layout.separator()
+        layout.operator("object.remesh_finish")
 
 
 class VIEW3D_OT_remesh_select(RemeshEdit, Operator):
@@ -595,7 +684,7 @@ def draw_selection():
             draw_lines(points, color, width=2.0)
 
 
-classes = (VIEW3D_OT_remesh_ribbon, VIEW3D_OT_remesh_stroke, VIEW3D_OT_remesh_select, MESH_OT_remesh_lock,
+classes = (MESH_OT_remesh_fill, OBJECT_OT_remesh_finish, VIEW3D_OT_remesh_ribbon, VIEW3D_OT_remesh_stroke, VIEW3D_OT_remesh_select, MESH_OT_remesh_lock,
            MESH_OT_remesh_relax, MESH_OT_remesh_select_all, VIEW3D_PT_remesh_mode,
            VIEW3D_MT_select_remesh, VIEW3D_MT_remesh)
 
@@ -612,7 +701,7 @@ def register():
     draw_handle = bpy.types.SpaceView3D.draw_handler_add(draw_selection, (), 'WINDOW', 'POST_VIEW')
     km = config.keymaps.new(name="Remesh Mode", space_type='EMPTY')
     for op, key in (("view3d.remesh_stroke", 'D'), ("view3d.remesh_stroke", 'E'),
-                    ("mesh.remesh_lock", 'L'), ("mesh.remesh_relax", 'S')):
+                    ("mesh.remesh_lock", 'L'), ("mesh.remesh_relax", 'S'), ("mesh.remesh_fill", 'F')):
         item = km.keymap_items.new(op, key, 'PRESS')
         if op == "view3d.remesh_stroke":
             item.properties.strip = key == 'E'

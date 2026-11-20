@@ -36,6 +36,7 @@ _modules = [
     "presets",
     "project",
     "render",
+    "remesh_mode",
     "rigidbody",
     "screen_play_rendered_anim",
     "sequencer",
@@ -83,6 +84,7 @@ def register():
     mesh_omni_outset.register()
     project.register()
     workplane.register()
+    remesh_mode.register()
     uv_tools.register()
     uv_tools_texel_pack.register()
     uv_tools_fit_align.register()
@@ -102,6 +104,7 @@ def unregister():
     mesh_omni_outset.unregister()
     project.unregister()
     workplane.unregister()
+    remesh_mode.unregister()
     uv_tools_texel_pack.unregister()
     uv_tools_fit_align.unregister()
     uv_tools_transform.unregister()

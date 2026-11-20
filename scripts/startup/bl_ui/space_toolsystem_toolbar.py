@@ -435,6 +435,17 @@ class _defs_transform:
         )
 
 
+class _defs_remesh:
+    @ToolDef.from_fn
+    def select():
+        return dict(
+            idname="builtin.remesh_select",
+            label="Select Retopology Edge",
+            icon="ops.generic.select_box",
+            description="Click an edge to select it, Shift-click to extend the selection",
+        )
+
+
 class _defs_view3d_select:
 
     @staticmethod
@@ -4121,6 +4132,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
             *_tools_annotate,
             _defs_view3d_generic.ruler,
         ],
+        'REMESH': [_defs_remesh.select],
         'PARTICLE': [
             *_tools_select,
             _defs_view3d_generic.cursor,

@@ -1479,6 +1479,9 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
           return CTX_MODE_VERTEX_GREASE_PENCIL;
         }
       }
+      if (object_mode & OB_MODE_REMESH) {
+        return CTX_MODE_REMESH;
+      }
       if (object_mode & OB_MODE_SCULPT_CURVES) {
         return CTX_MODE_SCULPT_CURVES;
       }
@@ -1528,6 +1531,7 @@ static const char *data_mode_strings[] = {
     "grease_pencil_sculpt",
     "grease_pencil_weight",
     "grease_pencil_vertex",
+    "remesh",
     nullptr,
 };
 BLI_STATIC_ASSERT(ARRAY_SIZE(data_mode_strings) == CTX_MODE_NUM + 1,

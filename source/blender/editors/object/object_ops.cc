@@ -41,6 +41,7 @@ void operatortypes_object()
   WM_operatortype_append(OBJECT_OT_mode_set);
   WM_operatortype_append(OBJECT_OT_mode_set_with_submode);
   WM_operatortype_append(OBJECT_OT_editmode_toggle);
+  WM_operatortype_append(OBJECT_OT_remeshmode_toggle);
   WM_operatortype_append(OBJECT_OT_posemode_toggle);
   WM_operatortype_append(OBJECT_OT_shade_smooth);
   WM_operatortype_append(OBJECT_OT_shade_smooth_by_angle);
@@ -344,6 +345,9 @@ void keymap_object(wmKeyConfig *keyconf)
   /* NOTE: this keymap gets disabled in non-object-mode. */
   keymap = WM_keymap_ensure(keyconf, "Object Mode", SPACE_EMPTY, RGN_TYPE_WINDOW);
   keymap->poll = object_mode_poll;
+
+  keymap = WM_keymap_ensure(keyconf, "Remesh Mode", SPACE_EMPTY, RGN_TYPE_WINDOW);
+  keymap->poll = [](bContext *C) { return CTX_data_mode_enum(C) == CTX_MODE_REMESH; };
 
   /* Modal keymaps. */
   object_transform_axis_target_modal_keymap(keyconf);

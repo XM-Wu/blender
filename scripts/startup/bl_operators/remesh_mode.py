@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Surface-guided retopology tools for the 3D View."""
+from contextlib import contextmanager
+
 import bmesh
 import bpy
 from bpy.props import BoolProperty, IntProperty
-from bpy.types import Operator, Panel
+from bpy.types import Menu, Operator, Panel
 from bpy_extras import view3d_utils as view
 from mathutils import Vector
 
@@ -13,52 +15,50 @@ keymaps = []
 
 
 def active(context):
-    obj = context.edit_object
-    return (obj is not None and obj.type == 'MESH' and obj.get(TAG) and
-            obj.parent is not None and obj.parent.type == 'MESH' and
-            len(context.objects_in_mode) == 1)
+    return context.mode == 'REMESH' and context.active_object is not None
 
 
-class VIEW3D_OT_remesh_toggle(Operator):
-    bl_idname = "view3d.remesh_mode_toggle"
-    bl_label = "Toggle Remesh Mode"
-    bl_options = {'REGISTER', 'UNDO'}
+def source_object(context):
+    obj = context.active_object
+    return obj.parent if obj.get(TAG) else obj
 
-    @classmethod
-    def poll(cls, context):
-        return (context.area and context.area.type == 'VIEW_3D' and
-                (active(context) or (context.mode == 'OBJECT' and
-                 context.object and context.object.type == 'MESH'))) or False
 
-    def execute(self, context):
-        if active(context):
-            bpy.ops.object.mode_set(mode='OBJECT')
-            return {'FINISHED'}
-        obj = context.object
-        if obj.get(TAG):
-            if not obj.parent or obj.parent.type != 'MESH':
-                self.report({'WARNING'}, "Output has no source mesh parent")
-                return {'CANCELLED'}
-            output = obj
-        else:
-            output = next((c for c in obj.children if c.get(TAG) and
-                           c.name in context.view_layer.objects and c.visible_get()), None)
-            if output is None:
-                mesh = bpy.data.meshes.new(obj.name + " Retopo")
-                output = bpy.data.objects.new(mesh.name, mesh)
-                context.collection.objects.link(output)
-                output.parent = obj
-                output[TAG] = True
-                output.show_in_front = True
-                if context.space_data.local_view:
-                    output.local_view_set(context.space_data, True)
-        for selected in context.selected_objects:
-            selected.select_set(False)
-        output.select_set(True)
-        context.view_layer.objects.active = output
-        bpy.ops.object.mode_set(mode='EDIT')
-        context.tool_settings.mesh_select_mode = (False, True, False)
-        return {'FINISHED'}
+def output_object(context, *, create=False):
+    obj = context.active_object
+    if obj.get(TAG):
+        return obj
+    for child in obj.children:
+        if child.type == 'MESH' and child.get(TAG) and child.visible_get(view_layer=context.view_layer):
+            return child
+    if create:
+        mesh = bpy.data.meshes.new(obj.name + " Retopo")
+        output = bpy.data.objects.new(mesh.name, mesh)
+        context.collection.objects.link(output)
+        output.parent = obj
+        output[TAG] = True
+        output.show_in_front = True
+        output.show_wire = True
+        output.show_all_edges = True
+        if context.space_data.local_view:
+            output.local_view_set(context.space_data, True)
+        context.view_layer.update()
+        return output
+    return None
+
+
+@contextmanager
+def mesh_buffer(mesh):
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        yield bm
+    finally:
+        bm.free()
+
+
+def store_mesh(bm, mesh):
+    bm.to_mesh(mesh)
+    mesh.update()
 
 
 def select_row(bm, row):
@@ -118,7 +118,8 @@ def commit_row(bm, coords, old, closed, normal):
 class RemeshEdit:
     @classmethod
     def poll(cls, context):
-        return bool(context.area and context.area.type == 'VIEW_3D' and active(context))
+        return bool(context.area and context.area.type == 'VIEW_3D' and active(context) and
+                    source_object(context) and source_object(context).type == 'MESH')
 
 
 class VIEW3D_OT_remesh_stroke(RemeshEdit, Operator):
@@ -133,18 +134,23 @@ class VIEW3D_OT_remesh_stroke(RemeshEdit, Operator):
         self.region = (context.region if context.region.type == 'WINDOW' else
                        next(r for r in self.area.regions if r.type == 'WINDOW'))
         self.rv = context.region_data or context.space_data.region_3d
-        self.obj = context.edit_object
-        self.source = self.obj.parent.evaluated_get(context.evaluated_depsgraph_get())
+        self.owner = context.active_object
+        self.obj = output_object(context)
+        self.source = source_object(context).evaluated_get(context.evaluated_depsgraph_get())
         self.to_source = self.source.matrix_world.inverted_safe()
-        self.to_output = self.obj.matrix_world.inverted_safe() @ self.source.matrix_world
+        self.to_output = (self.obj or self.owner).matrix_world.inverted_safe() @ self.source.matrix_world
         self.old = []
         self.closed = False
         if self.strip:
-            row = boundary_row(bmesh.from_edit_mesh(self.obj.data))
-            if not row:
+            if self.obj:
+                with mesh_buffer(self.obj.data) as bm:
+                    row = boundary_row(bm)
+                    if row:
+                        verts, self.closed = row
+                        self.old = [v.index for v in verts]
+            if not self.old:
                 self.report({'WARNING'}, "Select one connected boundary chain or loop")
                 return {'CANCELLED'}
-            self.old, self.closed = row
         self.points = []
         self.trace = []
         self.valid = False
@@ -170,7 +176,8 @@ class VIEW3D_OT_remesh_stroke(RemeshEdit, Operator):
         if self.strip:
             self.points = []
             self.trace = []
-            for vert in self.old:
+            for index in self.old:
+                vert = self.obj.data.vertices[index]
                 p = view.location_3d_to_region_2d(self.region, self.rv, self.obj.matrix_world @ vert.co)
                 if p is None:
                     return False
@@ -213,7 +220,8 @@ class VIEW3D_OT_remesh_stroke(RemeshEdit, Operator):
         self.area.tag_redraw()
 
     def modal(self, context, event):
-        if event.type in {'ESC', 'RIGHTMOUSE', 'WINDOW_DEACTIVATE'} or context.edit_object != self.obj:
+        if event.type in {'ESC', 'RIGHTMOUSE', 'WINDOW_DEACTIVATE'} or (
+                not active(context) or context.active_object != self.owner):
             self.cancel(context)
             return {'CANCELLED'}
         pixel = Vector((event.mouse_x - self.region.x, event.mouse_y - self.region.y))
@@ -238,9 +246,12 @@ class VIEW3D_OT_remesh_stroke(RemeshEdit, Operator):
             if not self.strip and len(self.points) >= 4 and (pixel - self.start).length <= self.spacing / 2:
                 self.points.pop()
                 self.closed = True
-            bm = bmesh.from_edit_mesh(self.obj.data)
-            commit_row(bm, self.points, self.old, self.closed, self.normal)
-            bmesh.update_edit_mesh(self.obj.data)
+            obj = output_object(context, create=True)
+            with mesh_buffer(obj.data) as bm:
+                bm.verts.ensure_lookup_table()
+                old = [bm.verts[i] for i in self.old]
+                commit_row(bm, self.points, old, self.closed, self.normal)
+                store_mesh(bm, obj.data)
             return {'FINISHED'}
         return {'RUNNING_MODAL'}
 
@@ -251,18 +262,19 @@ class MESH_OT_remesh_lock(RemeshEdit, Operator):
     bl_options = {'UNDO'}
 
     def execute(self, context):
-        mesh = context.edit_object.data
-        bm = bmesh.from_edit_mesh(mesh)
-        edges = [e for e in bm.edges if e.select and not e.hide]
-        if not edges:
-            self.report({'WARNING'}, "Select edges to lock or unlock")
+        obj = output_object(context)
+        if obj is None:
             return {'CANCELLED'}
-        layer = bm.edges.layers.int.get(LOCK) or bm.edges.layers.int.new(LOCK)
-        edges = [e for e in bm.edges if e.select and not e.hide]
-        lock = not all(e[layer] for e in edges)
-        for edge in edges:
-            edge[layer] = int(lock)
-        bmesh.update_edit_mesh(mesh, destructive=False)
+        with mesh_buffer(obj.data) as bm:
+            layer = bm.edges.layers.int.get(LOCK) or bm.edges.layers.int.new(LOCK)
+            edges = [e for e in bm.edges if e.select and not e.hide]
+            if not edges:
+                self.report({'WARNING'}, "Select edges to lock or unlock")
+                return {'CANCELLED'}
+            lock = not all(e[layer] for e in edges)
+            for edge in edges:
+                edge[layer] = int(lock)
+            store_mesh(bm, obj.data)
         self.report({'INFO'}, "%s %d edges" % ("Locked" if lock else "Unlocked", len(edges)))
         return {'FINISHED'}
 
@@ -273,8 +285,13 @@ class MESH_OT_remesh_relax(RemeshEdit, Operator):
     bl_options = {'UNDO'}
 
     def execute(self, context):
-        obj = context.edit_object
-        bm = bmesh.from_edit_mesh(obj.data)
+        obj = output_object(context)
+        if obj is None:
+            return {'CANCELLED'}
+        with mesh_buffer(obj.data) as bm:
+            return self.relax(context, obj, bm)
+
+    def relax(self, context, obj, bm):
         layer = bm.edges.layers.int.get(LOCK)
         source = obj.parent.evaluated_get(context.evaluated_depsgraph_get())
         transform = source.matrix_world.inverted_safe() @ obj.matrix_world
@@ -296,7 +313,7 @@ class MESH_OT_remesh_relax(RemeshEdit, Operator):
         for vert, co in moves.items():
             vert.co = co
         bm.normal_update()
-        bmesh.update_edit_mesh(obj.data, destructive=False)
+        store_mesh(bm, obj.data)
         return {'FINISHED'}
 
 
@@ -306,43 +323,133 @@ class VIEW3D_PT_remesh_mode(Panel):
     bl_region_type = 'UI'
     bl_category = "Remesh"
 
+    @classmethod
+    def poll(cls, context):
+        return active(context)
+
     def draw(self, context):
         layout = self.layout
-        editing = active(context)
-        layout.operator("view3d.remesh_mode_toggle", text="Exit Remesh Mode" if editing else "Enter Remesh Mode")
-        if editing:
-            layout.label(text="Source: " + context.edit_object.parent.name)
-            layout.operator("view3d.remesh_stroke", text="Draw Edge Flow").strip = False
-            layout.operator("view3d.remesh_stroke", text="Extrude Surface Strip").strip = True
-            layout.operator("mesh.remesh_lock")
-            layout.operator("mesh.remesh_relax")
-            layout.label(text="Drag LMB to draw or extrude.")
+        layout.operator("view3d.remesh_stroke", text="Draw Edge Flow").strip = False
+        layout.operator("view3d.remesh_stroke", text="Extrude Surface Strip").strip = True
+        layout.operator("mesh.remesh_lock")
+        layout.operator("mesh.remesh_relax")
 
 
-classes = (VIEW3D_OT_remesh_toggle, VIEW3D_OT_remesh_stroke, MESH_OT_remesh_lock,
-           MESH_OT_remesh_relax, VIEW3D_PT_remesh_mode)
+class VIEW3D_OT_remesh_select(RemeshEdit, Operator):
+    bl_idname = "view3d.remesh_select"
+    bl_label = "Select Retopology Edge"
+    bl_options = {'UNDO'}
+    extend: BoolProperty(default=False)
+
+    def invoke(self, context, event):
+        obj = output_object(context)
+        if obj is None:
+            return {'CANCELLED'}
+        pixel = Vector((event.mouse_region_x, event.mouse_region_y))
+        with mesh_buffer(obj.data) as bm:
+            closest = None
+            distance = 12 * context.preferences.system.ui_scale
+            screen = {v: view.location_3d_to_region_2d(context.region, context.region_data,
+                                                       obj.matrix_world @ v.co) for v in bm.verts}
+            for edge in bm.edges:
+                a, b = (screen[v] for v in edge.verts)
+                if a is None or b is None or edge.hide:
+                    continue
+                delta = b - a
+                t = (pixel - a).dot(delta) / max(delta.length_squared, 1e-12)
+                d = (a + delta * max(0, min(1, t)) - pixel).length
+                if d < distance:
+                    distance, closest = d, edge
+            selected = {e for e in bm.edges if e.select} if self.extend else set()
+            if closest:
+                selected.symmetric_difference_update((closest,))
+            select_row(bm, selected)
+            store_mesh(bm, obj.data)
+        return {'FINISHED'}
+
+
+class MESH_OT_remesh_select_all(RemeshEdit, Operator):
+    bl_idname = "mesh.remesh_select_all"
+    bl_label = "Select Retopology Edges"
+    bl_options = {'UNDO'}
+    deselect: BoolProperty(default=False)
+
+    def execute(self, context):
+        obj = output_object(context)
+        if obj is None:
+            return {'CANCELLED'}
+        with mesh_buffer(obj.data) as bm:
+            select_row(bm, [] if self.deselect else [e for e in bm.edges if not e.hide])
+            store_mesh(bm, obj.data)
+        return {'FINISHED'}
+
+
+class VIEW3D_MT_select_remesh(Menu):
+    bl_label = "Select"
+
+    def draw(self, context):
+        self.layout.operator("mesh.remesh_select_all", text="All").deselect = False
+        self.layout.operator("mesh.remesh_select_all", text="None").deselect = True
+
+
+class VIEW3D_MT_remesh(Menu):
+    bl_label = "Remesh"
+    draw = VIEW3D_PT_remesh_mode.draw
+
+
+def draw_selection():
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    context = bpy.context
+    if not active(context) or not context.space_data.overlay.show_overlays:
+        return
+    obj = output_object(context)
+    if obj is None:
+        return
+    mesh = obj.data
+    colors = ([], [], [])
+    lock = mesh.attributes.get(LOCK)
+    coords = [obj.matrix_world @ v.co for v in mesh.vertices]
+    for e in mesh.edges:
+        group = 2 if lock and lock.data[e.index].value else int(e.select)
+        colors[group].extend(coords[i] for i in e.vertices)
+    shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+    shader.bind()
+    shader.uniform_float("viewportSize", gpu.state.viewport_get()[2:])
+    shader.uniform_float("lineWidth", 2.0)
+    for points, color in zip(colors, ((0.16, 0.5, 0.6, 1), (1, 0.6, 0.12, 1), (0.75, 0.25, 1, 1))):
+        if points:
+            shader.uniform_float("color", color)
+            batch_for_shader(shader, 'LINES', {"pos": points}).draw(shader)
+
+
+classes = (VIEW3D_OT_remesh_stroke, VIEW3D_OT_remesh_select, MESH_OT_remesh_lock,
+           MESH_OT_remesh_relax, MESH_OT_remesh_select_all, VIEW3D_PT_remesh_mode,
+           VIEW3D_MT_select_remesh, VIEW3D_MT_remesh)
 
 
 def register():
     config = bpy.context.window_manager.keyconfigs.addon
     if config is None:
         return
-    for name, space, op, key, strip in (
-        ('3D View', 'VIEW_3D', "view3d.remesh_mode_toggle", 'R', None),
-        ('Mesh', 'EMPTY', "view3d.remesh_stroke", 'D', False),
-        ('Mesh', 'EMPTY', "view3d.remesh_stroke", 'E', True),
-        ('Mesh', 'EMPTY', "mesh.remesh_lock", 'L', None),
-        ('Mesh', 'EMPTY', "mesh.remesh_relax", 'S', None),
-    ):
-        km = config.keymaps.new(name=name, space_type=space)
-        kmi = km.keymap_items.new(op, key, 'PRESS', ctrl=True, alt=True, shift=True)
-        if strip is not None:
-            kmi.properties.strip = strip
-        keymaps.append((km, kmi))
+    global draw_handle
+    draw_handle = bpy.types.SpaceView3D.draw_handler_add(draw_selection, (), 'WINDOW', 'POST_VIEW')
+    km = config.keymaps.new(name="Remesh Mode", space_type='EMPTY')
+    for op, key in (("view3d.remesh_stroke", 'D'), ("view3d.remesh_stroke", 'E'),
+                    ("mesh.remesh_lock", 'L'), ("mesh.remesh_relax", 'S')):
+        item = km.keymap_items.new(op, key, 'PRESS')
+        if op == "view3d.remesh_stroke":
+            item.properties.strip = key == 'E'
+        keymaps.append((km, item))
+    for extend in (False, True):
+        item = km.keymap_items.new("view3d.remesh_select", 'LEFTMOUSE', 'PRESS', shift=extend)
+        item.properties.extend = extend
+        keymaps.append((km, item))
 
 
 def unregister():
+    if keymaps:
+        bpy.types.SpaceView3D.draw_handler_remove(draw_handle, 'WINDOW')
     for km, item in keymaps:
         km.keymap_items.remove(item)
     keymaps.clear()
-

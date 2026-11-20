@@ -64,6 +64,9 @@ static const char *object_mode_op_string(eObjectMode mode)
   if (mode & OB_MODE_EDIT) {
     return "OBJECT_OT_editmode_toggle";
   }
+  if (mode == OB_MODE_REMESH) {
+    return "OBJECT_OT_remeshmode_toggle";
+  }
   if (mode == OB_MODE_SCULPT) {
     return "SCULPT_OT_sculptmode_toggle";
   }
@@ -109,7 +112,7 @@ bool mode_compat_test(const Object *ob, eObjectMode mode)
   switch (ob->type) {
     case OB_MESH:
       if (mode & (OB_MODE_EDIT | OB_MODE_SCULPT | OB_MODE_VERTEX_PAINT | OB_MODE_WEIGHT_PAINT |
-                  OB_MODE_TEXTURE_PAINT))
+                  OB_MODE_TEXTURE_PAINT | OB_MODE_REMESH))
       {
         return true;
       }
@@ -280,6 +283,13 @@ static bool ed_object_mode_generic_exit_ex(
       }
       editmode_exit_ex(bmain, scene, ob, EM_FREEDATA);
     }
+  }
+  else if (ob->mode & OB_MODE_REMESH) {
+    if (only_test) {
+      return true;
+    }
+    ob->mode = OB_MODE_OBJECT;
+    DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_SYNC_TO_EVAL);
   }
   else if (ob->mode & OB_MODE_VERTEX_PAINT) {
     if (ob->runtime->sculpt_session &&

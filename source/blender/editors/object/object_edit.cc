@@ -2144,6 +2144,32 @@ static wmOperatorStatus object_mode_set_exec(bContext *C, wmOperator *op)
   return OPERATOR_FINISHED;
 }
 
+static wmOperatorStatus remeshmode_toggle_exec(bContext *C, wmOperator *op)
+{
+  Object *ob = CTX_data_active_object(C);
+  if (ob->type != OB_MESH || !mode_compat_set(C, ob, OB_MODE_REMESH, op->reports)) {
+    return OPERATOR_CANCELLED;
+  }
+  ob->mode = ob->mode == OB_MODE_REMESH ? OB_MODE_OBJECT : OB_MODE_REMESH;
+  DEG_id_tag_update(&ob->id, ID_RECALC_SYNC_TO_EVAL);
+  WM_msg_publish_rna_prop(CTX_wm_message_bus(C), &ob->id, ob, Object, mode);
+  WM_event_add_notifier(C, NC_SCENE | ND_MODE, CTX_data_scene(C));
+  if (!G.background) {
+    WM_toolsystem_update_from_context_view3d(C);
+  }
+  return OPERATOR_FINISHED;
+}
+
+void OBJECT_OT_remeshmode_toggle(wmOperatorType *ot)
+{
+  ot->name = "Toggle Remesh Mode";
+  ot->idname = "OBJECT_OT_remeshmode_toggle";
+  ot->description = "Enter or exit surface retopology mode";
+  ot->exec = remeshmode_toggle_exec;
+  ot->poll = object_mode_set_poll;
+  ot->flag = OPTYPE_UNDO;
+}
+
 void OBJECT_OT_mode_set(wmOperatorType *ot)
 {
   PropertyRNA *prop;

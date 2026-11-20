@@ -39,6 +39,7 @@ namespace blender {
 const EnumPropertyItem rna_enum_object_mode_items[] = {
     {OB_MODE_OBJECT, "OBJECT", ICON_OBJECT_DATAMODE, "Object Mode", ""},
     {OB_MODE_EDIT, "EDIT", ICON_EDITMODE_HLT, "Edit Mode", ""},
+    {OB_MODE_REMESH, "REMESH", ICON_MOD_REMESH, "Remesh Mode", "Draw topology on a mesh surface"},
     {OB_MODE_POSE, "POSE", ICON_POSE_HLT, "Pose Mode", ""},
     {OB_MODE_SCULPT, "SCULPT", ICON_SCULPTMODE_HLT, "Sculpt Mode", ""},
     {OB_MODE_VERTEX_PAINT, "VERTEX_PAINT", ICON_VPAINT_HLT, "Vertex Paint", ""},
@@ -77,6 +78,7 @@ const EnumPropertyItem rna_enum_object_mode_items[] = {
 const EnumPropertyItem rna_enum_workspace_object_mode_items[] = {
     {OB_MODE_OBJECT, "OBJECT", ICON_OBJECT_DATAMODE, "Object Mode", ""},
     {OB_MODE_EDIT, "EDIT", ICON_EDITMODE_HLT, "Edit Mode", ""},
+    {OB_MODE_REMESH, "REMESH", ICON_MOD_REMESH, "Remesh Mode", "Draw topology on a mesh surface"},
     {OB_MODE_POSE, "POSE", ICON_POSE_HLT, "Pose Mode", ""},
     {OB_MODE_SCULPT, "SCULPT", ICON_SCULPTMODE_HLT, "Sculpt Mode", ""},
     {OB_MODE_VERTEX_PAINT, "VERTEX_PAINT", ICON_VPAINT_HLT, "Vertex Paint", ""},

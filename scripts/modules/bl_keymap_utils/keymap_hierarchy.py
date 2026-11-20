@@ -59,6 +59,7 @@ _km_hierarchy = [
         ('Object Mode', 'EMPTY', 'WINDOW', [
             _km_expand_from_toolsystem('VIEW_3D', 'OBJECT'),
         ]),
+        ('Remesh Mode', 'EMPTY', 'WINDOW', []),
         ('Mesh', 'EMPTY', 'WINDOW', [
             _km_expand_from_toolsystem('VIEW_3D', 'EDIT_MESH'),
         ]),

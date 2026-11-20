@@ -65,6 +65,11 @@ enum eArmature_Flag : int {
   ARM_DS_EXPAND = (1 << 13),
   /** Other objects are used for visualizing various states (hack for efficient updates). */
   ARM_HAS_VIZ_DEPS = (1 << 14),
+  ARM_XBONE = (1 << 15),
+  ARM_XBONE_ROTATE_SELECTED_ONLY = (1 << 16),
+  ARM_XBONE_ORIENT_WORLD = (1 << 17),
+  ARM_XBONE_AUTO_SECONDARY = (1 << 18),
+  ARM_XBONE_ORIENT_CHILDREN = (1 << 19),
 };
 ENUM_OPERATORS(eArmature_Flag);
 
@@ -299,6 +304,12 @@ struct Bone_Runtime {
   ListBaseT<BoneCollectionReference> collections = {nullptr, nullptr};
 };
 
+/** Rigid rest transform relative to the parent joint (armature space for roots). */
+struct XBoneJoint {
+  float position[3] = {};
+  float orientation[4] = {1, 0, 0, 0};
+};
+
 struct Bone {
   DNA_DEFINE_CXX_METHODS(Bone)
 
@@ -308,7 +319,8 @@ struct Bone {
   IDProperty *prop = nullptr;
   /** System-Defined Properties storage. */
   IDProperty *system_properties = nullptr;
-  void *_pad0 = nullptr;
+  /** Optional point-joint rest data. Bone carries the shared name and hierarchy. */
+  XBoneJoint *xbone_joint = nullptr;
   /** Parent (IK parent if appropriate flag is set). */
   struct Bone *parent = nullptr;
   /** Children. */
@@ -433,7 +445,10 @@ struct bArmature {
 
   /** ID data is older than edit-mode data (TODO: move to edit-mode struct). */
   char needs_flush_to_id = 0;
-  char _pad0[3] = {};
+  /** Zero-initialized settings also apply to older XBone files: X aim, Y up, world +Z. */
+  int8_t xbone_primary_axis = 0;   /* X, Y, Z. */
+  int8_t xbone_secondary_axis = 0; /* Y, Z, X, None. */
+  int8_t xbone_world_up = 0;       /* +Z, -Z, +X, -X, +Y, -Y. */
 
   eArmature_Flag flag = ARM_COL_CUSTOM;
   eArmature_Drawtype drawtype = ARM_DRAW_TYPE_OCTA;
@@ -473,6 +488,9 @@ struct bArmature {
 
   /** Relative position of the axes on the bone, from head (0.0f) to tail (1.0f). */
   float axes_position = 0;
+  /** Uniform display multiplier for XBone pivots and links. */
+  float xbone_thickness = 1.0f;
+  char _pad_xbone[4] = {};
 
   /** Keep last, for consistency with the position of other DNA runtime structures. */
   bke::bArmature_Runtime *runtime = nullptr;

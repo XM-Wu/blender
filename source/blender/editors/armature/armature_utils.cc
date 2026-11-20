@@ -13,6 +13,7 @@
 
 #include "BLI_listbase.hh"
 #include "BLI_math_matrix_c.hh"
+#include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector_c.hh"
 #include "BLI_string_utf8.hh"
 #include "BLI_string_utils.hh"
@@ -824,7 +825,31 @@ void ED_armature_from_edit(Main *bmain, bArmature *arm)
   }
 
   /* Finalize definition of rest-pose data (roll, bone_mat, arm_mat, head/tail...). */
-  armature_finalize_restpose(&arm->bonebase, arm->edbo);
+  if (arm->flag & ARM_XBONE) {
+    /* Commit point frames directly. Topology comes from the shared hierarchy;
+     * a parent's displayed size or number of children has no role in FK. */
+    for (EditBone &edit : *arm->edbo) {
+      Bone *bone = edit.temp.bone;
+      bone->xbone_joint = MEM_new<XBoneJoint>(__func__);
+      XBoneJoint &joint = *bone->xbone_joint;
+      float frame[4][4];
+      ED_armature_ebone_to_mat4(&edit, frame);
+      if (edit.parent) {
+        float parent_frame[4][4], parent_inverse[4][4];
+        ED_armature_ebone_to_mat4(edit.parent, parent_frame);
+        invert_m4_m4(parent_inverse, parent_frame);
+        mul_m4_m4m4(frame, parent_inverse, frame);
+      }
+      copy_v3_v3(joint.position, frame[3]);
+      mat4_to_quat(joint.orientation, frame);
+      bone->length = len_v3v3(edit.head, edit.tail);
+      bone->flag &= ~BONE_CONNECTED;
+    }
+    BKE_armature_where_is(arm);
+  }
+  else {
+    armature_finalize_restpose(&arm->bonebase, arm->edbo);
+  }
   ANIM_armature_bonecoll_reconstruct(arm);
 
   BKE_armature_bone_hash_make(arm);

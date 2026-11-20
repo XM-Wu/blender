@@ -77,8 +77,23 @@ class MeshVertEdgeSlide(Operator):
         return result
 
 
+class XMEnterPoseMode(Operator):
+    """Enter Pose Mode on the active armature"""
+    bl_idname = "object.xm_enter_pose_mode"
+    bl_label = "XM Enter Pose Mode"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == 'ARMATURE' and obj.is_editable
+
+    def execute(self, context):
+        import bpy
+        return bpy.ops.object.mode_set(mode='POSE')
+
+
 class XMEditModeToggle(Operator):
-    """Toggle edit mode without relying on the object's previous mode"""
+    """Leave Pose Mode for Object Mode, otherwise toggle Edit Mode"""
     bl_idname = "object.xm_edit_mode_toggle"
     bl_label = "XM Toggle Edit Mode"
     bl_options = set()
@@ -103,7 +118,9 @@ class XMEditModeToggle(Operator):
         }
         result = {'CANCELLED'}
         try:
-            if bpy.ops.object.editmode_toggle.poll():
+            if context.mode == 'POSE':
+                result = bpy.ops.object.mode_set(mode='OBJECT')
+            elif bpy.ops.object.editmode_toggle.poll():
                 result = bpy.ops.object.editmode_toggle('EXEC_DEFAULT')
             else:
                 record["reason"] = "editmode_toggle poll failed"
@@ -171,4 +188,5 @@ classes = (
     MeshVertEdgeSlide,
     MeshApplyAllTransforms,
     XMEditModeToggle,
+    XMEnterPoseMode,
 )

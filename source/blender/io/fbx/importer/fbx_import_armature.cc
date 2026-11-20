@@ -60,6 +60,11 @@ Object *ArmatureImportContext::create_armature_for_node(const ufbx_node *node)
 #endif
 
   bArmature *arm = BKE_armature_add(&this->bmain, arm_name);
+  if (params.use_xbone) {
+    /* Commit the FBX bind frames as native joints when leaving Edit Mode. */
+    arm->flag |= ARM_XBONE;
+    arm->deformflag &= ~ARM_DEF_ENVELOPE;
+  }
   Object *obj = BKE_object_add_only_object(&this->bmain, OB_ARMATURE, obj_name);
   obj->dtx |= OB_DRAW_IN_FRONT;
   obj->data = id_cast<ID *>(arm);
@@ -171,7 +176,9 @@ void ArmatureImportContext::create_armature_bones(const ufbx_node *node,
     bone_size = parent_bone_size;
     /* If we do not have actual pose/skin matrix for this bone, apply local transform onto parent
      * matrix. */
-    if (!this->mapping.bone_to_bind_matrix.contains(node)) {
+    const bool needs_parent_bind = parent_bone &&
+                                   mapping.bone_to_bind_matrix.contains(node->parent);
+    if ((!params.use_xbone || needs_parent_bind) && !mapping.bone_to_bind_matrix.contains(node)) {
       ufbx_matrix offset_mtx = ufbx_transform_to_matrix(&node->local_transform);
       bone_mtx = ufbx_matrix_mul(&parent_mtx, &offset_mtx);
       bone_mtx.cols[0] = ufbx_vec3_normalize(bone_mtx.cols[0]);
@@ -210,7 +217,7 @@ void ArmatureImportContext::create_armature_bones(const ufbx_node *node,
 
   /* Mark bone as connected to parent if head approximately in the same place as parent tail, in
    * both rest pose and current pose. */
-  if (parent_bone != nullptr) {
+  if (parent_bone != nullptr && !params.use_xbone) {
     float3 self_head_rest(bone->head);
     float3 par_tail_rest(parent_bone->tail);
     const float connect_dist = 1.0e-4f;
@@ -260,13 +267,14 @@ void ArmatureImportContext::create_armature_bones(const ufbx_node *node,
 }
 
 /* Need to create armature if we are root bone, or any child is a non-root bone. */
-static bool need_create_armature_for_node(const ufbx_node *node)
+static bool need_create_armature_for_node(const ufbx_node *node, const bool use_xbone)
 {
-  if (node->bone && node->bone->is_root) {
+  /* XBone keeps an explicit FBX skeleton root as a joint, including a lone root. */
+  if (!use_xbone && node->bone && node->bone->is_root) {
     return true;
   }
   for (const ufbx_node *fchild : node->children) {
-    if (fchild->bone && !fchild->bone->is_root) {
+    if (fchild->bone && (use_xbone || !fchild->bone->is_root)) {
       return true;
     }
   }
@@ -298,11 +306,21 @@ static void find_fake_bones(const ufbx_node *root_node,
   }
 }
 
-static Set<const ufbx_node *> find_all_bones(const ufbx_node *root_node)
+static Set<const ufbx_node *> find_all_bones(const ufbx_node *root_node, const bool use_xbone)
 {
   /* Find regular FBX bones nodes anywhere under our root armature node. */
   Set<const ufbx_node *> bones;
-  find_bones(root_node, bones);
+  if (use_xbone) {
+    /* Separate rigs under sibling groups are discovered by find_armatures(). */
+    for (const ufbx_node *child : root_node->children) {
+      if (child->bone) {
+        find_bones(child, bones);
+      }
+    }
+  }
+  else {
+    find_bones(root_node, bones);
+  }
 
   /* There might be non-bone nodes in between, e.g. FBX structure being like:
    * BoneA -> MeshB -> BoneC -> MeshD. Blender Armature can only contain
@@ -319,14 +337,14 @@ static Set<const ufbx_node *> find_all_bones(const ufbx_node *root_node)
 
 void ArmatureImportContext::find_armatures(const ufbx_node *node)
 {
-  const bool needs_arm = need_create_armature_for_node(node);
+  const bool needs_arm = need_create_armature_for_node(node, params.use_xbone);
   if (needs_arm) {
     /* Create armature. */
     Object *arm_obj = this->create_armature_for_node(node);
     ufbx_matrix world_to_arm = this->mapping.armature_world_to_arm_pose_matrix.lookup_default(
         arm_obj, ufbx_identity_matrix);
 
-    Set<const ufbx_node *> bone_nodes = find_all_bones(node);
+    Set<const ufbx_node *> bone_nodes = find_all_bones(node, params.use_xbone);
 
     /* Create bones in edit mode. */
     bArmature *arm = id_cast<bArmature *>(arm_obj->data);

@@ -788,6 +788,19 @@ class VIEW3D_HT_header(Header):
             else:
                 layout.prop(tool_settings, "transform_pivot_point", text="", icon_only=True)
 
+        if obj and obj.type == 'ARMATURE' and object_mode in {'OBJECT', 'EDIT', 'POSE'}:
+            layout.prop(obj, "show_in_front", text="In Front", icon='XRAY', toggle=True)
+            if obj.data.is_xbone:
+                row = layout.row(align=True)
+                row.prop_enum(obj.data, "display_type", 'OCTAHEDRAL', text="", icon='SHADING_SOLID')
+                row.prop_enum(obj.data, "display_type", 'WIRE', text="", icon='SHADING_WIRE')
+
+        if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
+            layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",
+                        icon='CON_CHILDOF', toggle=True)
+            layout.popover(panel="VIEW3D_PT_xbone_orientation", text="Joint Orient")
+
+
         # Snap
         show_snap = False
         if obj is None:
@@ -2702,10 +2715,13 @@ class TOPBAR_MT_edit_armature_add(Menu):
     bl_label = "Armature"
     bl_options = {'SEARCH_ON_KEY_PRESS'}
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
 
         layout.operator_context = 'EXEC_REGION_WIN'
+        if context.edit_object.data.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            return
         layout.operator("armature.bone_primitive_add", text="Single Bone", icon='BONE_DATA')
 
 
@@ -2864,6 +2880,8 @@ class VIEW3D_MT_add(Menu):
             layout.menu("VIEW3D_MT_armature_add", icon='OUTLINER_OB_ARMATURE')
         else:
             layout.operator("object.armature_add", text="Armature", icon='OUTLINER_OB_ARMATURE')
+
+        layout.operator("object.xbone_add", text="XBone", icon='ARMATURE_DATA').enter_editmode = True
 
         layout.menu("VIEW3D_MT_lattice_add", icon='OUTLINER_OB_LATTICE')
 
@@ -5762,6 +5780,12 @@ class VIEW3D_MT_edit_armature(Menu):
         edit_object = context.edit_object
         arm = edit_object.data
 
+        if arm.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.delete", text="Delete Joints")
+            return
+
         layout.menu("VIEW3D_MT_transform_armature")
         layout.menu("VIEW3D_MT_mirror")
         layout.menu("VIEW3D_MT_snap")
@@ -5823,6 +5847,12 @@ class VIEW3D_MT_armature_context_menu(Menu):
         arm = edit_object.data
 
         layout.operator_context = 'INVOKE_REGION_WIN'
+
+        if arm.is_xbone:
+            layout.operator("armature.xbone_joint_add", icon='ADD')
+            layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.delete", text="Delete Joints")
+            return
 
         # Add
         layout.operator("armature.subdivide", text="Subdivide")
@@ -8050,6 +8080,36 @@ class VIEW3D_PT_proportional_edit(Panel):
         col.prop(tool_settings, "proportional_distance")
 
 
+class VIEW3D_PT_xbone_orientation(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_label = "Joint Orientation"
+    bl_ui_units_x = 15
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_ARMATURE' and context.edit_object.data.is_xbone
+
+    def draw(self, context):
+        arm = context.edit_object.data
+        layout = self.layout
+        layout.prop(arm, "xbone_orient_world")
+        col = layout.column()
+        col.enabled = not arm.xbone_orient_world
+        col.use_property_split = True
+        col.use_property_decorate = False
+        col.prop(arm, "xbone_primary_axis")
+        col.prop(arm, "xbone_secondary_axis")
+        up = col.column()
+        up.enabled = arm.xbone_secondary_axis != 'NONE'
+        up.prop(arm, "xbone_world_up", text="World Up")
+        up.prop(arm, "xbone_auto_secondary")
+        layout.separator()
+        layout.prop(arm, "xbone_orient_children")
+        layout.operator("armature.xbone_orient_joints")
+        layout.prop(arm, "show_axes", text="Show Local Axes")
+
+
 class VIEW3D_PT_transform_orientations(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
@@ -9641,6 +9701,7 @@ classes = (
     VIEW3D_PT_grease_pencil_origin,
     VIEW3D_PT_grease_pencil_lock,
     VIEW3D_PT_grease_pencil_guide,
+    VIEW3D_PT_xbone_orientation,
     VIEW3D_PT_transform_orientations,
     VIEW3D_PT_overlay_grease_pencil_options,
     VIEW3D_PT_overlay_grease_pencil_canvas_options,

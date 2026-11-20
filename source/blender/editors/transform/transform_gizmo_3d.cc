@@ -630,7 +630,8 @@ static int gizmo_3d_foreach_selected(const bContext *C,
         }
         for (EditBone &ebo : *arm->edbo) {
           if (animrig::bone_is_visible(arm, &ebo)) {
-            if (ebo.flag & BONE_TIPSEL) {
+            /* An XBone joint contributes one pivot. Its edit tail only encodes orientation. */
+            if (!(arm->flag & ARM_XBONE) && (ebo.flag & BONE_TIPSEL)) {
               run_coord_with_matrix(ebo.tail, use_mat_local, mat_local);
               totsel++;
             }

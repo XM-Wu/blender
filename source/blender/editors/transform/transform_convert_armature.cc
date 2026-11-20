@@ -18,6 +18,7 @@
 #include "BLI_math_matrix_c.hh"
 #include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_multi_value_map.hh"
 #include "BLI_set.hh"
 #include "BLI_vector.hh"
 
@@ -782,12 +783,112 @@ static void createTransPose(bContext * /*C*/, TransInfo *t)
   }
 }
 
+struct XBoneRestFrame {
+  EditBone *joint;
+  float4x4 matrix;
+  float3 tail;
+  float roll;
+};
+
+struct XBoneBranch {
+  EditBone *driver;
+  float4x4 inverse_start;
+  Vector<XBoneRestFrame> descendants;
+};
+
+struct XBoneUpPoint {
+  EditBone *joint;
+  float3 point;
+};
+
+struct EditArmatureTransformData {
+  Vector<BoneInitData> mirrored;
+  Vector<XBoneUpPoint> up_points;
+  Vector<XBoneBranch> branches;
+  bool branches_transformed = false;
+};
+
+/* Capture each unselected descendant once, relative to its nearest selected
+ * ancestor. Original coordinates also allow exact cancellation and mode switches. */
+static void xbone_capture_branches(bArmature &arm, EditArmatureTransformData &data)
+{
+  MultiValueMap<EditBone *, EditBone *> children;
+  Set<EditBone *> drivers;
+  for (EditBone &joint : *arm.edbo) {
+    if (joint.parent) {
+      children.add(joint.parent, &joint);
+    }
+    if ((joint.flag & BONE_SELECTED) && !(joint.flag & BONE_EDITMODE_LOCKED) &&
+        animrig::bone_is_visible(&arm, &joint))
+    {
+      drivers.add(&joint);
+      if (arm.flag & ARM_MIRROR_EDIT) {
+        if (EditBone *mirror = ED_armature_ebone_get_mirrored(arm.edbo, &joint)) {
+          drivers.add(mirror);
+        }
+      }
+    }
+  }
+  for (EditBone *driver : drivers) {
+    XBoneBranch branch;
+    branch.driver = driver;
+    float4x4 start;
+    ED_armature_ebone_to_mat4(driver, start.ptr());
+    invert_m4_m4(branch.inverse_start.ptr(), start.ptr());
+    Vector<EditBone *> pending(children.lookup(driver));
+    while (!pending.is_empty()) {
+      EditBone *joint = pending.pop_last();
+      if (drivers.contains(joint) || (joint->flag & BONE_EDITMODE_LOCKED)) {
+        continue;
+      }
+      float4x4 matrix;
+      ED_armature_ebone_to_mat4(joint, matrix.ptr());
+      branch.descendants.append({joint, matrix, float3(joint->tail), joint->roll});
+      pending.extend(children.lookup(joint));
+    }
+    if (!branch.descendants.is_empty()) {
+      data.branches.append(std::move(branch));
+    }
+  }
+}
+
+static void xbone_update_branches(EditArmatureTransformData &data, const bool rotating)
+{
+  if (!rotating && !data.branches_transformed) {
+    return;
+  }
+  for (const XBoneBranch &branch : data.branches) {
+    float4x4 delta;
+    if (rotating) {
+      float4x4 current;
+      ED_armature_ebone_to_mat4(branch.driver, current.ptr());
+      delta = current * branch.inverse_start;
+    }
+    for (const XBoneRestFrame &rest : branch.descendants) {
+      copy_v3_v3(rest.joint->head, rest.matrix.location());
+      copy_v3_v3(rest.joint->tail, rest.tail);
+      rest.joint->roll = rest.roll;
+      if (rotating) {
+        const float4x4 matrix = delta * rest.matrix;
+        ED_armature_ebone_from_mat4(rest.joint, matrix.ptr());
+      }
+    }
+  }
+  data.branches_transformed = rotating;
+}
+
 static void free_bone_init_data(TransInfo * /*t*/,
                                 TransDataContainer * /*tc*/,
                                 TransCustomData *custom_data)
 {
-  MEM_delete(static_cast<Vector<BoneInitData> *>(custom_data->data));
+  MEM_delete(static_cast<EditArmatureTransformData *>(custom_data->data));
   custom_data->data = nullptr;
+}
+
+static bool xbone_use_frame_points(const bArmature &arm, const eTfmMode mode)
+{
+  return (arm.flag & ARM_XBONE) &&
+         ELEM(mode, TFM_ROTATION, TFM_TRACKBALL, TFM_TRANSLATION, TFM_RESIZE);
 }
 
 static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
@@ -799,6 +900,7 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
     ListBaseT<EditBone> *edbo = arm->edbo;
     bool mirror = ((arm->flag & ARM_MIRROR_EDIT) != 0);
     int total_mirrored = 0;
+    const bool xbone_points = xbone_use_frame_points(*arm, t->mode);
 
     tc->data_len = 0;
     for (EditBone &ebo : *edbo) {
@@ -816,6 +918,9 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
           }
         }
         else {
+          if (xbone_points && (ebo.flag & BONE_ROOTSEL) && (ebo.flag & BONE_SELECTED)) {
+            tc->data_len++; /* A reference point for twist about the edit bone axis. */
+          }
           if (ebo.flag & BONE_TIPSEL) {
             tc->data_len++;
           }
@@ -836,11 +941,17 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
       continue;
     }
 
-    if (mirror) {
-      Vector<BoneInitData> *bid = MEM_new<Vector<BoneInitData>>(__func__);
-      bid->reserve(total_mirrored);
-
-      tc->custom.type.data = bid;
+    if (mirror || xbone_points) {
+      auto *data = MEM_new<EditArmatureTransformData>(__func__);
+      data->mirrored.reserve(total_mirrored);
+      if (xbone_points) {
+        /* TransData keeps pointers into this vector until the operator ends. */
+        data->up_points.reserve(tc->data_len);
+        if (!(arm->flag & ARM_XBONE_ROTATE_SELECTED_ONLY)) {
+          xbone_capture_branches(*arm, *data);
+        }
+      }
+      tc->custom.type.data = data;
       tc->custom.type.free_cb = free_bone_init_data;
       tc->custom.type.use_free = true;
     }
@@ -860,7 +971,7 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
     TransData *td, *td_old;
     float mtx[3][3], smtx[3][3], bonemat[3][3];
     bool mirror = ((arm->flag & ARM_MIRROR_EDIT) != 0);
-    auto &bid = *static_cast<Vector<BoneInitData> *>(tc->custom.type.data);
+    auto *data = static_cast<EditArmatureTransformData *>(tc->custom.type.data);
 
     copy_m3_m4(mtx, tc->obedit->object_to_world().ptr());
     pseudoinverse_m3_m3(smtx, mtx, PSEUDOINVERSE_EPSILON);
@@ -950,8 +1061,9 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
              * causes problem with snapping (see #45974).
              * However, in rotation mode, we want to keep that 'rotate bone around root with
              * only its tip selected' behavior (see #46325). */
-            if ((t->around == V3D_AROUND_LOCAL_ORIGINS) &&
-                ((t->mode == TFM_ROTATION) || (ebo.flag & BONE_ROOTSEL)))
+            if ((arm->flag & ARM_XBONE) ||
+                ((t->around == V3D_AROUND_LOCAL_ORIGINS) &&
+                 ((t->mode == TFM_ROTATION) || (ebo.flag & BONE_ROOTSEL))))
             {
               copy_v3_v3(td->center, ebo.head);
             }
@@ -1000,6 +1112,18 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
 
             td++;
           }
+          if ((ebo.flag & BONE_ROOTSEL) && (ebo.flag & BONE_SELECTED) &&
+              xbone_use_frame_points(*arm, t->mode)) {
+            /* Transform a third point through the same constraints and pivot as the
+             * selected joint. Two endpoints alone cannot capture axial twist. */
+            *td = *(td - 1);
+            data->up_points.append({&ebo, float3(ebo.head) + float3(td->axismtx[2])});
+            td->loc = data->up_points.last().point;
+            copy_v3_v3(td->iloc, td->loc);
+            td->flag |= TD_NOCENTER;
+            td->extra = nullptr;
+            td++;
+          }
         }
       }
 
@@ -1016,7 +1140,7 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
           bone_data.zwidth = eboflip->zwidth;
           copy_v3_v3(bone_data.head, eboflip->head);
           copy_v3_v3(bone_data.tail, eboflip->tail);
-          bid.append(bone_data);
+          data->mirrored.append(bone_data);
         }
       }
     }
@@ -1032,7 +1156,7 @@ static void createTransArmatureVerts(bContext * /*C*/, TransInfo *t)
 static void restoreBones(TransDataContainer *tc)
 {
   bArmature *arm;
-  auto &bid = *static_cast<Vector<BoneInitData> *>(tc->custom.type.data);
+  const auto &bid = static_cast<EditArmatureTransformData *>(tc->custom.type.data)->mirrored;
 
   if (tc->obedit) {
     arm = id_cast<bArmature *>(tc->obedit->data);
@@ -1160,6 +1284,17 @@ static void recalcData_edit_armature(TransInfo *t)
       }
     }
 
+    auto *data = static_cast<EditArmatureTransformData *>(tc->custom.type.data);
+    const bool rotating = t->state != TRANS_CANCEL && ELEM(t->mode, TFM_ROTATION, TFM_TRACKBALL);
+    if (data && rotating) {
+      for (const XBoneUpPoint &up : data->up_points) {
+        float3 axis = up.point - float3(up.joint->head);
+        if (normalize_v3(axis) > 0.0f) {
+          up.joint->roll = angle_compat_rad(
+              ED_armature_ebone_roll_to_vector(up.joint, axis, false), up.joint->roll);
+        }
+      }
+    }
     if (arm->flag & ARM_MIRROR_EDIT) {
       if (t->state != TRANS_CANCEL) {
         ED_armature_edit_transform_mirror_update(tc->obedit);
@@ -1167,6 +1302,9 @@ static void recalcData_edit_armature(TransInfo *t)
       else {
         restoreBones(tc);
       }
+    }
+    if (data) {
+      xbone_update_branches(*data, rotating);
     }
   }
 }

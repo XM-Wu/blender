@@ -665,6 +665,51 @@ static void handle_object_parent_orientation(Object *ob, float r_mat[3][3])
   }
 }
 
+/* Local constraints and the viewport gizmo share this world-space joint frame. */
+static bool xbone_local_orientation(Object &ob, float r_mat[3][3])
+{
+  if (ob.type != OB_ARMATURE || !(ob.mode & (OB_MODE_EDIT | OB_MODE_POSE))) {
+    return false;
+  }
+  bArmature *arm = id_cast<bArmature *>(ob.data);
+  if (!(arm->flag & ARM_XBONE)) {
+    return false;
+  }
+  float joint[3][3];
+  if (ob.mode & OB_MODE_EDIT) {
+    EditBone *active = arm->act_edbone;
+    if (!active || !animrig::bone_is_selected(arm, active)) {
+      active = nullptr;
+      for (EditBone &bone : *arm->edbo) {
+        if (animrig::bone_is_selected(arm, &bone)) {
+          active = &bone;
+          break;
+        }
+      }
+    }
+    if (!active) {
+      return false;
+    }
+    ED_armature_ebone_to_mat3(active, joint);
+  }
+  else {
+    const bPoseChannel *active = BKE_pose_channel_active_if_bonecoll_visible(&ob);
+    if (!active || !(active->flag & POSE_SELECTED)) {
+      return false;
+    }
+    copy_m3_m4(joint, active->pose_mat);
+  }
+  float object_matrix[3][3];
+  copy_m3_m4(object_matrix, ob.object_to_world().ptr());
+  mul_m3_m3m3(r_mat, object_matrix, joint);
+  normalize_m3(r_mat);
+  if (!is_orthogonal_m3(r_mat)) {
+    orthogonalize_m3(r_mat, arm->xbone_primary_axis);
+    normalize_m3(r_mat);
+  }
+  return true;
+}
+
 short calc_orientation_from_type_ex(const Main &bmain,
                                     const Scene *scene,
                                     ViewLayer *view_layer,
@@ -719,6 +764,9 @@ short calc_orientation_from_type_ex(const Main &bmain,
     }
     case V3D_ORIENT_LOCAL: {
       if (ob) {
+        if (xbone_local_orientation(*ob, r_mat)) {
+          break;
+        }
         if (ob->mode & OB_MODE_POSE) {
           /* Each bone moves on its own local axis, but to avoid confusion,
            * use the active bone's axis for display #33575, this works as expected on a single

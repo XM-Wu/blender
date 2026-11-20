@@ -6,6 +6,7 @@
  * \ingroup draw_engine
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,7 @@
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_rotation_c.hh"
 #include "BLI_math_vector_c.hh"
+#include "BLI_multi_value_map.hh"
 #include "BLI_utildefines.hh"
 
 #include "BKE_action.hh"
@@ -1882,7 +1884,9 @@ static void draw_bone_relations(const Armatures::DrawContext *ctx,
   }
 }
 
-static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBonePtr bone)
+static void draw_bone_name(const Armatures::DrawContext *ctx,
+                           const UnifiedBonePtr bone,
+                           bool xbone)
 {
   uchar color[4];
   float vec[3];
@@ -1902,7 +1906,12 @@ static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBoneP
 
   const float *head = is_pose ? pchan->pose_head : eBone->head;
   const float *tail = is_pose ? pchan->pose_tail : eBone->tail;
-  mid_v3_v3v3(vec, head, tail);
+  if (xbone) {
+    copy_v3_v3(vec, head);
+  }
+  else {
+    mid_v3_v3v3(vec, head, tail);
+  }
   mul_m4_v3(ctx->ob->object_to_world().ptr(), vec);
 
   DRW_text_cache_add(ctx->dt,
@@ -1921,6 +1930,124 @@ static void draw_bone_name(const Armatures::DrawContext *ctx, const UnifiedBoneP
 /* -------------------------------------------------------------------- */
 /** \name Main Draw Loops
  * \{ */
+
+/* A rig-wide rest length keeps display proportions useful across FBX unit systems.
+ * Ignore visibility and animated scale so the width is stable between modes. */
+static float xbone_reference_size(Vector<float> &rest_lengths)
+{
+  if (rest_lengths.is_empty()) {
+    return 1.0f;
+  }
+  const int64_t middle = rest_lengths.size() / 2;
+  const auto mid = rest_lengths.begin() + middle;
+  std::nth_element(rest_lengths.begin(), mid, rest_lengths.end());
+  const float median = rest_lengths.size() % 2 ?
+                           *mid :
+                           0.5f * (*mid + *std::max_element(rest_lengths.begin(), mid));
+  return median > 0.0f ? median : 1.0f;
+}
+
+/* XBone uses one pose channel per joint. Its pivot is selectable as a whole
+ * node in Edit Mode, so translation preserves the stored rest orientation. */
+static void draw_xbone_joint(const Armatures::DrawContext *ctx,
+                             UnifiedBonePtr bone,
+                             const eBone_Flag flags,
+                             const int select_id,
+                             Span<float3> child_origins,
+                             const float reference_size)
+{
+  draw_bone_update_disp_matrix_default(bone);
+  const float *wire = get_bone_wire_color(ctx, flags);
+  const int id = select_id | BONESEL_BONE;
+  const float *solid = get_bone_solid_with_consts_color(ctx, bone, flags);
+  const float *hint = get_bone_hint_color(ctx, flags);
+  /* Mark a joint hit separately from its incoming link. Both endpoint bits
+   * select the entire joint when edit selection is synchronized. */
+  const float display_size = reference_size * ctx->armature->xbone_thickness;
+  float4x4 pivot = float4x4::identity();
+  pivot.location() = float3(bone.disp_mat()[3]);
+  pivot.x_axis().x = pivot.y_axis().y = pivot.z_axis().z = display_size;
+  /* Keep the solid picking volume even when the visible joint is hollow. */
+  const bool wire_only = ctx->drawtype == ARM_DRAW_TYPE_WIRE && !ctx->res->is_selection();
+  const float4 wire_color(UNPACK3(wire), 1.0f);
+  if (wire_only) {
+    const auto pivot_id = ctx->res->select_id(*ctx->ob_ref, select_id | BONESEL_ANY);
+    ctx->bone_buf->sphere_outline_buf.append({ctx->ob->object_to_world() * pivot, wire_color},
+                                             pivot_id);
+  }
+  else {
+    drw_shgroup_bone_sphere(ctx, pivot.ptr(), solid, hint, wire, select_id | BONESEL_ANY);
+  }
+  /* The joint owns its outgoing links: selecting a shaft rotates it about its wide end. */
+  const float3 origin(bone.disp_mat()[3]);
+  const float cap_depth = 0.1f * reference_size;
+  /* Build the link cross-section in the owning joint's frame. Deriving roll
+   * from armature-space direction alone makes a rigidly rotating fork twist. */
+  float joint_rotation[4];
+  mat4_to_quat(joint_rotation, bone.disp_mat());
+  float3x3 joint_axes;
+  quat_to_mat3(joint_axes.ptr(), joint_rotation);
+  for (const float3 &child_origin : child_origins) {
+    /* Fit the tapered link to the actual pivots, independently for each branch. */
+    const float3 offset = child_origin - origin;
+    float length;
+    const float3 direction = math::normalize_and_get_length(offset, length);
+    if (length <= 1e-8f) {
+      continue;
+    }
+    if (length <= cap_depth) {
+      /* No room for a shaft between overlapping joints. */
+      continue;
+    }
+
+    const float3 up = math::abs(math::dot(direction, joint_axes[2])) > 0.99f ? joint_axes[0] :
+                                                                               joint_axes[2];
+    float4x4 half = float4x4::identity();
+    half.x_axis() = math::normalize(math::cross(direction, up));
+    half.z_axis() = math::cross(half.x_axis(), direction);
+    half.x_axis() *= 0.06f * display_size;
+    half.z_axis() *= 0.06f * display_size;
+    half.location() = origin + cap_depth * direction;
+
+    const auto sel_id = ctx->res->select_id(*ctx->ob_ref, id);
+    if (wire_only) {
+      /* Draw each real edge once, including the shared square between the cap and shaft. */
+      const float4x4 &world = ctx->ob->object_to_world();
+      const float3 start = math::transform_point(world, origin);
+      const float3 end = math::transform_point(world, child_origin);
+      const float3 x = half.x_axis(), z = half.z_axis();
+      const float3 center = half.location();
+      const float3 ring[4] = {math::transform_point(world, center + x + z),
+                              math::transform_point(world, center + x - z),
+                              math::transform_point(world, center - x - z),
+                              math::transform_point(world, center - x + z)};
+      for (int i = 0; i < 4; i++) {
+        ctx->bone_buf->wire_buf.append(start, ring[i], wire_color, sel_id);
+        ctx->bone_buf->wire_buf.append(ring[i], end, wire_color, sel_id);
+        ctx->bone_buf->wire_buf.append(ring[i], ring[(i + 1) % 4], wire_color, sel_id);
+      }
+      continue;
+    }
+    /* The fill pass alone has no line data for overlay antialiasing. Give an
+     * unselected solid link a neutral silhouette as well. */
+    const float4 outline = wire[3] > 0.0f ? float4(wire) : float4(UNPACK3(hint), 1.0f);
+    auto draw_half = [&]() {
+      const float4x4 matrix = ctx->ob->object_to_world() * half;
+      if (ctx->is_filled) {
+        ctx->bone_buf->custom_shape_fill_get_buffer(ctx->res->shapes.joint_pyramid.get())
+            .append({matrix, solid, hint}, sel_id);
+      }
+      ctx->bone_buf->custom_shape_outline_get_buffer(ctx->res->shapes.joint_pyramid_wire.get())
+          .append({matrix, outline}, sel_id);
+    };
+    half.y_axis() = direction * (length - cap_depth);
+    draw_half();
+    /* Turn the pyramid around the common base, preserving face winding. */
+    half.x_axis() = -half.x_axis();
+    half.y_axis() = -direction * cap_depth;
+    draw_half();
+  }
+}
 
 static void bone_draw_update_display_matrix(const eArmature_Drawtype drawtype,
                                             const bool use_custom_shape,
@@ -1955,6 +2082,19 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
 
   edbo_compute_bbone_child(&arm);
 
+  const bool xbone = (arm.flag & ARM_XBONE) != 0;
+  MultiValueMap<const EditBone *, float3> child_origins;
+  float reference_size = 1.0f;
+  if (xbone) {
+    Vector<float> lengths;
+    for (const EditBone &child : *arm.edbo) {
+      lengths.append(len_v3v3(child.head, child.tail));
+      if (child.parent && animrig::bone_is_visible(&arm, &child)) {
+        child_origins.add(child.parent, float3(child.head));
+      }
+    }
+    reference_size = xbone_reference_size(lengths);
+  }
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
   for (eBone = arm.edbo->first(),
@@ -1987,19 +2127,24 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
       set_ctx_bcolor(ctx, bone);
     }
 
-    if (!is_select) {
+    if (!is_select && !xbone) {
       draw_bone_relations(ctx, bone, boneflag);
     }
 
-    const eArmature_Drawtype drawtype = eBone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
-                                            arm_drawtype :
-                                            eArmature_Drawtype(eBone->drawtype);
-    bone_draw_update_display_matrix(drawtype, false, bone, arm);
-    bone_draw(drawtype, false, ctx, bone, boneflag, select_id);
+    if (xbone) {
+      draw_xbone_joint(ctx, bone, boneflag, select_id, child_origins.lookup(eBone), reference_size);
+    }
+    else {
+      const eArmature_Drawtype drawtype = eBone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
+                                              arm_drawtype :
+                                              eArmature_Drawtype(eBone->drawtype);
+      bone_draw_update_display_matrix(drawtype, false, bone, arm);
+      bone_draw(drawtype, false, ctx, bone, boneflag, select_id);
+    }
 
     if (!is_select) {
       if (show_text && (arm.flag & ARM_DRAWNAMES)) {
-        draw_bone_name(ctx, bone);
+        draw_bone_name(ctx, bone, xbone);
       }
 
       if (arm.flag & ARM_DRAWAXES) {
@@ -2083,6 +2228,19 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
     }
   }
 
+  const bool xbone = (arm.flag & ARM_XBONE) != 0;
+  MultiValueMap<const bPoseChannel *, float3> child_origins;
+  float reference_size = 1.0f;
+  if (xbone) {
+    Vector<float> lengths;
+    for (const bPoseChannel &child : ob->pose->chanbase) {
+      lengths.append(child.bone_get(arm)->length);
+      if (child.parent && animrig::bone_is_visible(&arm, {&child, child.bone_get(*ob)})) {
+        child_origins.add(child.parent, float3(child.pose_head));
+      }
+    }
+    reference_size = xbone_reference_size(lengths);
+  }
   const eArmature_Drawtype arm_drawtype = eArmature_Drawtype(arm.drawtype);
 
   for (bPoseChannel *pchan = ob->pose->chanbase.first(); pchan;
@@ -2123,15 +2281,20 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
     }
 
     const bool use_custom_shape = (pchan->custom) && !(arm.flag & ARM_NO_CUSTOM);
-    if (!is_pose_select) {
+    if (!is_pose_select && !xbone) {
       draw_bone_relations(ctx, bone_ptr, boneflag);
     }
 
-    const eArmature_Drawtype drawtype = bone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
-                                            arm_drawtype :
-                                            eArmature_Drawtype(bone->drawtype);
-    bone_draw_update_display_matrix(drawtype, use_custom_shape, bone_ptr, arm);
-    bone_draw(drawtype, use_custom_shape, ctx, bone_ptr, boneflag, select_id);
+    if (xbone) {
+      draw_xbone_joint(ctx, bone_ptr, boneflag, select_id, child_origins.lookup(pchan), reference_size);
+    }
+    else {
+      const eArmature_Drawtype drawtype = bone->drawtype == ARM_DRAW_TYPE_ARMATURE_DEFINED ?
+                                              arm_drawtype :
+                                              eArmature_Drawtype(bone->drawtype);
+      bone_draw_update_display_matrix(drawtype, use_custom_shape, bone_ptr, arm);
+      bone_draw(drawtype, use_custom_shape, ctx, bone_ptr, boneflag, select_id);
+    }
 
     /* Below this point nothing is used for selection queries. */
     if (is_pose_select) {
@@ -2142,7 +2305,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       draw_bone_degrees_of_freedom(ctx, pchan);
     }
     if (show_text && (arm.flag & ARM_DRAWNAMES)) {
-      draw_bone_name(ctx, bone_ptr);
+      draw_bone_name(ctx, bone_ptr, xbone);
     }
     if (arm.flag & ARM_DRAWAXES) {
       draw_axes(ctx, bone_ptr, arm);

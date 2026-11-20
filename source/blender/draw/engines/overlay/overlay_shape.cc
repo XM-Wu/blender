@@ -343,6 +343,35 @@ ShapeCache::ShapeCache()
         GPU_PRIM_LINES_ADJ, bone_octahedron.get()->verts[0], ibo, GPU_BATCH_OWNS_INDEX));
   }
 
+  /* Open square pyramid for either half of a joint link. The two instances
+   * share their base but have independently positioned tips. */
+  {
+    const std::array<float3, 4> ring = {
+        float3{1, 0, 1}, {1, 0, -1}, {-1, 0, -1}, {-1, 0, 1}};
+    const float3 tip{0, 1, 0};
+    Vector<VertShaded> verts;
+    GPUIndexBufBuilder edges;
+    GPU_indexbuf_init(&edges, GPU_PRIM_LINES_ADJ, 8, 12);
+    for (int i = 0; i < 4; i++) {
+      const int next = (i + 1) % 4;
+      const int prev = (i + 3) % 4;
+      const float3 normal = math::normalize(math::cross(ring[i] - tip, ring[next] - tip));
+      verts.append({tip, VCLASS_NONE, normal});
+      verts.append({ring[i], VCLASS_NONE, normal});
+      verts.append({ring[next], VCLASS_NONE, normal});
+      /* Silhouette of a side edge, then the perimeter of the base. */
+      /* Follow the outward winding: the outline shader rejects concave edges. */
+      GPU_indexbuf_add_line_adj_verts(&edges, 3 * next + 1, 3 * i, 3 * i + 1, 3 * prev + 1);
+      GPU_indexbuf_add_line_adj_verts(&edges, 3 * i, 3 * i + 1, 3 * next + 1, 3 * prev + 1);
+    }
+    joint_pyramid = BatchPtr(
+        GPU_batch_create_ex(GPU_PRIM_TRIS, vbo_from_vector(verts), nullptr, GPU_BATCH_OWNS_VBO));
+    joint_pyramid_wire = BatchPtr(GPU_batch_create_ex(GPU_PRIM_LINES_ADJ,
+                                                      joint_pyramid.get()->verts[0],
+                                                      GPU_indexbuf_build(&edges),
+                                                      GPU_BATCH_OWNS_INDEX));
+  }
+
   /* Armature Sphere. */
   {
     constexpr int resolution = 64;

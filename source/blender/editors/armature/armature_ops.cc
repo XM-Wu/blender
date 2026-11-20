@@ -54,6 +54,9 @@ void ED_operatortypes_armature()
   WM_operatortype_append(ARMATURE_OT_extrude);
   WM_operatortype_append(ARMATURE_OT_hide);
   WM_operatortype_append(ARMATURE_OT_reveal);
+  WM_operatortype_append(ARMATURE_OT_xbone_orient_joints);
+  WM_operatortype_append(ARMATURE_OT_xbone_joint_add);
+  WM_operatortype_append(ARMATURE_OT_xbone_finish_extrude);
   WM_operatortype_append(ARMATURE_OT_click_extrude);
   WM_operatortype_append(ARMATURE_OT_fill);
   WM_operatortype_append(ARMATURE_OT_separate);
@@ -149,6 +152,8 @@ void ED_operatormacros_armature()
   RNA_boolean_set(otmacro->ptr, "forked", false);
   otmacro = WM_operatortype_macro_define(ot, "TRANSFORM_OT_translate");
   RNA_boolean_set(otmacro->ptr, "use_proportional_edit", false);
+
+  WM_operatortype_macro_define(ot, "ARMATURE_OT_xbone_finish_extrude");
 
   /* XXX would it be nicer to just be able to have standard extrude_move,
    * but set the forked property separate?

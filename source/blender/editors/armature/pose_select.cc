@@ -33,6 +33,8 @@
 
 #include "DEG_depsgraph.hh"
 
+#include "GPU_select.hh"
+
 #include "RNA_access.hh"
 #include "RNA_define.hh"
 #include "RNA_types.hh"
@@ -475,8 +477,24 @@ bool ED_armature_pose_select_pick_with_buffer(const Main &bmain,
 
   /* Callers happen to already get the active base */
   Base *base_dummy = nullptr;
-  nearBone = ED_armature_pick_pchan_from_selectbuffer(
-      {base}, hit_results, hits, true, do_nearest, &base_dummy);
+  nearBone = nullptr;
+  if (ob->type == OB_ARMATURE && (id_cast<bArmature *>(ob->data)->flag & ARM_XBONE)) {
+    /* At a fork the parent pivot and several link bodies share the pick region. */
+    Vector<GPUSelectResult, 8> pivots;
+    for (const GPUSelectResult &hit : Span(hit_results, hits)) {
+      if ((hit.id & BONESEL_ANY) == BONESEL_ANY) {
+        pivots.append(hit);
+      }
+    }
+    if (!pivots.is_empty()) {
+      nearBone = ED_armature_pick_pchan_from_selectbuffer(
+          {base}, pivots.data(), pivots.size(), true, do_nearest, &base_dummy);
+    }
+  }
+  if (!nearBone) {
+    nearBone = ED_armature_pick_pchan_from_selectbuffer(
+        {base}, hit_results, hits, true, do_nearest, &base_dummy);
+  }
 
   return ED_armature_pose_select_pick_bone(bmain, scene, view_layer, v3d, ob, nearBone, params);
 }

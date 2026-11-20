@@ -88,6 +88,7 @@ void operatortypes_object()
   WM_operatortype_append(OBJECT_OT_delete);
   WM_operatortype_append(OBJECT_OT_text_add);
   WM_operatortype_append(OBJECT_OT_armature_add);
+  WM_operatortype_append(OBJECT_OT_xbone_add);
   WM_operatortype_append(OBJECT_OT_empty_add);
   WM_operatortype_append(OBJECT_OT_lightprobe_add);
   WM_operatortype_append(OBJECT_OT_empty_image_add);

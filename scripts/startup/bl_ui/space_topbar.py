@@ -411,6 +411,9 @@ class TOPBAR_MT_file_import(Menu):
         if bpy.app.build_options.io_fbx:
             self.layout.operator(
                 "wm.fbx_import", text=FileHandler.label_with_extensions("IO_FH_fbx"))
+            row = self.layout.row()
+            row.operator_context = 'INVOKE_DEFAULT'
+            row.operator("wm.xbone_fbx_import", text="FBX (XBone)")
 
 
 class TOPBAR_MT_file_export(Menu):

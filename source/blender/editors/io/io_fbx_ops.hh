@@ -13,6 +13,7 @@ namespace blender {
 struct wmOperatorType;
 
 void WM_OT_fbx_import(wmOperatorType *ot);
+void WM_OT_xbone_fbx_import(wmOperatorType *ot);
 
 namespace ed::io {
 void fbx_file_handler_add();

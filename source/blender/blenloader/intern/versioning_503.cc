@@ -706,8 +706,10 @@ void blo_do_versions_503(FileData *fd, Library * /*lib*/, Main *bmain)
 
   /* The fork used 503.26 for circle selection before upstream assigned it to ripple editing. */
   const bool xblender_503_26 = bmain->versionfile == 503 && bmain->subversionfile == 26 &&
-                               DNA_struct_member_exists(fd->filesdna, "ToolSettings", "char",
-                                                        "mesh_circle_select_through");
+                               DNA_struct_member_exists_with_alias(fd->filesdna.get(),
+                                                                   "ToolSettings",
+                                                                   "char",
+                                                                   "mesh_circle_select_through");
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 503, 26) || xblender_503_26) {
     for (Scene &scene : bmain->scenes) {
       SequencerToolSettings *sequencer_tool_settings = seq::tool_settings_ensure(&scene);

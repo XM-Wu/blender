@@ -252,9 +252,41 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 
 ## 分层权重绘制
 
+**任务进度（2026-11-20）**　V1、V2 和姿势往返改动已随 `b3edc8c48923` 合入 `main`。后续开发从主干继续。需求来源、合成公式、分期计划及实测工况见[专题设计与验收记录](doc/layered_weight_paint.md)。
+
+### 已交付
+
 在 **Weight Paint** 工作区选中带一个 Armature 修改器的网格，右下角的 **Weight Layers** 编辑器提供 **Create Layers from Weights**。它把当前变形组复制到 Base。其他区域也可以从编辑器类型菜单切换成 Weight Layers。
 
+- **工作区入口**。普通启动和新建 General 时，个人启动布局缺少 Weight Paint 会自动补上，保留原来的活动工作区。旧项目使用文件里保存的标签，可从顶部 **+ → General → Weight Paint** 添加。
 - 在 3D 视图标题栏用 **Native / Skin Tools** 切换权重来源。进入姿态模式、播放或渲染时，Armature 继续使用对象最后选择的来源。
 - 点 **+** 建修正层，选择影响骨后绘制。**Mask** 可用同一套画笔绘制逐顶点遮罩，黑色露出下层，白色保留本层。各层可调序、复制、开关和调整不透明度。
 - **Replace / Add / Scale / Smooth** 支持表面笔画、顶点或面选区与 Flood。Shift 落笔临时平滑。**Display** 可选择本层、灰度遮罩或最终权重。
 - **Bake to Vertex Groups** 把合成结果写回变形组，保留层栈并支持撤销。共享网格需要先转为单用户才能烘焙。原始顶点对应关系失效时，恢复拓扑后可继续绘制。
+- **图层树**。支持嵌套组、子层、移动子树和同级向下合并。普通层点 **Add Child** 会原位包进新组。子层先合成，组遮罩与不透明度只对合成结果应用一次。
+- **选骨与显示**。当前影响骨以黑白显示权重，其他骨骼按稳定通道标识着色。点列表会高亮视口骨骼。绿色骨形图标表示层内至少一个顶点在该骨上有正权重。**Influenced Only** 可叠加名称搜索，刷黑遮罩仍保留已画骨骼的绿标。
+- **赋权与镜像**。支持从表面取样主导骨骼、按最近静止关节赋权，以及本地 X 轴的一次性镜像和随笔镜像。顶点按静止几何双向配对，影响骨沿用 Blender 左右命名。
+- **摆姿势后接着画**。视图顶栏的 **Pose Rig** 进入绑定骨架的 Pose Mode，**Back to Weight Paint** 带着新姿势返回发起切换的网格、图层和影响骨。返回目标按 View Layer 记录，同一骨架绑定多个网格时也能找回原对象。**Bones In Front** 和 **Reset Pose** 位于 3D 视图的 **N → Weight Paint → Rig**，仅在 Weight Paint 模式显示。重置一次性清除局部姿态变换，随后可立即摆姿势，动画和约束继续求值。
+
+### 从哪里接手
+
+- 改图层混合或笔画时，同时核对 `compose_stack` 的整栈求值与 `SkinBrush` 的局部更新。对象持有层树，网格点属性保存各层权重、遮罩和合成通道。两条路径在父组半透明、遮罩和层调序后应给出相同结果。[图层与画笔](scripts/startup/bl_operators/skin_layers.py)
+- 改选骨、镜像或模式切换时，从工具操作符入手。编辑器列表和 N 侧栏在同一个 UI 模块，模式往返按钮在 3D 视图标题栏。[工具操作符](scripts/startup/bl_operators/skin_layers_tools.py) · [Weight Layers 与侧栏](scripts/startup/bl_ui/space_weight_layers.py) · [视图标题栏](scripts/startup/bl_ui/space_view3d.py)
+- 排查“颜色正确但变形不对”时，检查 Armature 修改器选择的权重来源、稳定顶点组标识及原始顶点对应。视口颜色有独立的读取路径。[修改器入口](source/blender/modifiers/intern/MOD_armature.cc) · [骨骼变形求值](source/blender/blenkernel/intern/armature_deform.cc) · [视口权重与颜色](source/blender/draw/intern/mesh_extractors/extract_mesh_vbo_weights.cc)
+- 排查新建文件缺标签时，分别测出厂设置、已有个人启动文件和新建 General。布局在 `release/datafiles/startup.blend`，个人布局补齐逻辑在 `wm_files.cc`。公开 fork 限制上传新 LFS 对象，因此这个定制启动文件通过 `.gitattributes` 的路径例外直接存入 Git。[启动加载逻辑](source/blender/windowmanager/intern/wm_files.cc) · [跟踪规则](.gitattributes)
+
+### 如何验证
+
+从仓库根目录执行，命令中的 `blender` 指本 fork 构建的可执行文件。
+
+```sh
+blender --background --factory-startup --python-exit-code 1 --python tests/python/bl_skin_layers.py
+blender --background --factory-startup --python-exit-code 1 --python tests/python/bl_skin_layers_v2.py
+```
+
+- 第一组覆盖工作区、个人启动布局、原生与分层权重隔离、编辑与渲染求值、烘焙和文件重开。第二组覆盖组遮罩与增量合成、影响骨、镜像、姿态重置，以及两个网格共用骨架时改名、保存重开并返回原网格。两组均已通过。[V1 回归](tests/python/bl_skin_layers.py) · [V2 回归](tests/python/bl_skin_layers_v2.py)
+- 窗口验证已覆盖实际笔画和镜像笔画的撤销／重做，以及顶栏两个按钮的往返。复测时，选一个修正层画一笔，点 **Pose Rig** 转动前臂，再点 **Back to Weight Paint**。检查新姿势仍在、原层和画笔仍可用，以及 **Rig** 侧栏只在绘制模式出现。
+
+### 后续任务
+
+当前实现针对单个 Armature 修改器；多骨架绑定、跨拓扑重映射需要单独设计。原计划的第三阶段候选包括可开关的镜像效果与映射编辑、体积平滑／锐化、输出影响骨数限制与小权重剪枝、权重剪贴板、跨网格传层及交换格式。逐顶点 DQ 混合仍需先确定与 Blender **Preserve Volume** 的对应语义。以上均待排期。

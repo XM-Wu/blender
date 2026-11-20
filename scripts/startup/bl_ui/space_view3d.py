@@ -793,6 +793,7 @@ class VIEW3D_HT_header(Header):
             if obj.data.is_xbone:
                 row = layout.row(align=True)
                 row.prop_enum(obj.data, "display_type", 'OCTAHEDRAL', text="", icon='SHADING_SOLID')
+                row.prop_enum(obj.data, "display_type", 'STICK', text="", icon='IPO_LINEAR')
                 row.prop_enum(obj.data, "display_type", 'WIRE', text="", icon='SHADING_WIRE')
 
         if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:

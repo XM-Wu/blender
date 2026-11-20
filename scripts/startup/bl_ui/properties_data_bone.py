@@ -141,9 +141,10 @@ class BONE_PT_curved(BoneButtonsPanel, Panel):
 
         layout.prop(bone, "bbone_segments", text="Segments")
 
-        col = layout.column(align=True)
-        col.prop(bone, "bbone_x", text="Display Size X")
-        col.prop(bone, "bbone_z", text="Z")
+        if not bone.id_data.is_xbone:
+            col = layout.column(align=True)
+            col.prop(bone, "bbone_x", text="Display Size X")
+            col.prop(bone, "bbone_z", text="Z")
 
         topcol = layout.column()
         topcol.active = bone.bbone_segments > 1
@@ -339,7 +340,7 @@ class BONE_PT_display(BoneButtonsPanel, Panel):
             col.prop(pose_bone, "hide", text="Hide", toggle=False)
             hide_select_sub.active = not pose_bone.hide
         hide_select_sub.prop(bone, "hide_select", invert_checkbox=True)
-        col.prop(bone, "display_type", text="Display As")
+        self.draw_display_type(col, bone)
 
         if not pose_bone:
             return
@@ -369,9 +370,20 @@ class BONE_PT_display(BoneButtonsPanel, Panel):
         hide_select_sub = col.column()
         hide_select_sub.active = not bone.hide
         hide_select_sub.prop(bone, "hide_select", invert_checkbox=True)
-        col.prop(bone, "display_type", text="Display As")
+        self.draw_display_type(col, bone)
         layout.prop(bone.color, "palette", text="Bone Color")
         self.draw_bone_color_ui(layout, bone.color)
+
+    @staticmethod
+    def draw_display_type(layout, bone):
+        if bone.id_data.is_xbone:
+            layout.label(text="Display As")
+            grid = layout.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            for value, label in (('ARMATURE_DEFINED', "Inherit"), ('OCTAHEDRAL', "Solid"),
+                                 ('STICK', "Stick"), ('WIRE', "Wire")):
+                grid.prop_enum(bone, "display_type", value, text=label)
+        else:
+            layout.prop(bone, "display_type", text="Display As")
 
     def draw_bone_color_ui(self, layout, bone_color):
         if not bone_color.is_custom:
@@ -459,7 +471,8 @@ class BONE_PT_inverse_kinematics(BoneButtonsPanel, Panel):
         active = pchan.is_in_ik_chain or ob.pose.use_auto_ik
 
         col = layout.column()
-        col.prop(pchan, "ik_stretch", slider=True)
+        if not context.object.data.is_xbone:
+            col.prop(pchan, "ik_stretch", slider=True)
         col.active = active
 
         layout.separator()

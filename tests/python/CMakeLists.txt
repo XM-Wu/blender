@@ -778,6 +778,13 @@ if(WITH_IO_FBX)
   )
 endif()
 
+if(WITH_IK_SOLVER AND WITH_IK_ITASC)
+  add_blender_test(
+    bl_xbone_ik
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_ik.py
+  )
+endif()
+
 add_blender_test(
   bl_xbone_orient
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_orient.py

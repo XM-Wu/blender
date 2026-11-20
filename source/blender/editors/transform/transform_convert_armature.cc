@@ -192,7 +192,7 @@ static short pose_grab_with_ik_add(Object &ob, bke::PChanBone pchanbone)
 
   data = static_cast<bKinematicConstraint *>(add_temporary_ik_constraint(pchan, targetless)->data);
 
-  copy_v3_v3(data->grabtarget, pchan->pose_tail);
+  copy_v3_v3(data->grabtarget, pchanbone.bone->xbone_joint ? pchan->pose_head : pchan->pose_tail);
 
   /* Watch-it! has to be 0 here, since we're still on the
    * same bone for the first time through the loop #25885. */
@@ -218,7 +218,7 @@ static short pose_grab_with_ik_add(Object &ob, bke::PChanBone pchanbone)
     /* We modify the pchan pointer below so we also have to get the corresponding bone pointer. */
     Bone *bone = pchan->bone_get(ob);
     /* Continue to parent, but only if we're connected to it. */
-    if (bone->flag & BONE_CONNECTED) {
+    if (bone->xbone_joint || (bone->flag & BONE_CONNECTED)) {
       pchan = pchan->parent;
     }
     else {
@@ -241,7 +241,7 @@ static short pose_grab_with_ik_children(Object &ob, Bone *bone)
 
   /* Go deeper if children & children are connected. */
   for (Bone &bonec : bone->childbase) {
-    if (bonec.flag & BONE_CONNECTED) {
+    if (bonec.xbone_joint || (bonec.flag & BONE_CONNECTED)) {
       wentdeeper = 1;
       added += pose_grab_with_ik_children(ob, &bonec);
     }
@@ -278,16 +278,18 @@ static short pose_grab_with_ik(Main *bmain, Object *ob)
       if ((pchan.flag & POSE_SELECTED) || (pchan_bone->flag & BONE_TRANSFORM_MIRROR)) {
         /* Rule: no IK for solitary (unconnected) bones. */
         for (bonec = pchan_bone->childbase.first(); bonec; bonec = bonec->next) {
-          if (bonec->flag & BONE_CONNECTED) {
+          if (bonec->xbone_joint || (bonec->flag & BONE_CONNECTED)) {
             break;
           }
         }
-        if ((pchan_bone->flag & BONE_CONNECTED) == 0 && (bonec == nullptr)) {
+        const bool linked_parent = pchan.parent && (pchan_bone->xbone_joint ||
+                                                    (pchan_bone->flag & BONE_CONNECTED));
+        if (!linked_parent && !bonec) {
           continue;
         }
 
         /* Rule: if selected Bone is not the root of a connected chain, it gets temporary IK. */
-        if (pchan.parent && (pchan_bone->flag & BONE_CONNECTED)) {
+        if (linked_parent) {
           /* Only adds if there's no IK yet (and no parent bone was selected). */
           bPoseChannel *parent;
           for (parent = pchan.parent; parent; parent = parent->parent) {
@@ -542,7 +544,13 @@ static void add_pose_transdata(
   if (t->mode == TFM_TRANSLATION) {
     bKinematicConstraint *data = has_targetless_ik(pchan);
     if (data) {
-      if (data->flag & CONSTRAINT_IK_TIP) {
+      if (bone->xbone_joint) {
+        const bPoseChannel *end = (!(data->flag & CONSTRAINT_IK_TIP) && pchan->parent) ?
+                                      pchan->parent :
+                                      pchan;
+        copy_v3_v3(data->grabtarget, end->pose_head);
+      }
+      else if (data->flag & CONSTRAINT_IK_TIP) {
         copy_v3_v3(data->grabtarget, pchan->pose_tail);
       }
       else {

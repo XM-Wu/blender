@@ -642,8 +642,9 @@ static void drw_shgroup_bone_axes(const Armatures::DrawContext *ctx,
                                   const float color[4])
 {
   float4x4 mat = ctx->ob->object_to_world() * float4x4(bone_mat);
-  /* Move to bone tail. */
-  mat[3] += mat[1];
+  if (!(ctx->armature->flag & ARM_XBONE)) {
+    mat[3] += mat[1];
+  }
   ExtraInstanceData data(mat, color, 0.25f);
   /* NOTE: Axes are not drawn in bone selection (pose or edit mode).
    * They are only drawn and selectable in object mode. So only load the object select ID. */
@@ -1270,6 +1271,23 @@ static void draw_axes(const Armatures::DrawContext *ctx,
   /* Mix with axes color. */
   final_col[3] = (ctx->const_color) ? 1.0 : (bone.flag() & BONE_SELECTED) ? 0.1 : 0.65;
 
+  if (arm.flag & ARM_XBONE) {
+    float matrix[4][4];
+    if (bone.is_posebone()) {
+      const bPoseChannel *pchan = bone.as_posebone();
+      float axes[3][3];
+      BKE_pose_channel_transform_orientation(&arm, pchan, axes);
+      copy_m4_m3(matrix, axes);
+      BKE_pose_channel_transform_location(&arm, pchan, matrix[3]);
+      const float length = bone.posebone_bone()->length;
+      rescale_m4(matrix, float3(length));
+    }
+    else {
+      copy_m4_m4(matrix, bone.disp_mat());
+    }
+    drw_shgroup_bone_axes(ctx, matrix, final_col);
+    return;
+  }
   if (bone.is_posebone() && bone.as_posebone()->custom && !(arm.flag & ARM_NO_CUSTOM)) {
     const bPoseChannel *pchan = bone.as_posebone();
     const Bone *pchan_bone = bone.posebone_bone();
@@ -1968,7 +1986,13 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
   pivot.location() = float3(bone.disp_mat()[3]);
   pivot.x_axis().x = pivot.y_axis().y = pivot.z_axis().z = display_size;
   /* Keep the solid picking volume even when the visible joint is hollow. */
-  const bool wire_only = ctx->drawtype == ARM_DRAW_TYPE_WIRE && !ctx->res->is_selection();
+  const int override_type = bone.is_editbone() ? bone.as_editbone()->drawtype :
+                                                 bone.posebone_bone()->drawtype;
+  const int style =
+      ELEM(override_type, ARM_DRAW_TYPE_OCTA, ARM_DRAW_TYPE_STICK, ARM_DRAW_TYPE_WIRE) ?
+          override_type :
+          ctx->drawtype;
+  const bool wire_only = style == ARM_DRAW_TYPE_WIRE && !ctx->res->is_selection();
   const float4 wire_color(UNPACK3(wire), 1.0f);
   if (wire_only) {
     const auto pivot_id = ctx->res->select_id(*ctx->ob_ref, select_id | BONESEL_ANY);
@@ -1993,6 +2017,15 @@ static void draw_xbone_joint(const Armatures::DrawContext *ctx,
     float length;
     const float3 direction = math::normalize_and_get_length(offset, length);
     if (length <= 1e-8f) {
+      continue;
+    }
+    if (style == ARM_DRAW_TYPE_STICK) {
+      float4x4 link = float4x4::identity();
+      link.location() = origin;
+      link.y_axis() = offset;
+      const float hidden[4] = {};
+      drw_shgroup_bone_stick(
+          ctx, link.ptr(), wire, ctx->const_color ? ctx->const_color : solid, hidden, hidden, id);
       continue;
     }
     if (length <= cap_depth) {
@@ -2285,7 +2318,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       draw_bone_relations(ctx, bone_ptr, boneflag);
     }
 
-    if (xbone) {
+    if (xbone && !use_custom_shape) {
       draw_xbone_joint(ctx, bone_ptr, boneflag, select_id, child_origins.lookup(pchan), reference_size);
     }
     else {

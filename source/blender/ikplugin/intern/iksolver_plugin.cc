@@ -327,7 +327,7 @@ static void execute_posetree(Depsgraph *depsgraph, Scene *scene, Object *ob, Pos
       flag |= IK_ZDOF;
     }
 
-    if (tree->stretch && (pchan->ikstretch > 0.0f)) {
+    if (!bone->xbone_joint && tree->stretch && (pchan->ikstretch > 0.0f)) {
       flag |= IK_TRANS_YDOF;
       hasstretch = 1;
     }
@@ -358,7 +358,10 @@ static void execute_posetree(Depsgraph *depsgraph, Scene *scene, Object *ob, Pos
 
     /* bone offset */
     if (pchan->parent && (a > 0)) {
-      sub_v3_v3v3(start, pchan->pose_head, pchan->parent->pose_tail);
+      /* XBone represents links as offsets between pivots, with no terminal Y segment. */
+      sub_v3_v3v3(start,
+                  pchan->pose_head,
+                  bone->xbone_joint ? pchan->parent->pose_head : pchan->parent->pose_tail);
     }
     else {
       /* only root bone (a = 0) has no parent */
@@ -366,7 +369,7 @@ static void execute_posetree(Depsgraph *depsgraph, Scene *scene, Object *ob, Pos
     }
 
     /* change length based on bone size */
-    length = bone->length * len_v3(R_bonemat[1]);
+    length = bone->xbone_joint ? 0.0f : bone->length * len_v3(R_bonemat[1]);
 
     /* basis must be pure rotation */
     normalize_m3(R_bonemat);
@@ -486,7 +489,9 @@ static void execute_posetree(Depsgraph *depsgraph, Scene *scene, Object *ob, Pos
 
       /* end effector in world space */
       copy_m4_m4(end_pose, pchan->pose_mat);
-      copy_v3_v3(end_pose[3], pchan->pose_tail);
+      if (!pchan->bone_get(*ob)->xbone_joint) {
+        copy_v3_v3(end_pose[3], pchan->pose_tail);
+      }
       mul_m4_series(world_pose, goalinv, ob->object_to_world().ptr(), end_pose);
 
       /* blend position */
@@ -505,8 +510,14 @@ static void execute_posetree(Depsgraph *depsgraph, Scene *scene, Object *ob, Pos
 
     if ((data->flag & CONSTRAINT_IK_POS) && data->weight != 0.0f) {
       if (poleconstrain) {
-        IK_SolverSetPoleVectorConstraint(
-            solver, iktarget, goalpos, polepos, data->poleangle, (poleangledata == data));
+        IK_SolverSetPoleVectorConstraint(solver,
+                                         iktarget,
+                                         goalpos,
+                                         polepos,
+                                         data->poleangle,
+                                         (poleangledata == data),
+                                         tree->pchan[target.tip]->bone_get(*ob)->xbone_joint !=
+                                             nullptr);
       }
       IK_SolverAddGoal(solver, iktarget, goalpos, data->weight);
     }

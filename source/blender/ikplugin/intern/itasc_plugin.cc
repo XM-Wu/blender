@@ -598,7 +598,9 @@ static bool target_callback(const iTaSC::Timestamp & /*timestamp*/,
       pchan = pchan->parent;
       float chanmat[4][4];
       copy_m4_m4(chanmat, pchan->pose_mat);
-      copy_v3_v3(chanmat[3], pchan->pose_tail);
+      if (!pchan->bone_get(*target->owner)->xbone_joint) {
+        copy_v3_v3(chanmat[3], pchan->pose_tail);
+      }
       mul_m4_series(restmat, target->owner->object_to_world().ptr(), chanmat, target->eeRest);
     }
     else {
@@ -628,7 +630,9 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
     pchan = pchan->parent;
     float chanmat[4][4];
     copy_m4_m4(chanmat, pchan->pose_mat);
-    copy_v3_v3(chanmat[3], pchan->pose_tail);
+    if (!pchan->bone_get(*ikscene->blArmature)->xbone_joint) {
+      copy_v3_v3(chanmat[3], pchan->pose_tail);
+    }
     /* save the base as a frame too so that we can compute deformation after simulation */
     ikscene->baseFrame.setValue(&chanmat[0][0]);
     /* iTaSC armature is scaled to object scale, scale the base frame too */
@@ -650,6 +654,13 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
     bKinematicConstraint *poledata = static_cast<bKinematicConstraint *>(
         ikscene->polarConstraint->data);
 
+    const bool point_chain =
+        ikscene->channels[0].pchan->bone_get(*ikscene->blArmature)->xbone_joint;
+    if (point_chain) {
+      /* KDL positions already include object scale. Invert the rigid base
+       * frame so target and effector use the same units. */
+      next.getValue(rootmat[0]);
+    }
     invert_m4_m4(imat, rootmat);
     /* polar constraint imply only one target */
     IK_Target *iktarget = ikscene->targets[0];
@@ -694,6 +705,47 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
     KDL::Vector poledir = KDL::Normalize(goalpos - rootpos);
     /* compute up directions */
     KDL::Vector poleup = KDL::Normalize(polepos - rootpos);
+    const auto rotate_base = [&](const KDL::Rotation &rotation) {
+      /* Subchains can start away from the base object's origin. */
+      const KDL::Frame correction(
+          rotation, point_chain ? rootpos - rotation * rootpos : KDL::Vector::Zero());
+      next = next * correction;
+      ikscene->baseFrame = ikscene->baseFrame * correction;
+    };
+    if (point_chain) {
+      KDL::Vector bend = KDL::Vector::Zero();
+      for (int i = ikscene->channels[iktarget->channel].parent; i > 0;
+           i = ikscene->channels[i].parent)
+      {
+        KDL::Frame middle;
+        ikscene->armature->getRelativeFrame(middle, ikscene->channels[i].tail);
+        const KDL::Vector offset = middle.p - rootpos;
+        const KDL::Vector projection = (dir * offset) * dir;
+        if (projection.Norm() > bend.Norm()) {
+          bend = projection;
+        }
+      }
+      if ((endpos - rootpos).Norm() < KDL::epsilon || (goalpos - rootpos).Norm() < KDL::epsilon ||
+          (poledir * poleup).Norm() < KDL::epsilon)
+      {
+        return true;
+      }
+      if (bend.Norm() < KDL::epsilon) {
+        if (ikscene->channels[iktarget->channel].parent > 0 &&
+            (dir * poledir).Norm() < KDL::epsilon &&
+            (goalpos - rootpos).Norm() < (endpos - rootpos).Norm() - KDL::epsilon)
+        {
+          const double angle = acos((goalpos - rootpos).Norm() / (endpos - rootpos).Norm());
+          const KDL::Rotation seed = KDL::Rotation::Rot(dir * poleup, angle);
+          rotate_base(seed);
+        }
+        return true;
+      }
+      rootx = KDL::Normalize(bend);
+      rootz = rootx * dir;
+      /* Let the iterative position task swing the arm. The pole only controls twist. */
+      poledir = dir;
+    }
     KDL::Vector up = rootx * KDL::cos(poledata->poleangle) + rootz * KDL::sin(poledata->poleangle);
     /* from which we build rotation matrix */
     KDL::Rotation endrot, polerot;
@@ -710,8 +762,7 @@ static bool base_callback(const iTaSC::Timestamp &timestamp,
     /* the difference between the two is the rotation we want to apply */
     KDL::Rotation result(polerot * endrot.Inverse());
     /* apply on base frame as this is an artificial additional rotation */
-    next.M = next.M * result;
-    ikscene->baseFrame.M = ikscene->baseFrame.M * result;
+    rotate_base(result);
   }
   return true;
 }
@@ -979,7 +1030,9 @@ static int convert_channels(Depsgraph *depsgraph, IK_Scene *ikscene, PoseTree *t
       flag |= IK_ZDOF;
     }
 
-    if (tree->stretch && (pchan->ikstretch > 0.0)) {
+    if (!pchan->bone_get(*ikscene->blArmature)->xbone_joint && tree->stretch &&
+        (pchan->ikstretch > 0.0))
+    {
       flag |= IK_TRANSY;
     }
     /*
@@ -1237,7 +1290,9 @@ static IK_Scene *convert_tree(
         unit_m3(R_parmat);
       }
       if (pchan->parent) {
-        sub_v3_v3v3(start, pchan->pose_head, pchan->parent->pose_tail);
+        sub_v3_v3v3(start,
+                    pchan->pose_head,
+                    bone->xbone_joint ? pchan->parent->pose_head : pchan->parent->pose_tail);
       }
       else if (ikparam->flag & ITASC_TRANSLATE_ROOT_BONES) {
         start[0] = start[1] = start[2] = 0.0f;
@@ -1254,7 +1309,7 @@ static IK_Scene *convert_tree(
     KDL::Frame head(brot, bpos);
 
     /* rest pose length of the bone taking scaling into account */
-    length = bone->length * ikscene->blScale;
+    length = bone->xbone_joint ? 0.0 : bone->length * ikscene->blScale;
     parent = (a > 0) ? ikscene->channels[tree->parent[a]].tail : root;
     /* first the fixed segment to the bone head */
     if (!(bone->flag & BONE_CONNECTED) || head.M.GetRot().Norm() > KDL::epsilon) {
@@ -1523,7 +1578,9 @@ static IK_Scene *convert_tree(
     const Bone *bone = pchan->bone_get(*ob);
     copy_m4_m4(baseFrame, bone->arm_mat);
     /* move to the tail and scale to get rest pose of armature base */
-    copy_v3_v3(baseFrame[3], bone->arm_tail);
+    if (!bone->xbone_joint) {
+      copy_v3_v3(baseFrame[3], bone->arm_tail);
+    }
     invert_m4_m4(invBaseFrame, baseFrame);
   }
   else {
@@ -1542,19 +1599,24 @@ static IK_Scene *convert_tree(
 
     /* add the end effector
      * estimate the average bone length, used to clamp feedback error */
-    for (bone_count = 0, bone_length = 0.0f, a = iktarget->channel; a >= 0;
-         a = tree->parent[a], bone_count++)
-    {
-      const bPoseChannel *pchan = tree->pchan[a];
-      const Bone *bone = pchan->bone_get(*ob);
-      bone_length += ikscene->blScale * bone->length;
+    for (bone_count = 0, bone_length = 0.0f, a = iktarget->channel; a >= 0; a = tree->parent[a]) {
+      const Bone *bone = tree->pchan[a]->bone_get(*ob);
+      if (bone->xbone_joint && tree->parent[a] < 0) {
+        continue; /* The chain root has no incoming link. */
+      }
+      bone_length += ikscene->blScale * (bone->xbone_joint ?
+                                             len_v3v3(bone->arm_head, bone->parent->arm_head) :
+                                             bone->length);
+      bone_count++;
     }
-    bone_length /= bone_count;
+    bone_length = bone_length > 0.0 ? bone_length / bone_count : 1.0;
 
     /* store the rest pose of the end effector to compute enforce target */
     const Bone *bone = pchan->bone_get(*ob);
     copy_m4_m4(mat, bone->arm_mat);
-    copy_v3_v3(mat[3], bone->arm_tail);
+    if (!bone->xbone_joint) {
+      copy_v3_v3(mat[3], bone->arm_tail);
+    }
     /* get the rest pose relative to the armature base */
     mul_m4_m4m4(iktarget->eeRest, invBaseFrame, mat);
     iktarget->eeBlend = (!ikscene->polarConstraint && condata->type == CONSTRAINT_IK_COPYPOSE) ?
@@ -1882,6 +1944,11 @@ static void execute_scene(Depsgraph *depsgraph,
     mul_v3_fl(pchan->pose_mat[0], scale);
     mul_v3_fl(pchan->pose_mat[1], scale);
     mul_v3_fl(pchan->pose_mat[2], scale);
+    const Bone *bone = pchan->bone_get(*ikscene->blArmature);
+    if (bone->xbone_joint) {
+      /* Keep the compatibility tail for consumers outside the point-joint solver. */
+      madd_v3_v3v3fl(pchan->pose_tail, pchan->pose_head, pchan->pose_mat[1], bone->length);
+    }
   }
   if (i < ikscene->numchan) {
     /* big problem */

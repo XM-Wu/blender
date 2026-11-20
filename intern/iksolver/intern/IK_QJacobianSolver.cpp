@@ -147,10 +147,15 @@ bool IK_QJacobianSolver::Setup(IK_QSegment *root, std::list<IK_QTask *> &tasks)
   return true;
 }
 
-void IK_QJacobianSolver::SetPoleVectorConstraint(
-    IK_QSegment *tip, Vector3d &goal, Vector3d &polegoal, float poleangle, bool getangle)
+void IK_QJacobianSolver::SetPoleVectorConstraint(IK_QSegment *tip,
+                                                 Vector3d &goal,
+                                                 Vector3d &polegoal,
+                                                 float poleangle,
+                                                 bool getangle,
+                                                 bool use_joint_pivots)
 {
   m_poleconstraint = true;
+  m_joint_pivots = use_joint_pivots;
   m_poletip = tip;
   m_goal = goal;
   m_polegoal = polegoal;
@@ -158,11 +163,12 @@ void IK_QJacobianSolver::SetPoleVectorConstraint(
   m_getpoleangle = getangle;
 }
 
-void IK_QJacobianSolver::ConstrainPoleVector(IK_QSegment *root, std::list<IK_QTask *> &tasks)
+void IK_QJacobianSolver::ConstrainPoleVector(IK_QSegment *root,
+                                             std::list<IK_QTask *> &tasks,
+                                             bool after_solve)
 {
-  // this function will be called before and after solving. calling it before
-  // solving gives predictable solutions by rotating towards the solution,
-  // and calling it afterwards ensures the solution is exact.
+  // Pre-align a bend before solving. Point-joint chains also align their solved
+  // bend plane afterwards, around the actual root-to-effector axis.
 
   if (!m_poleconstraint) {
     return;
@@ -196,10 +202,43 @@ void IK_QJacobianSolver::ConstrainPoleVector(IK_QSegment *root, std::list<IK_QTa
   Vector3d dir = normalize(endpos - rootpos);
   Vector3d rootx = rootbasis.col(0);
   Vector3d rootz = rootbasis.col(2);
+  if (m_joint_pivots) {
+    /* The bend plane is defined by joint positions, independent of the chosen
+     * local aim axis. A straight chain has no bend yet: let the position solve
+     * run first, then align the resulting bend with the pole. */
+    Vector3d bend = Vector3d::Zero();
+    for (IK_QSegment *seg = m_poletip->Parent(); seg && seg != root; seg = seg->Parent()) {
+      const Vector3d offset = seg->GlobalStart() - rootpos;
+      const Vector3d projection = offset - dir * offset.dot(dir);
+      if (projection.squaredNorm() > bend.squaredNorm()) {
+        bend = projection;
+      }
+    }
+    const Vector3d to_goal = m_goal - rootpos;
+    const Vector3d to_pole = m_polegoal - rootpos;
+    if (to_goal.squaredNorm() < 1e-12 || (endpos - rootpos).squaredNorm() < 1e-12 ||
+        to_goal.cross(to_pole).squaredNorm() < 1e-12)
+    {
+      return;
+    }
+    if (bend.squaredNorm() < 1e-12) {
+      /* With a straight arm and an inline, nearer goal the position Jacobian
+       * has zero gradient. Seed the bend using the explicit pole plane. */
+      if (!after_solve && m_poletip->Parent() && m_poletip->Parent() != root &&
+          dir.cross(to_goal.normalized()).squaredNorm() < 1e-12 &&
+          to_goal.norm() < (endpos - rootpos).norm() - 1e-6)
+      {
+        m_rootmatrix.prerotate(Eigen::AngleAxisd(0.05, dir.cross(to_pole).normalized()));
+      }
+      return;
+    }
+    rootx = bend.normalized();
+    rootz = rootx.cross(dir);
+  }
   Vector3d up = rootx * cos(m_poleangle) + rootz * sin(m_poleangle);
 
   // in post, don't rotate towards the goal but only correct the pole up
-  Vector3d poledir = (m_getpoleangle) ? dir : normalize(m_goal - rootpos);
+  Vector3d poledir = (m_getpoleangle || after_solve) ? dir : normalize(m_goal - rootpos);
   Vector3d poleup = normalize(m_polegoal - rootpos);
 
   Matrix3d mat, polemat;
@@ -360,6 +399,9 @@ bool IK_QJacobianSolver::Solve(IK_QSegment *root,
   }
 
   if (m_poleconstraint) {
+    if (m_joint_pivots) {
+      ConstrainPoleVector(root, tasks, true);
+    }
     root->PrependBasis(m_rootmatrix.linear());
   }
 

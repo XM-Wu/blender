@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(INC
+  ../blender/compositor
+  ../blender/compositor/algorithms
+  ../blender/compositor/cached_resources
+  ../blender/compositor/derived_resources
+  ../blender/compositor/utilities
   ../blender/editors/include
   ../blender/io/usd
   ../blender/makesrna
@@ -12,6 +17,7 @@ set(LIB
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::bmesh
+  bf_compositor
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
   PRIVATE bf::functions
@@ -501,7 +507,9 @@ if(WITH_PYTHON)
   # Install beside their bundled dependencies, found via each target's RPATH (UNIX)
   # or the `blender.shared` side-by-side assembly (WIN32).
   # Non-portable installs (UNIX system installs) place them beside the add-on.
-  if(WITH_INSTALL_PORTABLE)
+  # A Python module has no system libraries path, so it bundles them like a portable install,
+  # matching the lookup in the add-on's `library.py`.
+  if(WITH_INSTALL_PORTABLE OR WITH_PYTHON_MODULE)
     set(GLTF_BRIDGE_INSTALL_DIR "${TARGETDIR_LIB}")
   else()
     set(GLTF_BRIDGE_INSTALL_DIR "${TARGETDIR_VER_LIBS}/scripts/addons_core/io_scene_gltf2")
@@ -539,6 +547,19 @@ if(WITH_PYTHON)
     endif()
     install(
       PROGRAMS $<TARGET_FILE:bf_intern_meshopt_bridge>
+      DESTINATION ${GLTF_BRIDGE_INSTALL_DIR}
+    )
+  endif()
+
+  if(WITH_KTX)
+    if(GLTF_BRIDGE_RPATH)
+      set_target_properties(bf_intern_ktx_bridge PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "${GLTF_BRIDGE_RPATH}"
+      )
+    endif()
+    install(
+      PROGRAMS $<TARGET_FILE:bf_intern_ktx_bridge>
       DESTINATION ${GLTF_BRIDGE_INSTALL_DIR}
     )
   endif()
@@ -626,7 +647,7 @@ if(WIN32)
       DEBUG
     )
   endif()
-  if(EXISTS ${LIBDIR}/opentimelineio/lib/opentime.dll) # 5.3+  
+  if(EXISTS ${LIBDIR}/opentimelineio/lib/opentime.dll) # 5.3+
     windows_install_shared_manifest(
       FILES
         ${LIBDIR}/opentimelineio/lib/opentime.dll
@@ -634,14 +655,14 @@ if(WIN32)
       RELEASE
     )
   endif()
-  if(EXISTS ${LIBDIR}/opentimelineio/lib/opentime_d.dll) # 5.3+  
+  if(EXISTS ${LIBDIR}/opentimelineio/lib/opentime_d.dll) # 5.3+
     windows_install_shared_manifest(
       FILES
         ${LIBDIR}/opentimelineio/lib/opentime_d.dll
         ${LIBDIR}/opentimelineio/lib/opentimelineio_d.dll
       DEBUG
     )
-  endif()  
+  endif()
   if(EXISTS ${LIBDIR}/ceres/bin/ceres.dll) # 5.1+
     windows_install_shared_manifest(
       FILES
@@ -1448,8 +1469,8 @@ elseif(WIN32)
         PATTERN "__pycache__" EXCLUDE           # * any cache *
         PATTERN "*.pyc" EXCLUDE                 # * any cache *
         PATTERN "*.pyo" EXCLUDE                 # * any cache *
-        PATTERN "*_d.cp*" EXCLUDE                # * do not install debug libs * 
-      )      
+        PATTERN "*_d.cp*" EXCLUDE                # * do not install debug libs *
+      )
       install(
         DIRECTORY ${LIBDIR}/opentimelineio/python/opentimelineio/
         DESTINATION ${TARGETDIR_SITE_PACKAGES}/opentimelineio/
@@ -1717,6 +1738,11 @@ elseif(WIN32)
   windows_install_shared_manifest(
     FILES ${LIBDIR}/draco/bin/draco_d.dll
     DEBUG
+  )
+
+  windows_install_shared_manifest(
+    FILES ${LIBDIR}/ktx/bin/ktx.dll
+    ALL
   )
 
   windows_install_shared_manifest(

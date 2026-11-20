@@ -2175,14 +2175,6 @@ static void widget_draw_text_ime_underline(const uiFontStyle *fstyle,
 }
 #endif /* WITH_INPUT_IME */
 
-/* Text selection uses a lower opacity than the item color.
- * See #163741 for details. */
-static void widget_text_selection_color(const uiWidgetColors *wcol, uchar color[4])
-{
-  copy_v4_v4_uchar(color, wcol->item);
-  color[3] = 51;
-}
-
 static void widget_draw_textbox(const uiFontStyle *fstyle,
                                 const uiWidgetColors *wcol,
                                 Button *but,
@@ -2334,9 +2326,7 @@ static void widget_draw_textbox(const uiFontStyle *fstyle,
       const uint pos = GPU_vertformat_attr_add(
           immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
       immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-      uchar selection_color[4];
-      widget_text_selection_color(wcol, selection_color);
-      immUniformColor4ubv(selection_color);
+      immUniformColor4ubv(wcol->item);
       const StringRef line = lines[selection.line];
       const Vector<Bounds<int>> boxes = BLF_str_selection_boxes(
           fstyle->uifont_id,
@@ -2649,9 +2639,7 @@ static void widget_draw_text(const uiFontStyle *fstyle,
       uint pos = GPU_vertformat_attr_add(
           immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
       immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
-      uchar selection_color[4];
-      widget_text_selection_color(wcol, selection_color);
-      immUniformColor4ubv(selection_color);
+      immUniformColor4ubv(wcol->item);
       const auto boxes = BLF_str_selection_boxes(
           fstyle->uifont_id,
           drawstr + but->ofs,
@@ -2928,10 +2916,10 @@ static void widget_draw_multiline_text(const uiFontStyle *fstyle,
 
   float ymax = rect->ymax - padding;
   rcti line_rect = *rect;
-  int sccissors[4];
-  GPU_scissor_get(sccissors);
-  int sccisors_ymin = sccissors[1];
-  int sccisors_ymax = sccisors_ymin + sccissors[3];
+  int scissors[4];
+  GPU_scissor_get(scissors);
+  int scissors_ymin = scissors[1];
+  int scissors_ymax = scissors_ymin + scissors[3];
 
   for (const int i : multiline_label->wrap_cache->wrapped_lines.index_range().take_front(lines)) {
     StringRef line = multiline_label->wrap_cache->wrapped_lines[i];
@@ -2939,11 +2927,11 @@ static void widget_draw_multiline_text(const uiFontStyle *fstyle,
     ymax -= line_height;
     line_rect.ymin = ymax;
     /* Break when there is not more space to draw. */
-    if (line_rect.ymax < sccisors_ymin) {
+    if (line_rect.ymax < scissors_ymin) {
       break;
     }
     /* Skip the line if the line is not in visible bounds. */
-    if (line_rect.ymin > sccisors_ymax) {
+    if (line_rect.ymin > scissors_ymax) {
       continue;
     }
     if (i < (lines - 1) || total_lines == lines) {
@@ -3399,14 +3387,19 @@ static void widget_state(WidgetType *wt, const WidgetStateInfo *state, EmbossTyp
   }
 
   if (state->but_flag & BUT_REDALERT) {
+    uchar red[4];
+    theme::get_color_4ubv(TH_REDALERT, red);
+    /* Alpha is used to blend between the original color (text, background) and alert theme. */
+    const float red_alpha = float(red[3]) / 255.0f;
+
+    /* In regular widgets, tint the background and outline. */
     if (wt->draw && emboss != EmbossType::None) {
-      theme::get_color_3ubv(TH_REDALERT, wt->wcol.inner);
+      color_blend_v3_v3(wt->wcol.outline, red, red_alpha);
+      color_blend_v3_v3(wt->wcol.inner, red, red_alpha);
     }
+    /* Text such as labels or widgets without emboss. Tint the text only. */
     else {
-      uchar red[4];
-      theme::get_color_3ubv(TH_REDALERT, red);
-      color_mul_hsl_v3(red, 1.0f, 1.5f, 1.5f);
-      color_blend_v3_v3(wt->wcol.text, red, 0.5f);
+      color_blend_v3_v3(wt->wcol.text, red, red_alpha);
     }
   }
 
@@ -4913,7 +4906,7 @@ static void widget_swatch(Button *but,
   col[3] *= widget_alpha_factor(state);
 
   widgetbase_draw_color(&wtb, wcol, col, show_alpha_checkers);
-  if (color_but->is_pallete_color &&
+  if (color_but->is_palette_color &&
       (id_cast<Palette *>(but->rnapoin.owner_id))->active_color == color_but->palette_color_index)
   {
     const float width = rect->xmax - rect->xmin;
@@ -5266,9 +5259,12 @@ static void widget_state_label(WidgetType *wt, const WidgetStateInfo *state, Emb
 
   if (state->but_flag & BUT_REDALERT) {
     uchar red[4];
-    theme::get_color_3ubv(TH_REDALERT, red);
-    color_mul_hsl_v3(red, 1.0f, 1.5f, 1.5f);
-    color_blend_v3_v3(wt->wcol.text, red, 0.5f);
+    theme::get_color_4ubv(TH_REDALERT, red);
+
+    /* Alert color's alpha is used to blend between the text and alert tint.
+     * This ensures the text be always readable, lighter or darker depending on the theme. */
+    float red_alpha = float(red[3]) / 255.0f;
+    color_blend_v3_v3(wt->wcol.text, red, red_alpha);
   }
 }
 

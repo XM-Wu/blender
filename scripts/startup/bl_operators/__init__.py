@@ -34,7 +34,6 @@ _modules = [
     "object_quick_lattice",
     "object_randomize_transform",
     "presets",
-    "project",
     "render",
     "rigidbody",
     "screen_play_rendered_anim",
@@ -81,7 +80,6 @@ def register():
     bone_selection_sets.register()
     copy_global_transform.register()
     mesh_omni_outset.register()
-    project.register()
     workplane.register()
     uv_tools.register()
     uv_tools_texel_pack.register()
@@ -100,7 +98,6 @@ def unregister():
     bone_selection_sets.unregister()
     copy_global_transform.unregister()
     mesh_omni_outset.unregister()
-    project.unregister()
     workplane.unregister()
     uv_tools_texel_pack.unregister()
     uv_tools_fit_align.unregister()

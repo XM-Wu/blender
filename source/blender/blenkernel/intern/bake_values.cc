@@ -255,7 +255,7 @@ class RuntimeToBakeValue {
   {
     const CPPType &list_cpp_type = list.cpp_type();
     if (list_cpp_type.is<SocketValueVariant>()) {
-      bool found_invalid = true;
+      bool found_invalid = false;
       list.typed<SocketValueVariant>().foreach_for_write([&](SocketValueVariant &value_variant) {
         if (!this->runtime_to_bake__SocketValueVariant(value_variant)) {
           found_invalid = true;
@@ -320,6 +320,10 @@ class RuntimeToBakeValue {
         if (reference.type() == InstanceReference::Type::GeometrySet) {
           GeometrySet &geometry = reference.geometry_set();
           this->runtime_to_bake__GeometrySet(geometry);
+        }
+        else {
+          /* Don't leave dangling pointers for non-geometry object instances (e.g. lights). */
+          reference = bke::InstanceReference();
         }
       }
     }
@@ -662,6 +666,15 @@ static bool value_variant_valid_for_socket(const SocketValueVariant &value,
   }
   if (value.is_list()) {
     const nodes::GListPtr &list = *value.get_if<nodes::GListPtr>();
+    if (list && list->cpp_type().is<SocketValueVariant>()) {
+      bool found_invalid = false;
+      list->typed<SocketValueVariant>().foreach([&](const SocketValueVariant &item) {
+        if (!value_variant_valid_for_socket(item, base_cpp_type)) {
+          found_invalid = true;
+        }
+      });
+      return !found_invalid;
+    }
     return !list || list->cpp_type() == base_cpp_type;
   }
 #ifdef WITH_OPENVDB

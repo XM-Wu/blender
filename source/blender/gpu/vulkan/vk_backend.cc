@@ -509,6 +509,7 @@ void VKBackend::detect_workarounds(VKDevice &device)
 
     /* Force workarounds and disable extensions. */
     workarounds.not_aligned_pixel_formats = true;
+    workarounds.static_viewport_scissor = true;
     extensions.shader_viewport_index_layer = false;
     extensions.fragment_shader_barycentric = false;
     extensions.dynamic_rendering_local_read = false;
@@ -533,6 +534,12 @@ void VKBackend::detect_workarounds(VKDevice &device)
 
   if (G.debug & G_DEBUG_GPU_NO_TEXTURE_POOL) {
     GCaps.texture_pool_workaround = true;
+  }
+
+  /* Some Qualcomm drivers keep command-buffer-local state written by `vkCmdSetViewport` across
+   * command buffer resets. */
+  if (GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY)) {
+    workarounds.static_viewport_scissor = true;
   }
 
   extensions.shader_viewport_index_layer = device.supports_extension(
@@ -650,6 +657,17 @@ void VKBackend::detect_workarounds(VKDevice &device)
   }
 #endif
 
+  /* Legacy AMD drivers (#142019) don't perform the sRGB conversion when storing a clear value into
+   * an sRGB attachment, so a linear clear color is stored into the sRGB attachment and the
+   * background then renders too bright. Only official AMD drivers up to version 31.0.24002.92
+   * (Vulkan 2.0.294) are affected. */
+  if (GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_WIN, GPU_DRIVER_OFFICIAL)) {
+    const uint32_t driver_version = device.physical_device_properties_get().driverVersion;
+    if (driver_version <= VK_MAKE_API_VERSION(2, 0, 294, 0)) {
+      workarounds.missing_srgb_clear_conversion = true;
+    }
+  }
+
 #ifdef __APPLE__
   extensions.extended_dynamic_state = false;
 #endif
@@ -676,16 +694,6 @@ void VKBackend::init_resources()
 void VKBackend::delete_resources()
 {
   MEM_delete(compiler_);
-}
-
-bool VKBackend::pipelines_compiled_since_last_reset()
-{
-  return device.pipelines.compiled_since_last_reset();
-}
-
-void VKBackend::reset_pipeline_compilation_tracking()
-{
-  device.pipelines.reset_compilation_tracking();
 }
 
 void VKBackend::compute_dispatch(int groups_x_len, int groups_y_len, int groups_z_len)
@@ -872,6 +880,9 @@ void VKBackend::capabilities_init(VKDevice &device)
       device.physical_device_acceleration_structure_properties_get().maxGeometryCount > 0 &&
       device.physical_device_acceleration_structure_properties_get().maxPrimitiveCount > 0 &&
       device.physical_device_acceleration_structure_properties_get().maxInstanceCount > 0;
+  if (G.debug & G_DEBUG_GPU_NO_HW_RAYTRACING) {
+    GCaps.ray_query_support = false;
+  }
 
   GCaps.multi_viewport_support = device.physical_device_features_get().multiViewport &&
                                  limits.maxViewports >= GPU_MAX_VIEWPORTS;

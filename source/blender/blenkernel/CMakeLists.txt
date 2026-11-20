@@ -65,6 +65,7 @@ set(SRC
   intern/blender_cli_command.cc
   intern/blender_copybuffer.cc
   intern/blender_project.cc
+  intern/blender_project_config.cc
   intern/blender_undo.cc
   intern/blender_user_menu.cc
   intern/blendfile.cc
@@ -801,6 +802,7 @@ if(WITH_GTESTS)
     intern/main_test.cc
     intern/nla_test.cc
     intern/node_socket_value_iter_test.cc
+    intern/node_socket_value_test.cc
     intern/path_templates_test.cc
     intern/recents_test.cc
     intern/scene_test.cc

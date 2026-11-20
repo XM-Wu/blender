@@ -87,9 +87,13 @@ void VKWorkarounds::log() const
   CLOG_DEBUG(&LOG,
              "Activated workarounds\n"
              " - [%c] Not 16/32 bit aligned image formats\n"
-             " - [%c] No texture pool",
+             " - [%c] Static viewport & scissor state\n"
+             " - [%c] No texture pool\n"
+             " - [%c] Missing sRGB clear conversions",
              not_aligned_pixel_formats ? 'X' : ' ',
-             GCaps.texture_pool_workaround ? 'X' : ' ');
+             static_viewport_scissor ? 'X' : ' ',
+             GCaps.texture_pool_workaround ? 'X' : ' ',
+             missing_srgb_clear_conversion ? 'X' : ' ');
 }
 
 void VKDevice::reinit()
@@ -110,6 +114,13 @@ void VKDevice::deinit()
   samplers_.free();
   GPU_SHADER_FREE_SAFE(vk_backbuffer_blit_sh_);
 
+  /* Destroy resources that reached a zero ref count but were never consumed by a submission,
+   * as no further submissions will drain them. */
+  {
+    Vector<render_graph::VKResourceStateTracker::DiscardableResource> discardable =
+        resources.pop_discardable_resources();
+    orphaned_data.discard_resources(discardable, UINT64_MAX);
+  }
   orphaned_data_render.deinit(*this);
   orphaned_data.deinit(*this);
   {
@@ -313,6 +324,7 @@ shader::GeneratedSource VKDevice::extensions_define(StringRefNull stage_define,
   }
   if (use_ray_query) {
     ss << "#extension GL_EXT_ray_query : enable\n";
+    ss << "#define GPU_EXT_RAY_QUERY\n";
   }
   if (!extensions_.provoking_vertex) {
     ss << "#define GPU_PROVOKING_VERTEX_LAST\n";

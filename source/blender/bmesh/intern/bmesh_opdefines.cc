@@ -1006,7 +1006,7 @@ static BMOpDefine bmo_holes_fill_def = {
     {
         /* Input edges. */
         {"edges", BMO_OP_SLOT_ELEMENT_BUF, {BM_EDGE}},
-        /* Maximum number of sides for holes to fill (holes with more edges are skipped). */
+        /* Maximum number of sides for holes to fill, zero fills all holes. */
         {"sides", BMO_OP_SLOT_INT},
         {{'\0'}},
     },
@@ -1095,7 +1095,7 @@ static BMOpDefine bmo_edgenet_fill_def = {
         {"mat_nr", BMO_OP_SLOT_INT},
         /* Smooth state to use. */
         {"use_smooth", BMO_OP_SLOT_BOOL},
-        /* Maximum number of sides for created faces. */
+        /* Maximum number of sides for created faces (currently ignored). */
         {"sides", BMO_OP_SLOT_INT},
         {{'\0'}},
     },
@@ -1217,6 +1217,48 @@ static BMOpDefine bmo_scale_def = {
     /*init*/ nullptr,
     /*exec*/ bmo_scale_exec,
     /*type_flag*/ (BMO_OPTYPE_FLAG_NORMALS_CALC),
+};
+
+static BMO_FlagSet bmo_enum_fit_edge_loops_to_annotation_method[] = {
+    {TO_ANNOTATION_SPREAD, "SPREAD"},
+    {TO_ANNOTATION_SPREAD_EVENLY, "SPREAD_EVENLY"},
+    {TO_ANNOTATION_PROJECT, "PROJECT"},
+    {0, nullptr}};
+
+/*
+ * Fit Edge Loops To Annotation.
+ *
+ * Stretches selected vertices to the active stroke.
+ */
+static BMOpDefine bmo_fit_edge_loops_to_annotation_def = {
+    /*opname*/ "fit_edge_loops_to_annotation",
+    /*slot_types_in*/
+    {
+        /* Input geometry. */
+        {"geom", BMO_OP_SLOT_ELEMENT_BUF, {BM_EDGE}},
+        /* Influence factor: spans from 0.0 to 1.0. */
+        {"factor", BMO_OP_SLOT_FLT},
+        /* Method of distributing the vertices over the stroke. */
+        {"method",
+         BMO_OP_SLOT_INT,
+         to_subtype_union(BMO_OP_SLOT_SUBTYPE_INT_ENUM),
+         bmo_enum_fit_edge_loops_to_annotation_method},
+        /* Array of annotation strokes to project onto (ignored if None). */
+        {"strokes", BMO_OP_SLOT_PTR, to_subtype_union(BMO_OP_SLOT_SUBTYPE_PTR_STRUCT)},
+        /* Lock X axis editing. */
+        {"lock_x", BMO_OP_SLOT_BOOL},
+        /* Lock Y axis editing. */
+        {"lock_y", BMO_OP_SLOT_BOOL},
+        /* Lock Z axis editing. */
+        {"lock_z", BMO_OP_SLOT_BOOL},
+        {{'\0'}},
+    },
+    /*slot_types_out*/
+    {{{'\0'}}},
+    /*init*/ nullptr,
+    /*exec*/ bmo_fit_edge_loops_to_annotation_exec,
+    /*type_flag*/
+    (BMO_OPTYPE_FLAG_NORMALS_CALC),
 };
 
 /*
@@ -2226,7 +2268,7 @@ static BMOpDefine bmo_split_edges_def = {
     },
     /*slot_types_out*/
     {
-        /* The original edges that were disconnected. */
+        /* The input edges and the new edges created by splitting them. */
         {"edges.out", BMO_OP_SLOT_ELEMENT_BUF, {BM_EDGE}},
         {{'\0'}},
     },
@@ -3122,6 +3164,7 @@ const BMOpDefine *bmo_opdefines[] = {
     &bmo_bisect_plane_def,
     &bmo_space_edge_loops_evenly_def,
     &bmo_symmetrize_def,
+    &bmo_fit_edge_loops_to_annotation_def,
     &bmo_transform_def,
     &bmo_translate_def,
     &bmo_triangle_fill_def,

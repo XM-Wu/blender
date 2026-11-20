@@ -1069,6 +1069,8 @@ void popup_block_close(bContext *C, wmWindow *win, Block *block);
 
 bool popup_block_name_exists(const bScreen *screen, StringRef name);
 
+bool popup_region_from_operator(const bScreen *screen, const ARegion *region);
+
 /* Blocks
  *
  * Functions for creating, drawing and freeing blocks. A Block is a
@@ -2125,7 +2127,7 @@ void button_tooltip_timer_remove(bContext *C, Button *but);
 
 /**
  * Attempt to activate an button referencing an RNA property in the \a region.
- * \param block_name: targets a block in the \a region, if \a block_name is not set it will test
+ * \param block: targets a block in the \a region, when not passed it will test
  * any block in the \a region.
  * \returns `true` if the button gets activated.
  */
@@ -2561,6 +2563,30 @@ void template_search_preview(Layout *layout,
                              int rows,
                              int cols,
                              std::optional<StringRef> text = std::nullopt);
+
+/**
+ * Create a filepath with filebrowser button, similar to the default layout generated for this type
+ * of string property by `Layout::prop()`, but with more control.
+ *
+ * \param pathselect_op: If not null, the name of the operator to call (instead of the generic
+ * `BUTTONS_OT_file_browse` or `BUTTONS_OT_directory_browse` ones).
+ * \param filter_glob: If not empty, a 'glob filter' string listing all allowed extensions to list
+ * in the filebrowser, separated by semi-columns (e.g. `*.usd;*.usda;*.usdc;*.usdz`). Only used if
+ * the property sub-type is `PROP_FILEPATH`.
+ * \param name: Label text, the property name is used if unset.
+ * \param placeholder: the placeholder text to show in the text widget, when empty.
+ * \param split_name: Edit the parent directory and file/directory name in separate text fields.
+ */
+void template_filepath(Layout *layout,
+                       const bContext *C,
+                       PointerRNA *ptr,
+                       const StringRefNull propname,
+                       const char *pathselect_op,
+                       const char *filter_glob,
+                       const std::optional<StringRef> name,
+                       const std::optional<StringRef> placeholder,
+                       bool split_name = false);
+
 /**
  * This is creating/editing RNA-Paths
  *
@@ -2814,7 +2840,17 @@ void template_colormanaged_view_settings(Layout *layout,
                                          PointerRNA *ptr,
                                          StringRefNull propname);
 
-int template_recent_files(Layout *layout, int rows);
+enum class RecentFilesFilter : int8_t {
+  All,
+  Project, /**< Files in the active project. */
+  Other,   /**< Files not in the active project. */
+};
+int template_recent_files(Layout *layout,
+                          int rows,
+                          RecentFilesFilter filter = RecentFilesFilter::All,
+                          float project_ratio = 0.5f);
+int template_recent_projects(Layout *layout, int rows);
+void template_project_splash(Layout *layout, bContext *C);
 void template_file_select_path(Layout *layout, bContext *C, FileSelectParams *params);
 
 void template_asset_shelf_popover(
@@ -2825,6 +2861,8 @@ void template_light_linking_collection(
 
 void template_bone_collection_tree(Layout *layout, bContext *C);
 void template_grease_pencil_layer_tree(Layout *layout, bContext *C);
+
+void template_project_asset_libraries_tree(Layout *layout, bContext *C);
 
 void template_tree_interface(Layout *layout, const bContext *C, PointerRNA *ptr);
 /**
@@ -3097,6 +3135,9 @@ ARegion *tooltip_create_from_button_or_extra_icon(bContext *C,
                                                   ButtonExtraOpIcon *extra_icon,
                                                   bool is_quick_tip);
 ARegion *tooltip_create_from_gizmo(bContext *C, wmGizmo *gz);
+ARegion *tooltip_create_from_func(bContext *C,
+                                  FunctionRef<void(TooltipData &data)> create_fn,
+                                  const float init_position[2]);
 
 void tooltip_free(bContext *C, bScreen *screen, ARegion *region);
 
@@ -3113,7 +3154,7 @@ ARegion *tooltip_create_from_search_item_generic(bContext *C,
                                                  ID *id);
 
 /* How long before a tool-tip shows. */
-#define UI_TOOLTIP_DELAY 1.0
+#define UI_TOOLTIP_DELAY 0.5
 #define UI_TOOLTIP_DELAY_QUICK 0.2
 
 /* Float precision helpers */
@@ -3209,6 +3250,11 @@ Button *region_views_find_active_item_but(const ARegion *region);
 void region_views_clear_search_highlight(const ARegion *region);
 
 bool region_panels_fits_only_categories(const ARegion *region);
+/**
+ * Ensures the region is wide enough to draw panels' content.
+ * \return true if the region width changed.
+ */
+bool panel_region_visible_width_ensure(ARegion *region);
 
 void register_scene_compositor_effects_panel(ARegionType *region_type);
 
@@ -3222,8 +3268,8 @@ enum class ActivationButtonState : int8_t {
 /**
  * Attempt to activate an button referencing an RNA property. If any other button in the screen is
  * active, it will be deactivated.
- * \param state: Activation state for the button. Some states are specific to certain button types;
- * when an incompatible state is provided, the button will be activated with the
+ * \param target_state: Activation state for the button. Some states are specific to certain button
+ * types; when an incompatible state is provided, the button will be activated with the
  * #ActivationButtonState::Highlight state.
  * \param index: Index of the button that references the RNA property.
  * \return The center point of the button in window coordinates when successfully activated.

@@ -220,6 +220,7 @@ static const char *get_set_function_name(const ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -321,6 +322,7 @@ static GPUNodeLink *get_input_value_link(const bNodeSocket &input, GPUNodeStack 
     case SOCK_TEXT_ID:
     case SOCK_MASK:
     case SOCK_BUNDLE:
+    case SOCK_CLOSURE:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(get_node_socket_result_type(&input)));
       break;
@@ -453,6 +455,7 @@ static GPUNodeLink *get_result_single_value_link(const Result &result)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(result.type()));
       BLI_assert_unreachable();
@@ -641,6 +644,7 @@ static const char *get_store_function_name(ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -709,6 +713,7 @@ static GPUNodeLink *get_default_input_value_link(const ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -869,6 +874,7 @@ static const char *glsl_store_expression_from_result_type(ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -906,6 +912,7 @@ static ImageType gpu_image_type_from_result_type(const ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -1048,6 +1055,7 @@ std::string ShaderOperation::generate_code_for_outputs(ShaderCreateInfo &shader_
       case ResultType::Text:
       case ResultType::Mask:
       case ResultType::Bundle:
+      case ResultType::Closure:
         /* Single only types do not support GPU code path. */
         BLI_assert(Result::is_single_value_only_type(result.type()));
         BLI_assert_unreachable();
@@ -1115,6 +1123,7 @@ static const char *glsl_type_from_result_type(ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();
@@ -1164,6 +1173,7 @@ static const char *glsl_swizzle_from_result_type(ResultType type)
     case ResultType::Text:
     case ResultType::Mask:
     case ResultType::Bundle:
+    case ResultType::Closure:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(type));
       BLI_assert_unreachable();

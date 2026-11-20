@@ -124,7 +124,9 @@ enum class Diag {
   CapacityArrayDimensionMismatch,
   CapacityArrayImplicitSize,
 
+  ConditionAttributeDeclaredHere,
   ConditionAttributeMultiple,
+  ConditionAttributeNotChecked,
   ConditionAttributeNotOnResource,
   ConditionAttributeUnsupported,
 
@@ -195,6 +197,7 @@ enum class Diag {
   OperatorCalledIsNotFunction,
   OperatorTokenInvalid,
   OperatorInvalidTernary,
+  OperatorBitfieldInvalid,
 
   OverloadAmbiguous,
   OverloadNotFound,
@@ -434,8 +437,12 @@ static inline std::string_view diagnostic_message_get(Diag diag)
       return "Invalid argument type '{0}' to unary expression ({0}'{1}')";
     case Diag::MissingParameterForCall:
       return "Missing parameter for call to '{}'";
+    case Diag::ConditionAttributeDeclaredHere:
+      return "Condition declared here";
     case Diag::ConditionAttributeMultiple:
       return "Only one condition attribute is allowed";
+    case Diag::ConditionAttributeNotChecked:
+      return "Access to conditional resource '{}' is not guarded by any static check";
     case Diag::ConditionAttributeNotOnResource:
       return "Condition attribute is only allowed on resources declaration";
     case Diag::ConditionAttributeUnsupported:
@@ -466,6 +473,8 @@ static inline std::string_view diagnostic_message_get(Diag diag)
       return "Called object type '{}' is not a function";
     case Diag::OperatorInvalidTernary:
       return "Incompatible operand types ('{}' and '{}')";
+    case Diag::OperatorBitfieldInvalid:
+      return "Increment and decrement operators are not supported on bitfield";
     case Diag::OperatorTokenInvalid:
       return "Invalid operator token '{}'";
     case Diag::OverloadAmbiguous:

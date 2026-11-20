@@ -338,18 +338,12 @@ gpu::Shader *GPU_shader_async_compilation_finalize(AsyncCompilationHandle &handl
 
 void GPU_shader_async_compilation_cancel(AsyncCompilationHandle &handle)
 {
-  GPUBackend::get()->get_compiler()->asyc_compilation_cancel(handle);
+  GPUBackend::get()->get_compiler()->async_compilation_cancel(handle);
 }
 
 bool GPU_shader_compiler_has_pending_work()
 {
-  return GPUBackend::get()->get_compiler()->is_compiling() ||
-         GPUBackend::get()->pipelines_compiled_since_last_reset();
-}
-
-void GPU_shader_compiler_reset_frame_pipeline_tracking()
-{
-  GPUBackend::get()->reset_pipeline_compilation_tracking();
+  return GPUBackend::get()->get_compiler()->is_compiling();
 }
 
 void GPU_shader_compiler_wait_for_all()
@@ -512,7 +506,7 @@ bool GPU_shader_async_specialization_is_ready(AsyncSpecializationHandle &handle)
 
 void GPU_shader_async_specialization_cancel(AsyncSpecializationHandle &handle)
 {
-  GPUBackend::get()->get_compiler()->asyc_compilation_cancel(handle);
+  GPUBackend::get()->get_compiler()->async_compilation_cancel(handle);
 }
 
 /** \} */
@@ -905,6 +899,7 @@ Shader *ShaderCompiler::compile(const shader::ShaderCreateInfo &orig_info, bool 
   std::string resources = shader->resources_declare(info);
 
   defines += info.resource_guard_defines(info.compilation_constants_);
+  defines += info.iface_guard_defines();
 
   if (!info.compute_entry_fn_.is_empty()) {
     defines += "#define ENTRY_POINT_" + info.compute_entry_fn_ + "\n";
@@ -1106,7 +1101,7 @@ AsyncCompilationHandle ShaderCompiler::async_compilation(const shader::ShaderCre
   return handle;
 }
 
-void ShaderCompiler::asyc_compilation_cancel(AsyncCompilationHandle &handle)
+void ShaderCompiler::async_compilation_cancel(AsyncCompilationHandle &handle)
 {
   {
     std::unique_lock lock(mutex_);

@@ -5829,6 +5829,7 @@ class VIEW3D_MT_edit_armature(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.symmetrize")
             layout.operator("armature.delete", text="Delete Joints")
             return
 
@@ -5897,6 +5898,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.symmetrize")
             layout.operator("armature.delete", text="Delete Joints")
             return
 

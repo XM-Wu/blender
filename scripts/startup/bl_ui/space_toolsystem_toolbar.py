@@ -438,11 +438,15 @@ class _defs_transform:
 class _defs_remesh:
     @ToolDef.from_fn
     def select():
+        def draw_settings(context, layout, tool):
+            layout.prop(context.scene, "remesh_strip_width")
+
         return dict(
             idname="builtin.remesh_select",
-            label="Select Retopology Edge",
-            icon="ops.generic.select_box",
-            description="Click an edge to select it, Shift-click to extend the selection",
+            label="Draw Quad Strip",
+            draw_settings=draw_settings,
+            icon="ops.gpencil.draw",
+            description="Drag on the surface to draw quads or drag out from a boundary edge to extend it. Click to select",
         )
 
 

@@ -27,8 +27,12 @@ class IK_QJacobianSolver {
   ~IK_QJacobianSolver() = default;
 
   // setup pole vector constraint
-  void SetPoleVectorConstraint(
-      IK_QSegment *tip, Vector3d &goal, Vector3d &polegoal, float poleangle, bool getangle);
+  void SetPoleVectorConstraint(IK_QSegment *tip,
+                               Vector3d &goal,
+                               Vector3d &polegoal,
+                               float poleangle,
+                               bool getangle,
+                               bool use_joint_pivots);
   float GetPoleAngle()
   {
     return m_poleangle;
@@ -46,7 +50,9 @@ class IK_QJacobianSolver {
  private:
   void AddSegmentList(IK_QSegment *seg);
   bool UpdateAngles(double &norm);
-  void ConstrainPoleVector(IK_QSegment *root, std::list<IK_QTask *> &tasks);
+  void ConstrainPoleVector(IK_QSegment *root,
+                           std::list<IK_QTask *> &tasks,
+                           bool after_solve = false);
 
   double ComputeScale();
   void Scale(double scale, std::list<IK_QTask *> &tasks);
@@ -61,6 +67,7 @@ class IK_QJacobianSolver {
   Affine3d m_rootmatrix;
 
   bool m_poleconstraint;
+  bool m_joint_pivots = false;
   bool m_getpoleangle;
   Vector3d m_goal;
   Vector3d m_polegoal;

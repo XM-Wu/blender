@@ -370,7 +370,8 @@ void IK_SolverSetPoleVectorConstraint(IK_Solver *solver,
                                       float goal[3],
                                       float polegoal[3],
                                       float poleangle,
-                                      int getangle)
+                                      int getangle,
+                                      int use_joint_pivots)
 {
   if (solver == nullptr || tip == nullptr) {
     return;
@@ -387,7 +388,8 @@ void IK_SolverSetPoleVectorConstraint(IK_Solver *solver,
   Vector3d qgoal(goal[0], goal[1], goal[2]);
   Vector3d qpolegoal(polegoal[0], polegoal[1], polegoal[2]);
 
-  qsolver->solver.SetPoleVectorConstraint(qtip, qgoal, qpolegoal, poleangle, getangle);
+  qsolver->solver.SetPoleVectorConstraint(
+      qtip, qgoal, qpolegoal, poleangle, getangle, use_joint_pivots);
 }
 
 float IK_SolverGetPoleAngle(IK_Solver *solver)

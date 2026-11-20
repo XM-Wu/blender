@@ -65,6 +65,7 @@ class DATA_PT_display(ArmatureButtonsPanel, Panel):
         if arm.is_xbone:
             row = layout.row(align=True, heading="Display As")
             row.prop_enum(arm, "display_type", 'OCTAHEDRAL', text="Solid")
+            row.prop_enum(arm, "display_type", 'STICK', text="Stick")
             row.prop_enum(arm, "display_type", 'WIRE', text="Wireframe")
             layout.prop(arm, "xbone_thickness", text="Thickness")
         else:
@@ -81,6 +82,8 @@ class DATA_PT_display(ArmatureButtonsPanel, Panel):
         col = layout.column(align=False, heading="Axes")
         row = col.row(align=True)
         row.prop(arm, "show_axes", text="")
+        if arm.is_xbone:
+            return
         sub = row.row(align=True)
         sub.active = arm.show_axes
         sub.prop(arm, "axes_position", text="Position")

@@ -697,7 +697,7 @@ static bool xbone_local_orientation(Object &ob, float r_mat[3][3])
     if (!active || !(active->flag & POSE_SELECTED)) {
       return false;
     }
-    copy_m3_m4(joint, active->pose_mat);
+    BKE_pose_channel_transform_orientation(arm, active, joint);
   }
   float object_matrix[3][3];
   copy_m3_m4(object_matrix, ob.object_to_world().ptr());

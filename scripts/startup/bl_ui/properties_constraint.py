@@ -885,6 +885,7 @@ class ConstraintButtonsPanel:
         layout.use_property_split = True
         layout.use_property_decorate = True
 
+        joint_ik = context.object.type == 'ARMATURE' and context.object.data.is_xbone
         self.target_template(layout, con)
 
         if context.object.pose.ik_solver == 'ITASC':
@@ -900,9 +901,12 @@ class ConstraintButtonsPanel:
             col = layout.column()
             if con.pole_target:
                 col.prop(con, "pole_angle")
-            col.prop(con, "use_tail")
-            col.prop(con, "use_stretch")
-            col.prop(con, "chain_count")
+            if joint_ik:
+                col.prop(con, "use_tail", text="Include Owner Joint")
+            else:
+                col.prop(con, "use_tail")
+                col.prop(con, "use_stretch")
+            col.prop(con, "chain_count", text="Chain Joints" if joint_ik else "Chain Length")
 
             if con.ik_type == 'COPY_POSE':
                 layout.prop(con, "reference_axis", expand=True)
@@ -958,9 +962,12 @@ class ConstraintButtonsPanel:
             if con.pole_target:
                 col.prop(con, "pole_angle")
             col.prop(con, "iterations")
-            col.prop(con, "chain_count")
-            col.prop(con, "use_tail")
-            col.prop(con, "use_stretch")
+            col.prop(con, "chain_count", text="Chain Joints" if joint_ik else "Chain Length")
+            if joint_ik:
+                col.prop(con, "use_tail", text="Include Owner Joint")
+            else:
+                col.prop(con, "use_tail")
+                col.prop(con, "use_stretch")
 
             col = layout.column()
             row = col.row(align=True, heading="Weight Position")

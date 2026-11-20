@@ -137,7 +137,8 @@ void IK_SolverSetPoleVectorConstraint(IK_Solver *solver,
                                       float goal[3],
                                       float polegoal[3],
                                       float poleangle,
-                                      int getangle);
+                                      int getangle,
+                                      int use_joint_pivots);
 float IK_SolverGetPoleAngle(IK_Solver *solver);
 
 int IK_Solve(IK_Solver *solver, float tolerance, int max_iterations);

@@ -154,15 +154,6 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
         0, ("object.mode_set", {"type": 'TWO', "value": 'PRESS'},
             {"properties": [("mode", 'EDIT')]}))
 
-    # Explicit edit toggle avoids per-object restore_mode history.
-    mode_items = _keymap_items(keyconfig_data, "Object Non-modal")
-    mode_items[:] = [
-        ("object.xm_edit_mode_toggle", event, None)
-        if operator == "object.mode_set" and event.get("type") == 'FOUR'
-        else (operator, event, options)
-        for operator, event, options in mode_items
-    ]
-
     # Shift+V is the only keyboard shortcut for vertex/edge slide.
     mesh_items = _keymap_items(keyconfig_data, "Mesh")
     # Mesh-only overrides; global framing and transform modal keys stay intact.

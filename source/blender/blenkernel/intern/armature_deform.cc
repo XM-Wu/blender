@@ -33,9 +33,11 @@
 
 #include "BKE_action.hh"
 #include "BKE_armature.hh"
+#include "BKE_attribute.hh"
 #include "BKE_customdata.hh"
 #include "BKE_deform.hh"
 #include "BKE_editmesh.hh"
+#include "BKE_idprop.hh"
 #include "BKE_lattice.hh"
 #include "BKE_mesh.hh"
 #include "BKE_pose.hh"
@@ -289,6 +291,13 @@ struct ArmatureDeformParams {
 
   int armature_def_nr;
 
+  struct LayerChannel {
+    PChanBone joint;
+    VArray<float> weights;
+  };
+  Vector<LayerChannel> layer_channels;
+  bool use_layer_channels = false;
+
   /* List of all pose channels on the target object. */
   ConstListBaseWrapper<bPoseChannel> pose_channels = {{nullptr, nullptr}};
   /* Maps vertex group index (def_nr) to pose channels, if vertex groups are used.
@@ -403,34 +412,37 @@ static void armature_vert_task_with_mixer(const ArmatureDeformParams &params,
   float contrib = 0.0f;
   bool deformed = false;
   /* Apply vertex group deformation if enabled. */
-  if (params.use_dverts && dvert) {
-    /* Range of valid def_nr in MDeformWeight. */
-    const IndexRange def_nr_range = params.pose_channel_by_vertex_group.index_range();
-    const Span<MDeformWeight> dweights(dvert->dw, dvert->totweight);
-    for (const auto &dw : dweights) {
-      const PChanBone pchanbone = def_nr_range.contains(dw.def_nr) ?
-                                      params.pose_channel_by_vertex_group[dw.def_nr] :
-                                      PChanBone(nullptr, nullptr);
-      const bPoseChannel *pchan = pchanbone.pchan;
-      if (pchan == nullptr) {
-        continue;
+  auto accumulate = [&](const PChanBone pchanbone, float weight) {
+    /* Bone option to mix with envelope weight. */
+    const Bone *bone = pchanbone.bone;
+    if (bone && bone->flag & BONE_MULT_VG_ENV) {
+      weight *= distfactor_to_bone(co,
+                                   float3(bone->arm_head),
+                                   float3(bone->arm_tail),
+                                   bone->rad_head,
+                                   bone->rad_tail,
+                                   bone->dist);
+    }
+
+    contrib += pchan_bone_deform(pchanbone, weight, co, mixer);
+    deformed = true;
+  };
+  if (params.use_layer_channels) {
+    for (const auto &channel : params.layer_channels) {
+      const float weight = channel.weights[i];
+      if (weight > 0.0f) {
+        accumulate(channel.joint, weight);
       }
-
-      float weight = dw.weight;
-
-      /* Bone option to mix with envelope weight. */
-      const Bone *bone = pchanbone.bone;
-      if (bone && bone->flag & BONE_MULT_VG_ENV) {
-        weight *= distfactor_to_bone(co,
-                                     float3(bone->arm_head),
-                                     float3(bone->arm_tail),
-                                     bone->rad_head,
-                                     bone->rad_tail,
-                                     bone->dist);
+    }
+  }
+  else if (params.use_dverts && dvert) {
+    for (const MDeformWeight &dw : Span(dvert->dw, dvert->totweight)) {
+      if (params.pose_channel_by_vertex_group.index_range().contains(dw.def_nr)) {
+        const PChanBone joint = params.pose_channel_by_vertex_group[dw.def_nr];
+        if (joint.pchan) {
+          accumulate(joint, dw.weight);
+        }
       }
-
-      contrib += pchan_bone_deform(pchanbone, weight, co, mixer);
-      deformed = true;
     }
   }
   /* Use envelope if enabled and no bone deformed the vertex yet. */
@@ -500,6 +512,61 @@ static void armature_vert_task_with_dvert(const ArmatureDeformParams &deform_par
   }
 }
 
+/* Mesh attribute spans and edit-mesh custom data use the same channel identifiers.
+ * The caller ensures the edit-mesh vertex table before starting parallel deformation. */
+template<typename T>
+static VArray<T> layer_values(const Mesh *mesh,
+                              BMesh *bm,
+                              StringRefNull name,
+                              eCustomDataType type)
+{
+  if (mesh) {
+    return mesh->attributes().lookup<T>(name, AttrDomain::Point).varray;
+  }
+  const int offset = CustomData_get_offset_named(&bm->vdata, type, name.c_str());
+  if (offset < 0) {
+    return {};
+  }
+  return VArray<T>::from_func(bm->totvert, [bm, offset](const int64_t i) {
+    const BMVert *vert = BM_vert_at_index(bm, int(i));
+    return *static_cast<const T *>(BM_ELEM_CD_GET_VOID_P(vert, offset));
+  });
+}
+
+static void init_layer_channels(const Object &ob,
+                                const ListBaseT<bDeformGroup> &groups,
+                                StringRefNull prefix,
+                                const Mesh *mesh,
+                                BMesh *bm,
+                                ArmatureDeformParams &params)
+{
+  if (!params.use_dverts || !ob.id.properties ||
+      IDP_group_lookup_int(*ob.id.properties, "_skin_vertex_count") != params.vert_coords.size())
+  {
+    return;
+  }
+  const auto indices = layer_values<int>(mesh, bm, prefix, CD_PROP_INT32);
+  if (!indices || indices.size() != params.vert_coords.size()) {
+    return;
+  }
+  for (const int i : params.vert_coords.index_range()) {
+    if (indices[i] != i + 1) {
+      return;
+    }
+  }
+  params.use_layer_channels = true;
+  for (const auto [index, group] : groups.enumerate()) {
+    const PChanBone joint = params.pose_channel_by_vertex_group[index];
+    if (joint.pchan && group.skin_channel > 0) {
+      const std::string name = std::string(prefix) + "_r" + std::to_string(group.skin_channel);
+      auto values = layer_values<float>(mesh, bm, name, CD_PROP_FLOAT);
+      if (values) {
+        params.layer_channels.append({joint, std::move(values)});
+      }
+    }
+  }
+}
+
 static void armature_deform_coords(const Object &ob_arm,
                                    const Object &ob_target,
                                    const ListBaseT<bDeformGroup> *defbase,
@@ -509,7 +576,8 @@ static void armature_deform_coords(const Object &ob_arm,
                                    const std::optional<Span<float3>> vert_coords_prev,
                                    StringRefNull defgrp_name,
                                    const std::optional<Span<MDeformVert>> dverts,
-                                   const Mesh *me_target)
+                                   const Mesh *me_target,
+                                   StringRefNull layer_prefix = "")
 {
   ArmatureDeformParams deform_params = get_armature_deform_params(ob_arm,
                                                                   ob_target,
@@ -519,7 +587,12 @@ static void armature_deform_coords(const Object &ob_arm,
                                                                   vert_deform_mats,
                                                                   deformflag,
                                                                   defgrp_name,
-                                                                  dverts.has_value());
+                                                                  dverts.has_value() ||
+                                                                      !layer_prefix.is_empty());
+
+  if (me_target && defbase && !layer_prefix.is_empty()) {
+    init_layer_channels(ob_target, *defbase, layer_prefix, me_target, nullptr, deform_params);
+  }
 
   const bool use_quaternion = bool(deformflag & ARM_DEF_QUATERNION);
   constexpr int grain_size = 32;
@@ -573,7 +646,8 @@ static void armature_deform_editmesh(const Object &ob_arm,
                                      const std::optional<Span<float3>> vert_coords_prev,
                                      StringRefNull defgrp_name,
                                      const BMesh &bm_target,
-                                     const int cd_dvert_offset)
+                                     const int cd_dvert_offset,
+                                     StringRefNull layer_prefix)
 {
   ArmatureDeformParams deform_params = get_armature_deform_params(ob_arm,
                                                                   ob_target,
@@ -583,7 +657,8 @@ static void armature_deform_editmesh(const Object &ob_arm,
                                                                   vert_deform_mats,
                                                                   deformflag,
                                                                   defgrp_name,
-                                                                  cd_dvert_offset >= 0);
+                                                                  cd_dvert_offset >= 0 ||
+                                                                      !layer_prefix.is_empty());
 
   ArmatureEditMeshUserdata data{};
   data.use_quaternion = bool(deformflag & ARM_DEF_QUATERNION);
@@ -599,7 +674,12 @@ static void armature_deform_editmesh(const Object &ob_arm,
   TaskParallelSettings settings;
   BLI_parallel_mempool_settings_defaults(&settings);
 
-  if (data.deform_params.use_dverts) {
+  if (defbase && !layer_prefix.is_empty()) {
+    BM_mesh_elem_table_ensure(bm, BM_VERT);
+    init_layer_channels(ob_target, *defbase, layer_prefix, nullptr, bm, data.deform_params);
+  }
+
+  if (data.deform_params.use_dverts && cd_dvert_offset >= 0) {
     BLI_task_parallel_mempool(bm->vpool, &data, armature_vert_task_editmesh<true>, &settings);
   }
   else {
@@ -662,7 +742,8 @@ void BKE_armature_deform_coords_with_mesh(const Object &ob_arm,
                                           std::optional<MutableSpan<float3x3>> vert_deform_mats,
                                           int deformflag,
                                           StringRefNull defgrp_name,
-                                          const Mesh *me_target)
+                                          const Mesh *me_target,
+                                          StringRefNull layer_prefix)
 {
   if (!bke::verify_armature_deform_valid(ob_arm)) {
     return;
@@ -710,7 +791,8 @@ void BKE_armature_deform_coords_with_mesh(const Object &ob_arm,
                               vert_coords_prev,
                               defgrp_name,
                               dverts_opt,
-                              me_target);
+                              me_target,
+                              layer_prefix);
 }
 
 void BKE_armature_deform_coords_with_editmesh(
@@ -721,7 +803,8 @@ void BKE_armature_deform_coords_with_editmesh(
     std::optional<MutableSpan<float3x3>> vert_deform_mats,
     int deformflag,
     StringRefNull defgrp_name,
-    const BMesh &bm_target)
+    const BMesh &bm_target,
+    StringRefNull layer_prefix)
 {
   if (!bke::verify_armature_deform_valid(ob_arm)) {
     return;
@@ -739,7 +822,8 @@ void BKE_armature_deform_coords_with_editmesh(
                                 vert_coords_prev,
                                 defgrp_name,
                                 bm_target,
-                                cd_dvert_offset);
+                                cd_dvert_offset,
+                                layer_prefix);
 }
 
 /** \} */

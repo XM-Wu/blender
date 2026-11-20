@@ -372,6 +372,16 @@ add_blender_test(
 )
 
 add_blender_test(
+  script_skin_layers_v2
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_skin_layers_v2.py
+)
+
+add_blender_test(
+  script_skin_layers
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_skin_layers.py
+)
+
+add_blender_test(
   script_uv_tools
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_tools.py
 )

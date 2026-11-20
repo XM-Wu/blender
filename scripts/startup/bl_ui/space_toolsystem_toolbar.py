@@ -2197,6 +2197,23 @@ class _defs_texture_paint:
 
 class _defs_weight_paint:
 
+    @ToolDef.from_fn
+    def layered():
+        def draw_cursor(context, _tool, xy):
+            from gpu_extras.presets import draw_circle_2d
+            obj = context.active_object
+            if obj and "_skin_source" in obj:
+                draw_circle_2d(xy, (1.0, 1.0, 1.0, 0.8), obj.skin_layers.radius, segments=64)
+
+        return dict(
+            idname="builtin.skin_layer_brush",
+            label="Skin Layer Brush",
+            icon="brush.generic",
+            cursor='PAINT_CROSS',
+            draw_cursor=draw_cursor,
+            keymap="3D View Tool: Paint Weight, Skin Layer Brush",
+        )
+
     @staticmethod
     def poll_select_tools(context):
         if context is None:
@@ -3868,8 +3885,14 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
     def tools_from_context(cls, context, mode=None):
         if mode is None:
             mode = context.mode
+        if mode == 'PAINT_WEIGHT' and context.active_object and "_skin_source" in context.active_object:
+            yield _defs_weight_paint.layered
+            yield from _defs_weight_paint.poll_select_tools(context)
+            return
         for tools in (cls._tools[None], cls._tools.get(mode, ())):
             for item in tools:
+                if item is _defs_weight_paint.layered:
+                    continue
                 if not (type(item) is ToolDef) and callable(item):
                     yield from item(context)
                 else:
@@ -4252,6 +4275,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
         ],
         'PAINT_WEIGHT': [
             _brush_tool,
+            _defs_weight_paint.layered,
             _defs_weight_paint.blur,
             _defs_weight_paint.average,
             _defs_weight_paint.smear,

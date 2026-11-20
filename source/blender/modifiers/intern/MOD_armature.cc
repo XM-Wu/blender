@@ -22,6 +22,7 @@
 #include "BKE_armature.hh"
 #include "BKE_deform.hh"
 #include "BKE_editmesh.hh"
+#include "BKE_idprop.hh"
 #include "BKE_lib_query.hh"
 #include "BKE_mesh.hh"
 #include "BKE_modifier.hh"
@@ -113,6 +114,20 @@ static void update_depsgraph(ModifierData *md, const ModifierUpdateDepsgraphCont
   DEG_add_depends_on_transform_relation(ctx->node, "Armature Modifier");
 }
 
+static StringRefNull layer_source(const Object &ob, const ArmatureModifierData &armature)
+{
+  if (ob.id.properties && IDP_group_lookup_int(*ob.id.properties, "_skin_modifier") ==
+                              armature.modifier.persistent_uid)
+  {
+    const IDProperty *rig = IDP_GetPropertyTypeFromGroup(
+        ob.id.properties, "_skin_armature", IDP_ID);
+    if (rig && IDP_ID_get(rig) == &armature.object->id) {
+      return IDP_group_lookup_string(*ob.id.properties, "_skin_source").value_or("");
+    }
+  }
+  return "";
+}
+
 static void deform_verts(ModifierData *md,
                          const ModifierEvalContext *ctx,
                          Mesh *mesh,
@@ -134,7 +149,8 @@ static void deform_verts(ModifierData *md,
                                        std::nullopt,
                                        amd->deformflag,
                                        amd->defgrp_name,
-                                       mesh);
+                                       mesh,
+                                       layer_source(*ctx->object, *amd));
 
   /* free cache */
   MEM_SAFE_DELETE(amd->vert_coords_prev);
@@ -166,7 +182,8 @@ static void deform_verts_EM(ModifierData *md,
                                            std::nullopt,
                                            amd->deformflag,
                                            amd->defgrp_name,
-                                           *BKE_editmesh_bmesh_get(mesh));
+                                           *BKE_editmesh_bmesh_get(mesh),
+                                           layer_source(*ctx->object, *amd));
 
   /* free cache */
   MEM_SAFE_DELETE(amd->vert_coords_prev);
@@ -186,7 +203,8 @@ static void deform_matrices_EM(ModifierData *md,
                                            matrices,
                                            amd->deformflag,
                                            amd->defgrp_name,
-                                           *BKE_editmesh_bmesh_get(mesh));
+                                           *BKE_editmesh_bmesh_get(mesh),
+                                           layer_source(*ctx->object, *amd));
 }
 
 static void deform_matrices(ModifierData *md,
@@ -203,7 +221,8 @@ static void deform_matrices(ModifierData *md,
                                        matrices,
                                        amd->deformflag,
                                        amd->defgrp_name,
-                                       mesh);
+                                       mesh,
+                                       layer_source(*ctx->object, *amd));
 }
 
 static void panel_draw(const bContext * /*C*/, Panel *panel)

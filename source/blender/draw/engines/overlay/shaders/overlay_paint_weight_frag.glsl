@@ -84,8 +84,8 @@ void main()
   /* Weights are available */
   else {
     float weight = weight_interp.x;
-    float4 weight_color = texture(colorramp, weight);
-    weight_color = apply_color_fac(weight_color);
+    float4 weight_color = skin_colors ? float4(skin_color, 1.0f) : texture(colorramp, weight);
+    weight_color = skin_colors ? float4(weight_color.rgb * color_fac, 1.0f) : apply_color_fac(weight_color);
 
     /* Contour display */
     if (draw_contours) {

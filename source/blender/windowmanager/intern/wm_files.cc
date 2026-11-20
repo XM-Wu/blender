@@ -1473,6 +1473,27 @@ void wm_homefile_read_ex(bContext *C,
     }
     if (success) {
       is_factory_startup = filepath_startup_is_factory;
+      /* A personal General startup replaces the entire factory workspace list. Bring the
+       * skinning workspace into this Main without activating it or resaving the startup file. */
+      if (use_data && !filepath_startup_is_factory && !(app_template && app_template[0]) &&
+          !BKE_libblock_find_name(bmain, ID_WS, "Weight Paint", nullptr))
+      {
+        ID *workspace = WM_file_append_datablock(bmain,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                BLO_EMBEDDED_STARTUP_BLEND,
+                                                ID_WS,
+                                                "Weight Paint",
+                                                BLO_LIBLINK_APPEND_RECURSIVE,
+                                                reports);
+        if (workspace) {
+          BLO_update_defaults_workspace(id_cast<WorkSpace *>(workspace), nullptr);
+          ID *layout = BKE_libblock_find_name(bmain, ID_WS, "Layout", nullptr);
+          BKE_id_reorder(
+              reinterpret_cast<const ListBaseT<ID> *>(&bmain->workspaces), workspace, layout, true);
+        }
+      }
     }
   }
 

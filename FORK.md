@@ -249,3 +249,12 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `69550036a16` 智能挤出、对称和原生手柄，XM 记住工具组选择；`f2c838f2366` 穿透选择、镜像边标记和 XM 编辑快捷键；`de6c2c4bbf4` 临时工作平面。
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
+
+## 分层权重绘制
+
+在 **Weight Paint** 工作区选中带一个 Armature 修改器的网格，右下角的 **Weight Layers** 编辑器提供 **Create Layers from Weights**。它把当前变形组复制到 Base。其他区域也可以从编辑器类型菜单切换成 Weight Layers。
+
+- 在 3D 视图标题栏用 **Native / Skin Tools** 切换权重来源。进入姿态模式、播放或渲染时，Armature 继续使用对象最后选择的来源。
+- 点 **+** 建修正层，选择影响骨后绘制。**Mask** 可用同一套画笔绘制逐顶点遮罩，黑色露出下层，白色保留本层。各层可调序、复制、开关和调整不透明度。
+- **Replace / Add / Scale / Smooth** 支持表面笔画、顶点或面选区与 Flood。Shift 落笔临时平滑。**Display** 可选择本层、灰度遮罩或最终权重。
+- **Bake to Vertex Groups** 把合成结果写回变形组，保留层栈并支持撤销。共享网格需要先转为单用户才能烘焙。原始顶点对应关系失效时，恢复拓扑后可继续绘制。

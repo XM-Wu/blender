@@ -231,6 +231,7 @@ if(WITH_BLENDER)
       boids
       bold
       bone_data
+      bone_influenced
       bookmarks
       bordermove
       brushes_all

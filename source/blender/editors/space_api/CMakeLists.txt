@@ -13,10 +13,12 @@ set(INC_SYS
 
 set(SRC
   spacetypes.cc
+  space_weight_layers.cc
 )
 
 set(LIB
   PRIVATE bf::asset_system
+  PRIVATE bf::blenloader
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
   PRIVATE bf::dna

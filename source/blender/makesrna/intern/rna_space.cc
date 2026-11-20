@@ -168,6 +168,11 @@ const EnumPropertyItem rna_enum_space_type_items[] = {
      ICON_OUTLINER,
      "Outliner",
      "Overview of scene graph and all available data-blocks"},
+    {SPACE_WEIGHT_LAYERS,
+     "WEIGHT_LAYERS",
+     ICON_MOD_VERTEX_WEIGHT,
+     "Weight Layers",
+     "Edit layered skin weights and masks"},
     {SPACE_PROPERTIES,
      "PROPERTIES",
      ICON_PROPERTIES,
@@ -824,6 +829,8 @@ static StructRNA *rna_Space_refine(PointerRNA *ptr)
       return RNA_SpaceClipEditor;
     case SPACE_SPREADSHEET:
       return RNA_SpaceSpreadsheet;
+    case SPACE_WEIGHT_LAYERS:
+      return RNA_SpaceWeightLayers;
     case SPACE_PROJECT:
       return RNA_SpaceProject;
 
@@ -9826,6 +9833,9 @@ void RNA_def_space(BlenderRNA *brna)
   rna_def_space_nla(brna);
   rna_def_space_console(brna);
   rna_def_console_line(brna);
+  StructRNA *weight_layers = RNA_def_struct(brna, "SpaceWeightLayers", "Space");
+  RNA_def_struct_sdna(weight_layers, "SpaceLink");
+  RNA_def_struct_ui_text(weight_layers, "Weight Layers", "Layered skin weight editor");
   rna_def_space_info(brna);
   rna_def_space_userpref(brna);
   rna_def_node_tree_path(brna);

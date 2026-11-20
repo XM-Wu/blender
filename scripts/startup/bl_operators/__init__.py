@@ -37,6 +37,8 @@ _modules = [
     "render",
     "rigidbody",
     "screen_play_rendered_anim",
+    "skin_layers",
+    "skin_layers_tools",
     "sequencer",
     "spreadsheet",
     "userpref",
@@ -81,6 +83,8 @@ def register():
     copy_global_transform.register()
     mesh_omni_outset.register()
     workplane.register()
+    skin_layers.register()
+    skin_layers_tools.register()
     uv_tools.register()
     uv_tools_texel_pack.register()
     uv_tools_fit_align.register()
@@ -99,6 +103,8 @@ def unregister():
     copy_global_transform.unregister()
     mesh_omni_outset.unregister()
     workplane.unregister()
+    skin_layers_tools.unregister()
+    skin_layers.unregister()
     uv_tools_texel_pack.unregister()
     uv_tools_fit_align.unregister()
     uv_tools_transform.unregister()

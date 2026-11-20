@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "BKE_deform.hh"
+#include "BKE_idprop.hh"
 #include "DNA_userdef_types.h"
 
 #include "ED_view3d.hh"
@@ -490,6 +492,8 @@ class Armatures : Overlay {
     /* Wire thickness. */
     float const_wire = 0.0f;
 
+    bool skin_paint_target = false;
+    const char *skin_active_bone = nullptr;
     bool do_relations = false;
     bool transparent = false;
     bool show_relations = false;
@@ -517,6 +521,29 @@ class Armatures : Overlay {
     ctx.armature = &arm;
     ctx.res = &res;
     ctx.dt = state.dt;
+    const Object *paint_ob = state.object_active;
+    if (paint_ob && (state.object_mode & OB_MODE_WEIGHT_PAINT) && paint_ob->id.properties &&
+        IDP_GetPropertyFromGroup(paint_ob->id.properties, "_skin_source"))
+    {
+      const IDProperty *rig = IDP_GetPropertyTypeFromGroup(
+          paint_ob->id.properties, "_skin_armature", IDP_ID);
+      const ID *rig_id = rig ? IDP_ID_get(rig) : nullptr;
+      ctx.skin_paint_target = rig_id &&
+                              DEG_get_original(rig_id) == DEG_get_original(&ob_ref.object->id);
+      if (ctx.skin_paint_target) {
+        const int channel =
+            IDP_group_lookup_int(*paint_ob->id.properties, "_skin_active_channel").value_or(0);
+        if (channel) {
+          for (const bDeformGroup &group : *BKE_object_defgroup_list(paint_ob)) {
+            if (group.skin_channel == channel) {
+              ctx.skin_active_bone = group.name;
+              break;
+            }
+          }
+        }
+        draw_mode = ARM_DRAW_MODE_POSE;
+      }
+    }
     ctx.draw_mode = draw_mode;
     ctx.drawtype = eArmature_Drawtype(arm.drawtype);
 

@@ -2360,6 +2360,11 @@ static void rna_def_vertex_group(BlenderRNA *brna)
       srna, "Vertex Group", "Group of vertices, used for armature deform and other purposes");
   RNA_def_struct_ui_icon(srna, ICON_GROUP_VERTEX);
 
+  prop = RNA_def_property(srna, "skin_channel", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Skin Channel", "Persistent identifier for layered skin weights");
+
   prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
   RNA_def_property_ui_text(prop, "Name", "Vertex group name");
   RNA_def_struct_name_property(srna, prop);

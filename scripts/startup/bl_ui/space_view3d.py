@@ -79,6 +79,13 @@ class VIEW3D_HT_tool_header(Header):
     def draw_tool_settings(self, context):
         layout = self.layout
         tool_mode = context.mode
+        if tool_mode == 'PAINT_WEIGHT' and "_skin_source" in context.active_object:
+            state = context.active_object.skin_layers
+            layout.prop(state, "brush", text="")
+            layout.prop(state, "value")
+            layout.prop(state, "radius")
+            layout.prop(state, "strength", slider=True)
+            return
 
         # Active Tool
         # -----------
@@ -929,6 +936,14 @@ class VIEW3D_HT_header(Header):
         layout.template_header_3D_mode()
 
         # Contains buttons like Mode, Pivot, Layer, Mesh Select Mode...
+        if mode_string == 'PAINT_WEIGHT':
+            from .space_weight_layers import draw_source
+            draw_source(layout, obj)
+            layout.operator("paint.skin_switch_pose", text="Pose Rig", icon='POSE_HLT')
+        elif mode_string == 'POSE':
+            session = context.view_layer.skin_pose_session
+            if session.rig == obj and session.source:
+                layout.operator("paint.skin_switch_pose", text="Back to Weight Paint", icon='WPAINT_HLT')
         if obj:
             # Particle edit
             if object_mode == 'PARTICLE_EDIT':
@@ -1085,6 +1100,12 @@ class VIEW3D_HT_header(Header):
             )
         elif object_mode == 'VERTEX_GREASE_PENCIL':
             draw_topbar_grease_pencil_layer_panel(context, layout)
+        elif object_mode == 'WEIGHT_PAINT' and "_skin_source" in obj:
+            state = obj.skin_layers
+            group = next((g for g in obj.vertex_groups if g.skin_channel == state.influence), None)
+            layer_is_group = state.layers and state.layers[state.index].is_group
+            label = "Mask" if layer_is_group or state.target == 'MASK' else (group.name if group else "Choose Bone")
+            layout.label(text=label, icon='MOD_MASK' if layer_is_group or state.target == 'MASK' else 'BONE_DATA')
         elif object_mode == 'WEIGHT_PAINT':
             row = layout.row()
             row.popover(panel="VIEW3D_PT_slots_vertex_groups", icon='GROUP_VERTEX')
@@ -3885,7 +3906,14 @@ class VIEW3D_MT_paint_weight(Menu):
 
         layout.menu("VIEW3D_MT_paint_weight_lock", text="Locks")
 
-    def draw(self, _context):
+    def draw(self, context):
+        if "_skin_source" in context.active_object:
+            self.layout.operator("paint.skin_flood")
+            self.layout.operator("paint.skin_layer_edit", text="Add Layer").action = 'ADD'
+            self.layout.operator("paint.skin_layer_edit", text="Duplicate Layer").action = 'DUPLICATE'
+            self.layout.separator()
+            self.layout.operator("paint.skin_bake")
+            return
         self.draw_generic(self.layout, is_editmode=False)
 
 
@@ -9121,6 +9149,14 @@ class VIEW3D_PT_paint_weight_context_menu(Panel):
     def draw(self, context):
         layout = self.layout
 
+        if "_skin_source" in context.active_object:
+            state = context.active_object.skin_layers
+            layout.prop(state, "brush")
+            layout.prop(state, "value", slider=True)
+            layout.prop(state, "strength", slider=True)
+            layout.prop(state, "radius")
+            return
+
         brush = context.tool_settings.weight_paint.brush
 
         # Use unified_paint_settings_override to allow 'brush-like' tools (e.g. Gradient).
@@ -9437,6 +9473,11 @@ class VIEW3D_AST_brush_weight_paint(View3DAssetShelf, bpy.types.AssetShelf):
     mode = 'WEIGHT_PAINT'
     mode_prop = "use_paint_weight"
     brush_type_prop = "weight_brush_type"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return super().poll(context) and obj is not None and "_skin_source" not in obj
 
 
 class VIEW3D_AST_brush_texture_paint(View3DAssetShelf, bpy.types.AssetShelf):

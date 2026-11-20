@@ -37,6 +37,7 @@
 #include "BKE_editmesh.hh"
 #include "BKE_global.hh"
 #include "BKE_mesh.hh"
+#include "BKE_idprop.hh"
 #include "BKE_object_deform.h"
 #include "BKE_object_types.hh"
 #include "BKE_paint.hh"
@@ -1880,6 +1881,12 @@ void WeightPaintStroke::done(bool /*is_cancel*/, bool /*stroke_started*/)
 
 static wmOperatorStatus wpaint_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
+  const Object *object = CTX_data_active_object(C);
+  if (object && IDP_GetPropertyFromGroup_null(object->id.properties, "_skin_source")) {
+    WM_operator_name_call(
+        C, "PAINT_OT_skin_layer_stroke", wm::OpCallContext::InvokeRegionWin, nullptr, event);
+    return OPERATOR_CANCELLED;
+  }
   if (!G.background) {
     view3d_operator_needs_gpu(C);
   }
@@ -1908,6 +1915,10 @@ static wmOperatorStatus wpaint_invoke(bContext *C, wmOperator *op, const wmEvent
 
 static wmOperatorStatus wpaint_exec(bContext *C, wmOperator *op)
 {
+  const Object *object = CTX_data_active_object(C);
+  if (object && IDP_GetPropertyFromGroup_null(object->id.properties, "_skin_source")) {
+    return OPERATOR_CANCELLED;
+  }
   WeightPaintStroke *stroke = MEM_new<WeightPaintStroke>(__func__, C, op, nullptr);
   op->customdata = stroke;
 

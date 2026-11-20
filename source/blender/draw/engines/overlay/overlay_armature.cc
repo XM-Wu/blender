@@ -866,6 +866,9 @@ static const float *get_bone_solid_color(const Armatures::DrawContext *ctx,
                                          const eBone_Flag boneflag)
 {
   const UniformData &theme = ctx->res->theme;
+  if (ctx->skin_paint_target && (boneflag & BONE_DRAW_ACTIVE)) {
+    return theme.colors.active_object;
+  }
   if (ctx->const_color) {
     return theme.colors.bone_solid;
   }
@@ -885,6 +888,9 @@ static const float *get_bone_solid_with_consts_color(const Armatures::DrawContex
                                                      const eBone_Flag boneflag)
 {
   const UniformData &theme = ctx->res->theme;
+  if (ctx->skin_paint_target && (boneflag & BONE_DRAW_ACTIVE)) {
+    return theme.colors.active_object;
+  }
   if (ctx->const_color) {
     return theme.colors.bone_solid;
   }
@@ -2207,7 +2213,9 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
   bool is_pose_select = false;
   /* Object can be edited in the scene. */
   if (!is_from_dupli_or_set(ob)) {
-    if ((draw_ctx->object_mode & OB_MODE_POSE) || (ob == draw_ctx->object_pose)) {
+    if (ctx->skin_paint_target || (draw_ctx->object_mode & OB_MODE_POSE) ||
+        (ob == draw_ctx->object_pose))
+    {
       ctx->draw_mode = ARM_DRAW_MODE_POSE;
     }
     is_pose_select =
@@ -2305,7 +2313,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       /* Avoid drawing connection line to hidden parent. */
       boneflag &= ~BONE_CONNECTED;
     }
-    if (bone == arm.act_bone) {
+    if (ctx->skin_active_bone ? STREQ(bone->name, ctx->skin_active_bone) : bone == arm.act_bone) {
       /* Draw bone as active, but only if selected. */
       boneflag |= BONE_DRAW_ACTIVE;
     }

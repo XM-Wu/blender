@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "BKE_idprop.hh"
 #include "BKE_image.hh"
 #include "BKE_image_gpu.hh"
 #include "BKE_paint.hh"
@@ -118,6 +119,11 @@ class Paints : Overlay {
                                    res.shaders->paint_weight_fake_shading.get());
         sub.bind_texture("colorramp", &res.weight_ramp_tx);
         sub.push_constant("draw_contours", draw_contours);
+        const IDProperty *settings = state.object_active ? state.object_active->id.properties :
+                                                           nullptr;
+        const auto preview = settings ? IDP_group_lookup_string(*settings, "_skin_preview") :
+                                        std::nullopt;
+        sub.push_constant("skin_colors", preview.has_value());
         sub.push_constant("opacity", state.overlay.weight_paint_mode_opacity);
         if (!shadeless) {
           /* Arbitrary light to give a hint of the geometry behind the weights. */

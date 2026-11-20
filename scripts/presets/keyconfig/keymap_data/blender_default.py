@@ -8548,6 +8548,17 @@ def km_3d_view_tool_sculpt_face_set_edit(params):
 # ------------------------------------------------------------------------------
 # Tool System (3D View, Weight Paint)
 
+def km_3d_view_tool_paint_weight_skin_layers(params):
+    return (
+        "3D View Tool: Paint Weight, Skin Layer Brush",
+        {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
+        {"items": [
+            ("paint.skin_layer_stroke", {"type": params.tool_mouse, "value": 'PRESS'}, None),
+            ("paint.skin_layer_stroke", {"type": params.tool_mouse, "value": 'PRESS', "shift": True}, None),
+        ]},
+    )
+
+
 def km_3d_view_tool_paint_weight_sample_weight(params):
     return (
         "3D View Tool: Paint Weight, Sample Weight",
@@ -9378,6 +9389,7 @@ def generate_keymaps(params=None):
         km_3d_view_tool_sculpt_color_filter(params),
         km_3d_view_tool_sculpt_mask_by_color(params),
         km_3d_view_tool_sculpt_face_set_edit(params),
+        km_3d_view_tool_paint_weight_skin_layers(params),
         km_3d_view_tool_paint_weight_sample_weight(params),
         km_3d_view_tool_paint_weight_sample_vertex_group(params),
         km_3d_view_tool_paint_weight_gradient(params),

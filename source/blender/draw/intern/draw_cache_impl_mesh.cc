@@ -28,6 +28,8 @@
 #include "BKE_editmesh.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
+#include "BKE_idprop.hh"
+#include "BLI_string.hh"
 #include "BKE_object.hh"
 #include "BKE_object_deform.h"
 #include "BKE_paint.hh"
@@ -308,6 +310,7 @@ static bool drw_mesh_weight_state_compare(const DRW_MeshWeightState *a,
 {
   return a->defgroup_active == b->defgroup_active && a->defgroup_len == b->defgroup_len &&
          a->flags == b->flags && a->alert_mode == b->alert_mode &&
+         STREQ(a->skin_preview, b->skin_preview) &&
          a->defgroup_sel_count == b->defgroup_sel_count &&
          drw_mesh_flags_equal(a->defgroup_sel, b->defgroup_sel, a->defgroup_len) &&
          drw_mesh_flags_equal(a->defgroup_locked, b->defgroup_locked, a->defgroup_len) &&
@@ -324,6 +327,11 @@ static void drw_mesh_weight_state_extract(
   wstate->defgroup_len = mesh.vertex_group_names.count();
 
   wstate->alert_mode = ts.weightuser;
+  if (paint_mode && ob.id.properties) {
+    if (auto name = IDP_group_lookup_string(*ob.id.properties, "_skin_preview")) {
+      STRNCPY(wstate->skin_preview, name->c_str());
+    }
+  }
 
   if (paint_mode && ts.multipaint) {
     /* Multi-paint needs to know all selected bones, not just the active group.

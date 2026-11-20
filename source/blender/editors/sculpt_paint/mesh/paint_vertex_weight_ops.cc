@@ -28,6 +28,7 @@
 #include "BKE_colortools.hh"
 #include "BKE_context.hh"
 #include "BKE_deform.hh"
+#include "BKE_idprop.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_iterators.hh"
 #include "BKE_modifier.hh"
@@ -100,11 +101,18 @@ static void wpaint_prev_destroy(WPaintPrev *wpp)
 /** \name Weight from Bones Operator
  * \{ */
 
+static bool native_weight_source(bContext *C)
+{
+  const Object *ob = CTX_data_active_object(C);
+  return ob && !IDP_GetPropertyFromGroup_null(ob->id.properties, "_skin_source");
+}
+
 static bool weight_from_bones_poll(bContext *C)
 {
   Object *ob = CTX_data_active_object(C);
 
-  return (ob && (ob->mode & OB_MODE_WEIGHT_PAINT) && BKE_modifiers_is_deformed_by_armature(ob));
+  return (native_weight_source(C) && ob && (ob->mode & OB_MODE_WEIGHT_PAINT) &&
+          BKE_modifiers_is_deformed_by_armature(ob));
 }
 
 static wmOperatorStatus weight_from_bones_exec(bContext *C, wmOperator *op)
@@ -287,7 +295,7 @@ void PAINT_OT_weight_sample(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->invoke = weight_sample_invoke;
-  ot->poll = weight_paint_mode_poll;
+  ot->poll = [](bContext *C) { return native_weight_source(C) && weight_paint_mode_poll(C); };
 
   /* flags */
   ot->flag = OPTYPE_UNDO | OPTYPE_DEPENDS_ON_CURSOR;
@@ -396,7 +404,9 @@ void PAINT_OT_weight_sample_group(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->invoke = weight_sample_group_invoke;
-  ot->poll = weight_paint_mode_region_view3d_poll;
+  ot->poll = [](bContext *C) {
+    return native_weight_source(C) && weight_paint_mode_region_view3d_poll(C);
+  };
 
   /* flags */
   ot->flag = OPTYPE_UNDO | OPTYPE_DEPENDS_ON_CURSOR;
@@ -527,7 +537,7 @@ void PAINT_OT_weight_set(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->exec = weight_paint_set_exec;
-  ot->poll = weight_paint_mode_poll;
+  ot->poll = [](bContext *C) { return native_weight_source(C) && weight_paint_mode_poll(C); };
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -931,7 +941,9 @@ void PAINT_OT_weight_gradient(wmOperatorType *ot)
   ot->invoke = paint_weight_gradient_invoke;
   ot->modal = paint_weight_gradient_modal;
   ot->exec = paint_weight_gradient_exec;
-  ot->poll = weight_paint_poll_ignore_tool;
+  ot->poll = [](bContext *C) {
+    return native_weight_source(C) && weight_paint_poll_ignore_tool(C);
+  };
   ot->cancel = WM_gesture_straightline_cancel;
 
   /* flags */

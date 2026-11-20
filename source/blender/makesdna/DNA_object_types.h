@@ -339,7 +339,9 @@ struct bDeformGroup {
   char name[/*MAX_VGROUP_NAME*/ 64] = "";
   /* need this flag for locking weights */
   ebDeformGroup_Flag flag = {};
-  char _pad0[7] = {};
+  char _pad0[3] = {};
+  /** Persistent key for skin layer channels, assigned on first use. */
+  int skin_channel = 0;
 };
 
 #ifdef DNA_DEPRECATED_ALLOW

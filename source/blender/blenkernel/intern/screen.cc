@@ -1316,7 +1316,7 @@ void BKE_screen_header_alignment_reset(bScreen *screen)
           region.alignment = RGN_ALIGN_TOP;
           continue;
         }
-        region.alignment = alignment;
+        region.alignment = (area.spacetype == SPACE_WEIGHT_LAYERS) ? RGN_ALIGN_BOTTOM : alignment;
       }
       if (region.regiontype == RGN_TYPE_FOOTER) {
         if (ELEM(area.spacetype,

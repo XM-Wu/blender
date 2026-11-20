@@ -16,7 +16,9 @@ void main()
   gl_Position = drw_point_world_to_homogenous(world_pos);
 
   /* Separate actual weight and alerts for independent interpolation */
-  weight_interp = max(float2(weight, -weight), 0.0f);
+  weight_interp = max(float2(weight.x, -weight.x), 0.0f);
+
+  skin_color = weight.yzw;
 
   /* Saturate the weight to give a hint of the geometry behind the weights. */
 #ifdef FAKE_SHADING

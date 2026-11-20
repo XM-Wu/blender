@@ -711,7 +711,8 @@ void BKE_armature_deform_coords_with_mesh(const Object &ob_arm,
                                           std::optional<MutableSpan<float3x3>> vert_deform_mats,
                                           int deformflag,
                                           StringRefNull defgrp_name,
-                                          const Mesh *me_target);
+                                          const Mesh *me_target,
+                                          StringRefNull layer_prefix = "");
 
 void BKE_armature_deform_coords_with_editmesh(
     const Object &ob_arm,
@@ -721,7 +722,8 @@ void BKE_armature_deform_coords_with_editmesh(
     std::optional<MutableSpan<float3x3>> vert_deform_mats,
     int deformflag,
     StringRefNull defgrp_name,
-    const BMesh &bm_target);
+    const BMesh &bm_target,
+    StringRefNull layer_prefix = "");
 
 /** \} */
 

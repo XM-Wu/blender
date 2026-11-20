@@ -28,6 +28,7 @@
 #include "BLI_utildefines_stack.hh"
 #include "BLI_vector.hh"
 
+#include "BKE_idprop.hh"
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_curves.hh"
@@ -1226,6 +1227,7 @@ static void vgroup_duplicate(Object *ob)
   }
 
   cdg = BKE_defgroup_duplicate(dg);
+  cdg->skin_channel = 0;
   STRNCPY_UTF8(cdg->name, name);
   BKE_object_defgroup_unique_name(cdg, ob);
 
@@ -2461,6 +2463,12 @@ static void vgroup_assign_verts(Object *ob, Scene &scene, const int def_nr, cons
 
 static bool vertex_group_supported_poll_ex(bContext *C, const Object *ob)
 {
+  if (ob && ob->mode == OB_MODE_WEIGHT_PAINT &&
+      IDP_GetPropertyFromGroup_null(ob->id.properties, "_skin_source"))
+  {
+    CTX_wm_operator_poll_msg_set(C, "Switch to Native to edit vertex groups");
+    return false;
+  }
   if (!ED_operator_object_active_local_editable_ex(C, ob)) {
     CTX_wm_operator_poll_msg_set(C, "No active editable object");
     return false;

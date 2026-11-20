@@ -264,7 +264,7 @@ class SkinWeightSettings(PropertyGroup):
     brush: EnumProperty(name="Brush", items=[
         ('REPLACE', "Replace", ""), ('ADD', "Add", ""), ('SCALE', "Scale", ""), ('SMOOTH', "Smooth", "")])
     value: FloatProperty(name="Weight", default=1, min=0, max=1)
-    strength: FloatProperty(name="Strength", default=0.5, min=0, max=1)
+    strength: FloatProperty(name="Strength", default=1.0, min=0, max=1)
     radius: IntProperty(name="Radius", subtype='PIXEL', min=1, max=2000, default=50)
 
 

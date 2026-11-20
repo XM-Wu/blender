@@ -809,6 +809,11 @@ if(WITH_IK_SOLVER AND WITH_IK_ITASC)
 endif()
 
 add_blender_test(
+  bl_armature_batch_rename
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_armature_batch_rename.py
+)
+
+add_blender_test(
   bl_xbone_orient
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_orient.py
 )

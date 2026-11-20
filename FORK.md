@@ -250,6 +250,10 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## 骨骼批量命名
+
+Edit Mode 的 **Armature → Names → Batch Rename Bones** 和 Pose Mode 的 **Pose → Names** 可为选中骨骼按深度优先顺序编号。XBone 的编辑菜单与右键菜单直接提供该命令。输入基础名 `Arm`，可生成 `Arm_001`、`Arm_002`，或选用侧别得到 `Arm_001_L`、`Arm_002_L`；`_L` 与 `_R` 可用于骨架对称化和 Skin Tools 权重镜像。父骨先于子骨，同级依骨架已有顺序；遍历经过未选骨骼时只给选中项编号。多骨架选择从活动骨架开始连续编号。目标名被未选骨骼或其他变形组占用时可换一个基础名重试。
+
 ## 分层权重绘制
 
 **任务进度（2026-11-20）**　V1、V2 和姿势往返改动已随 `b3edc8c48923` 合入 `main`。后续开发从主干继续。需求来源、合成公式、分期计划及实测工况见[专题设计与验收记录](doc/layered_weight_paint.md)。
@@ -261,7 +265,7 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - **工作区入口**。普通启动和新建 General 时，个人启动布局缺少 Weight Paint 会自动补上，保留原来的活动工作区。旧项目使用文件里保存的标签，可从顶部 **+ → General → Weight Paint** 添加。
 - 在 3D 视图标题栏用 **Native / Skin Tools** 切换权重来源。进入姿态模式、播放或渲染时，Armature 继续使用对象最后选择的来源。
 - 点 **+** 建修正层，选择影响骨后绘制。**Mask** 可用同一套画笔绘制逐顶点遮罩，黑色露出下层，白色保留本层。各层可调序、复制、开关和调整不透明度。
-- **Replace / Add / Scale / Smooth** 支持表面笔画、顶点或面选区与 Flood。Shift 落笔临时平滑。**Display** 可选择本层、灰度遮罩或最终权重。
+- Skin Tools 笔刷强度默认 **1.0**。**Replace / Add / Scale / Smooth** 支持表面笔画、顶点或面选区与 Flood。Shift 落笔临时平滑。**Display** 可选择本层、灰度遮罩或最终权重。
 - **Bake to Vertex Groups** 把合成结果写回变形组，保留层栈并支持撤销。共享网格需要先转为单用户才能烘焙。原始顶点对应关系失效时，恢复拓扑后可继续绘制。
 - **图层树**。支持嵌套组、子层、移动子树和同级向下合并。普通层点 **Add Child** 会原位包进新组。子层先合成，组遮罩与不透明度只对合成结果应用一次。
 - **选骨与显示**。当前影响骨以黑白显示权重，其他骨骼按稳定通道标识着色。点列表会高亮视口骨骼。绿色骨形图标表示层内至少一个顶点在该骨上有正权重。**Influenced Only** 可叠加名称搜索，刷黑遮罩仍保留已画骨骼的绿标。

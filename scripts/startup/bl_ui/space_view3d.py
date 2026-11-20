@@ -4577,6 +4577,9 @@ class VIEW3D_MT_pose_names(Menu):
     def draw(self, _context):
         layout = self.layout
 
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator("armature.batch_rename_hierarchy")
+        layout.separator()
         layout.operator_context = 'EXEC_REGION_WIN'
         layout.operator("pose.autoside_names", text="Auto-Name Left/Right").axis = 'XAXIS'
         layout.operator("pose.autoside_names", text="Auto-Name Front/Back").axis = 'YAXIS'
@@ -4626,6 +4629,7 @@ class VIEW3D_MT_pose_context_menu(Menu):
         props = layout.operator("wm.call_panel", text="Rename Active Bone...")
         props.name = "TOPBAR_PT_name"
         props.keep_open = False
+        layout.operator("armature.batch_rename_hierarchy")
 
         layout.separator()
 
@@ -5830,6 +5834,7 @@ class VIEW3D_MT_edit_armature(Menu):
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
             layout.operator("armature.symmetrize")
+            layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
             return
 
@@ -5899,6 +5904,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
             layout.operator("armature.symmetrize")
+            layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
             return
 
@@ -5941,6 +5947,9 @@ class VIEW3D_MT_edit_armature_names(Menu):
     def draw(self, _context):
         layout = self.layout
 
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator("armature.batch_rename_hierarchy")
+        layout.separator()
         layout.operator_context = 'EXEC_REGION_WIN'
         layout.operator("armature.autoside_names", text="Auto-Name Left/Right").type = 'XAXIS'
         layout.operator("armature.autoside_names", text="Auto-Name Front/Back").type = 'YAXIS'

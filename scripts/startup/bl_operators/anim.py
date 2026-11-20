@@ -19,6 +19,151 @@ from bpy.app.translations import (
 )
 
 
+def _selected_bones_dfs(context):
+    from collections import defaultdict
+
+    edit = context.mode == 'EDIT_ARMATURE'
+    selected = defaultdict(set)
+    if edit:
+        for bone in context.selected_bones or ():
+            # The edit context can include unselected X-mirror partners.
+            if bone.select:
+                selected[bone.id_data].add(bone.name)
+    else:
+        for pb in context.selected_pose_bones or ():
+            selected[pb.id_data.data].add(pb.name)
+
+    for arm in sorted(selected, key=lambda arm: (arm != context.active_object.data, arm.name_full)):
+        children = defaultdict(list)
+        bones = arm.edit_bones if edit else arm.bones
+        for bone in bones:
+            children[bone.parent.name if bone.parent else None].append(bone)
+        pending = list(reversed(children[None]))
+        while pending:
+            bone = pending.pop()
+            if bone.name in selected[arm]:
+                yield arm, bone
+            pending.extend(reversed(children.get(bone.name, ())))
+
+
+class ARMATURE_OT_batch_rename_hierarchy(Operator):
+    bl_idname = "armature.batch_rename_hierarchy"
+    bl_label = "Batch Rename Bones"
+    bl_description = "Number selected bones in depth-first hierarchy order, parents before children"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    base_name: StringProperty(name="Base Name", default="Bone")
+    side: EnumProperty(name="Side", items=[
+        ('NONE', "None", "Number only"), ('LEFT', "_L", "Left side"), ('RIGHT', "_R", "Right side"),
+    ])
+
+    @classmethod
+    def poll(cls, context):
+        if context.mode == 'EDIT_ARMATURE':
+            return bool(context.selected_bones)
+        return context.mode == 'POSE' and bool(context.selected_pose_bones)
+
+    def bone_name(self, number):
+        suffix = {'NONE': "", 'LEFT': "_L", 'RIGHT': "_R"}[self.side]
+        return f"{self.base_name.strip()}_{number:03d}{suffix}"
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, confirm_text="Rename")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "base_name")
+        layout.row(align=True).prop(self, "side", expand=True)
+        if self.base_name.strip():
+            layout.label(text=self.bone_name(1), icon='BONE_DATA')
+
+    def execute(self, context):
+        from collections import defaultdict
+        from uuid import uuid4
+
+        if not self.base_name.strip():
+            self.report({'ERROR'}, "Enter a base name")
+            return {'CANCELLED'}
+        moves = defaultdict(dict)
+        changes = []
+        for i, (arm, bone) in enumerate(_selected_bones_dfs(context), 1):
+            name = self.bone_name(i)
+            if not arm.is_editable or bone.is_property_readonly("name"):
+                self.report({'ERROR'}, "Bone is read-only: " + bone.name)
+                return {'CANCELLED'}
+            if len(name.encode("utf8")) >= 64:
+                self.report({'ERROR'}, "Bone names including suffixes must fit in 63 UTF-8 bytes")
+                return {'CANCELLED'}
+            if name != bone.name:
+                moves[arm][bone.name] = name
+                changes.append((bone, bone.name, name))
+        if not changes:
+            return {'CANCELLED'}
+
+        # Reserve names before modifying any rig. The native rename setter propagates names
+        # to actions, constraints, parenting and deform groups, and auto-suffixes collisions.
+        reserved = set()
+        for arm, renames in moves.items():
+            bones = arm.edit_bones if context.mode == 'EDIT_ARMATURE' else arm.bones
+            reserved.update(bones.keys())
+            for target in renames.values():
+                if target in bones and target not in renames:
+                    self.report({'ERROR'}, f"{arm.name}: bone already named {target}")
+                    return {'CANCELLED'}
+
+        # Linked mesh instances can have modifiers targeting different armatures but
+        # share one group list. Check the combined mapping for that data-block.
+        owners = {}
+        for obj in bpy.data.objects:
+            if not obj.vertex_groups:
+                continue
+            rigs = {mod.object.data for mod in obj.modifiers
+                    if mod.type in {'ARMATURE', 'GREASE_PENCIL_ARMATURE'} and mod.object}
+            if obj.parent_type == 'ARMATURE' and obj.parent and obj.parent.type == 'ARMATURE':
+                rigs.add(obj.parent.data)
+            for arm in rigs & moves.keys():
+                groups = set(obj.vertex_groups.keys())
+                reserved.update(groups)
+                for old, target in moves[arm].items():
+                    if target in groups and target not in moves[arm]:
+                        self.report({'ERROR'}, f"{obj.name}: vertex group already named {target}")
+                        return {'CANCELLED'}
+                    if old in groups:
+                        key = (obj.data, old)
+                        if key in owners and owners[key] != target:
+                            self.report({'ERROR'}, f"{obj.name}: shared vertex group {old} has conflicting targets")
+                            return {'CANCELLED'}
+                        owners[key] = target
+
+        temporary = []
+        for _ in changes:
+            name = uuid4().hex
+            while name in reserved:
+                name = uuid4().hex
+            reserved.add(name)
+            temporary.append(name)
+        try:
+            # Free names that are needed by other selected bones (including swaps).
+            occupied = {name for renames in moves.values() for name in renames.values()}
+            for (bone, old, _), temp in zip(changes, temporary):
+                if old in occupied:
+                    bone.name = temp
+            for bone, _, target in changes:
+                bone.name = target
+                if bone.name != target:
+                    raise RuntimeError("Could not assign the exact name " + target)
+        except (RuntimeError, TypeError) as exc:
+            changed = [(bone, old, temp) for (bone, old, _), temp in zip(changes, temporary) if bone.name != old]
+            for bone, _, temp in changed:
+                bone.name = temp
+            for bone, old, _ in changed:
+                bone.name = old
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Renamed {len(changes)} bones")
+        return {'FINISHED'}
+
+
 class ANIM_OT_keying_set_export(Operator):
     """Export Keying Set to a Python script"""
     bl_idname = "anim.keying_set_export"
@@ -821,6 +966,7 @@ class ANIM_OT_version_bone_hide_property(Operator):
 
 
 classes = (
+    ARMATURE_OT_batch_rename_hierarchy,
     ANIM_OT_keying_set_export,
     NLA_OT_bake,
     ClearUselessActions,

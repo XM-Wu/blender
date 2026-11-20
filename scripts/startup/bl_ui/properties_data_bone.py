@@ -379,6 +379,8 @@ class BONE_PT_display(BoneButtonsPanel, Panel):
         if bone.id_data.is_xbone:
             layout.label(text="Display As")
             grid = layout.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+            grid.use_property_split = False
+            grid.use_property_decorate = False
             for value, label in (('ARMATURE_DEFINED', "Inherit"), ('OCTAHEDRAL', "Solid"),
                                  ('STICK', "Stick"), ('WIRE', "Wire")):
                 grid.prop_enum(bone, "display_type", value, text=label)

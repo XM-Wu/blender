@@ -792,9 +792,9 @@ class VIEW3D_HT_header(Header):
             layout.prop(obj, "show_in_front", text="In Front", icon='XRAY', toggle=True)
             if obj.data.is_xbone:
                 row = layout.row(align=True)
-                row.prop_enum(obj.data, "display_type", 'OCTAHEDRAL', text="", icon='SHADING_SOLID')
-                row.prop_enum(obj.data, "display_type", 'STICK', text="", icon='IPO_LINEAR')
-                row.prop_enum(obj.data, "display_type", 'WIRE', text="", icon='SHADING_WIRE')
+                row.prop_enum(obj.data, "display_type", 'OCTAHEDRAL', text="Solid")
+                row.prop_enum(obj.data, "display_type", 'STICK', text="Stick")
+                row.prop_enum(obj.data, "display_type", 'WIRE', text="Wire")
 
         if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
             layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",

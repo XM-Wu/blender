@@ -63,10 +63,13 @@ class DATA_PT_display(ArmatureButtonsPanel, Panel):
         arm = context.armature
 
         if arm.is_xbone:
-            row = layout.row(align=True, heading="Display As")
+            layout.label(text="Display As")
+            row = layout.row(align=True)
+            row.use_property_split = False
+            row.use_property_decorate = False
             row.prop_enum(arm, "display_type", 'OCTAHEDRAL', text="Solid")
             row.prop_enum(arm, "display_type", 'STICK', text="Stick")
-            row.prop_enum(arm, "display_type", 'WIRE', text="Wireframe")
+            row.prop_enum(arm, "display_type", 'WIRE', text="Wire")
             layout.prop(arm, "xbone_thickness", text="Thickness")
         else:
             layout.prop(arm, "display_type", text="Display As")

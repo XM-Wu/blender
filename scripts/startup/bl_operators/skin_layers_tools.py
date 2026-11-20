@@ -288,12 +288,88 @@ class PAINT_OT_skin_closest(LayerTool, Operator):
         return {'FINISHED'}
 
 
+def current_mirror_target(obj):
+    group = next((g for g in skin.channels(obj) if g.skin_channel == obj.skin_layers.influence), None)
+    if group is None:
+        raise ValueError("Choose a deform bone to mirror")
+    name = mirror_name(obj, group)
+    direction = None
+    if name != group.name:
+        rig = skin.rig_modifier(obj).object
+        to_mesh = obj.matrix_world.inverted_safe() @ rig.matrix_world
+        bone, other = rig.data.bones[group.name], rig.data.bones[name]
+        for a, b in ((bone.head_local, other.head_local), (bone.tail_local, other.tail_local)):
+            delta_x = (to_mesh @ a).x - (to_mesh @ b).x
+            if abs(delta_x) > 1e-6:
+                direction = 'POSITIVE' if delta_x > 0 else 'NEGATIVE'
+                break
+    return group, name, direction
+
+
+def mirror_one_channel(obj, prefix, source, counterpart, src, dst):
+    mesh = obj.data
+    values = skin.read_values(mesh, prefix + str(source.skin_channel))[src]
+    target = group_for_bone(obj, counterpart)
+    key = prefix + str(target.skin_channel)
+    weights = skin.read_values(mesh, key)
+    # Respect layer transparency. Only growing weights can need room on the target side.
+    growing = values > weights[dst]
+    if np.any(growing):
+        vertices = dst[growing]
+        other_keys = [prefix + str(g.skin_channel) for g in skin.channels(obj)
+                      if g.skin_channel != target.skin_channel and prefix + str(g.skin_channel) in mesh.attributes]
+        total = np.zeros(len(vertices), dtype=np.float32)
+        for other_key in other_keys:
+            total += skin.read_values(mesh, other_key)[vertices]
+        room = 1 - values[growing]
+        over = total > room
+        if np.any(over):
+            scale = room[over] / total[over]
+            for other_key in other_keys:
+                other = skin.read_values(mesh, other_key)
+                other[vertices[over]] *= scale
+                skin.write_values(mesh, other_key, other)
+    weights[dst] = values
+    skin.write_values(mesh, key, weights)
+
+
 class PAINT_OT_skin_mirror(LayerTool, Operator):
     bl_idname = "paint.skin_mirror"
-    bl_label = "Mirror Layer"
-    bl_description = "Copy the current paint target across the local X axis using rest-space vertex pairs"
+    bl_label = "Mirror"
+    bl_description = "Copy weights or mask to the other side of the active layer"
     bl_options = {'REGISTER', 'UNDO'}
-    direction: EnumProperty(items=[('POSITIVE', "+X to −X", ""), ('NEGATIVE', "−X to +X", "")])
+    scope: EnumProperty(name="Bones", items=[
+        ('ALL', "All Bones", "Copy the full weight distribution of this layer"),
+        ('CURRENT', "Current Bone", "Copy the active influence to its mirrored bone"),
+    ])
+    direction: EnumProperty(name="Direction", items=[
+        ('POSITIVE', "Left to Right (+X to -X)", ""),
+        ('NEGATIVE', "Right to Left (-X to +X)", ""),
+    ])
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=360, confirm_text="Mirror")
+
+    def draw(self, context):
+        obj = context.active_object
+        state = obj.skin_layers
+        layer = skin.current_layer(state)
+        layout = self.layout
+        layout.label(text=layer.name, icon='FILE_FOLDER' if layer.is_group else 'MOD_VERTEX_WEIGHT')
+        if layer.is_group or state.target == 'MASK':
+            layout.label(text="Layer Mask", icon='MOD_MASK')
+        else:
+            layout.row(align=True).prop(self, "scope", expand=True)
+            if self.scope == 'CURRENT':
+                try:
+                    source, counterpart, direction = current_mirror_target(obj)
+                except ValueError as exc:
+                    layout.label(text=str(exc), icon='INFO')
+                    return
+                layout.label(text=f"{source.name} → {counterpart}", icon='BONE_DATA')
+                if direction is not None:
+                    return
+        layout.prop(self, "direction", text="Direction")
 
     def execute(self, context):
         obj = context.active_object
@@ -303,18 +379,25 @@ class PAINT_OT_skin_mirror(LayerTool, Operator):
         state, mesh = obj.skin_layers, obj.data
         layer = skin.current_layer(state)
         mask = layer.is_group or state.target == 'MASK'
+        single = self.scope == 'CURRENT' and not mask
+        direction = self.direction
+        try:
+            if single:
+                source, counterpart, inferred = current_mirror_target(obj)
+                direction = inferred or direction
+            elif not mask:
+                used = skin.used_channels(obj, layer)
+                names = {g.skin_channel: mirror_name(obj, g) for g in skin.channels(obj)
+                         if g.skin_channel in used}
+        except ValueError as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
         x, pair = mirror_geometry(mesh)
         valid = (pair >= 0) & (pair != np.arange(len(pair)))
-        side = x > 0 if self.direction == 'POSITIVE' else x < 0
+        side = x > 0 if direction == 'POSITIVE' else x < 0
         src = np.flatnonzero(valid & side)
         if not len(src):
             self.report({'WARNING'}, "No matching vertices across local X")
-            return {'CANCELLED'}
-        groups = [g for g in skin.channels(obj) if g.skin_channel in skin.used_channels(obj, layer)]
-        try:
-            names = {} if mask else {g.skin_channel: mirror_name(obj, g) for g in groups}
-        except ValueError as exc:
-            self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}
         skin.unique_storage(obj)
         prefix = skin.layer_key(state, layer) + "_"
@@ -322,6 +405,8 @@ class PAINT_OT_skin_mirror(LayerTool, Operator):
             weights = skin.read_values(mesh, prefix + "mask", 1)
             weights[pair[src]] = weights[src]
             skin.write_values(mesh, prefix + "mask", weights)
+        elif single:
+            mirror_one_channel(obj, prefix, source, counterpart, src, pair[src])
         else:
             mapping = {j: group_for_bone(obj, name).skin_channel for j, name in names.items()}
             inputs = {j: skin.read_values(mesh, prefix + str(j))[src] for j in mapping}

@@ -158,9 +158,7 @@ class WEIGHT_LAYERS_PT_layers(Panel):
         tools.prop(state, "display", text="Display")
         tools.operator("paint.skin_flood", text="Flood Selection", icon='BRUSH_DATA')
         tools.operator("paint.skin_pick", icon='EYEDROPPER')
-        row = tools.row(align=True)
-        row.operator_menu_enum("paint.skin_mirror", "direction", text="Mirror Layer")
-        row.prop(state, "mirror_strokes", toggle=True)
+        tools.operator("paint.skin_mirror", text="Mirror", icon='MOD_MIRROR')
         if not layer.is_group:
             tools.operator_menu_enum("paint.skin_closest", "scope", text="Assign from Closest Joint")
         tools.operator("paint.skin_bake", icon='GROUP_VERTEX')

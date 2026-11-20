@@ -254,7 +254,6 @@ class SkinWeightSettings(PropertyGroup):
     bone_index: IntProperty(min=0, update=select_bone_row)
     influence: IntProperty(min=0, update=update_preview)
     only_influenced: BoolProperty(name="Influenced Only", description="Show bones with a positive authored weight in this layer")
-    mirror_strokes: BoolProperty(name="Mirror Strokes", description="Mirror across the mesh local X axis in the rest geometry")
     search: StringProperty(name="Filter Bones", options={'TEXTEDIT_UPDATE'})
     target: EnumProperty(name="Paint Target", items=[
         ('WEIGHT', "Weight", "Paint joint weights"), ('MASK', "Mask", "Paint layer coverage")],
@@ -587,7 +586,7 @@ class SkinBrush:
         if not self.mask and not any(g.skin_channel == state.influence for g in groups):
             raise ValueError("Choose a deform bone to paint")
         self.mirror_pair = None
-        if stroke and state.mirror_strokes:
+        if stroke and obj.use_mesh_mirror_x:
             from .skin_layers_tools import mirror_geometry, mirror_name, group_for_bone
             self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
             self.mirror_active = self.active

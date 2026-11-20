@@ -111,6 +111,30 @@ def run():
     assert bpy.ops.paint.skin_mirror(direction='POSITIVE') == {'FINISHED'}
     prefix = skin.layer_key(state, layer()) + "_"
     np.testing.assert_allclose(skin.read_values(obj.data, prefix + str(right)), [0, 1, 0])
+    # The header X switch applies to strokes only. Manual mirroring also works with X off.
+    obj.use_mesh_mirror_x = True
+    assert skin.SkinBrush(obj, stroke=True).mirror_pair is not None
+    assert skin.SkinBrush(obj).mirror_pair is None
+    obj.use_mesh_mirror_x = False
+    assert skin.SkinBrush(obj, stroke=True).mirror_pair is None
+
+    # An existing destination distribution demonstrates the difference between the two scopes.
+    # Current Bone keeps unrelated weights when there is room and only reduces overflow.
+    lw, rw = prefix + str(left), prefix + str(right)
+    skin.write_values(obj.data, lw, [0.4, 0.3, 0.2])
+    skin.write_values(obj.data, rw, [0.1, 0.05, 0.2])
+    skin.composite(obj)
+    assert bpy.ops.paint.skin_mirror(scope='CURRENT', direction='NEGATIVE') == {'FINISHED'}
+    np.testing.assert_allclose(skin.read_values(obj.data, rw), [0.1, 0.4, 0.2])
+    np.testing.assert_allclose(skin.read_values(obj.data, lw), [0.4, 0.3, 0.2])
+    pick(bone='Arm.R')
+    skin.write_values(obj.data, rw, [0.7, 0.6, 0.2])
+    assert bpy.ops.paint.skin_mirror(scope='CURRENT') == {'FINISHED'}
+    np.testing.assert_allclose(skin.read_values(obj.data, lw), [0.6, 0.3, 0.2])
+    np.testing.assert_allclose(skin.read_values(obj.data, rw), [0.4, 0.6, 0.2])
+    assert bpy.ops.paint.skin_mirror(scope='ALL', direction='NEGATIVE') == {'FINISHED'}
+    np.testing.assert_allclose(skin.read_values(obj.data, rw), [0.3, 0.6, 0.2])
+    pick(bone='Arm.L')
     state.target = 'MASK'
     state.value = 0.35
     skin.SkinBrush(obj).paint([0], 1, 'REPLACE')

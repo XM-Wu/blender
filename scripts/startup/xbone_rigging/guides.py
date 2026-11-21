@@ -13,9 +13,23 @@ def template_points(path, scale, up_axis):
     with open(path, encoding="utf-8") as stream:
         data = json.load(stream)
     builtin = Path(__file__).with_name("biped.sgt")
-    biped = Path(path).resolve() == builtin or (
-        "global_C0" in data["components_dict"] and data == json.loads(builtin.read_text(encoding="utf-8"))
-    )
+    biped = Path(path).resolve() == builtin
+    reference_positions = {}
+    if not biped and "global_C0" in data["components_dict"]:
+        canonical = json.loads(builtin.read_text(encoding="utf-8"))
+        for name, component in canonical["components_dict"].items():
+            instance = data["components_dict"].get(name, {})
+            imported = instance.get("param_values", {})
+            if instance.get("pos", {}).keys() == component["pos"].keys() and instance["pos"] != component["pos"]:
+                reference_positions.update({(name, loc): Vector((x,-z,y) if up_axis == 'Y' else (x,y,z))*scale
+                                            for loc,(x,y,z) in component["pos"].items()})
+                for field in ("pos", "apos", "tra", "atra", "blade"):
+                    component[field] = instance.get(field)
+            for key in ("div0", "div1", "supportJoints", "division", "blend", "maxstretch",
+                        "st_profile", "sq_profile", "rollAngle"):
+                if key in imported and (key in component["param_values"] or key == "rollAngle"):
+                    component["param_values"][key] = imported[key]
+        biped = data == canonical
     specs = {}
     settings = {}
     components = data["components_dict"]
@@ -49,6 +63,18 @@ def template_points(path, scale, up_axis):
         if kind not in chains:
             raise ValueError("Unsupported Shifter component: " + kind)
         chain = chains[kind]
+        if biped:
+            options = {}
+            for prop in ("div0", "div1", "supportJoints", "division"):
+                if prop in params:
+                    value = params[prop]
+                    if prop != "supportJoints" and (type(value) is not int or value < (2 if prop == "division" else 0)):
+                        raise ValueError(f"Invalid {name}.{prop}")
+                    options[prop] = value
+            settings[name, "root"] = options
+            for profile in ("st_profile", "sq_profile"):
+                if profile in params and params[profile]:
+                    options[profile] = params[profile]
         parent_component = component["parent_fullName"]
         attachment = (parent_component, component["parent_localName"]) if parent_component else None
         for key in dict.fromkeys([*chain, *positions]):
@@ -72,14 +98,18 @@ def template_points(path, scale, up_axis):
             if limb:
                 settings[name, key] = {
                     "ik_default": float(params.get("blend", key == "ankle")),
+                    "maxstretch": float(params.get("maxstretch", 1.5)),
+                    "negate_roll": params.get("comp_side") == "R",
                     "ik_reference": (params.get("ikrefarray") or "").split(",")[0],
                     "pole_reference": (params.get("upvrefarray") or "").split(",")[0],
+                    "ik_references": params.get("ikrefarray", ""),
+                    "pole_references": params.get("upvrefarray", ""),
                 }
             if kind == "eye_01" and key == "look":
                 ref = (params.get("ikrefarray") or "").split(",")[0]
                 settings[name, key] = {"eye_target": True, "eye_reference": ref}
             if kind == "foot_bk_01" and key == "root":
-                settings[name, key] = {"foot_root": True}
+                settings[name, key] = {"foot_root": True, "rollAngle": float(params.get("rollAngle", -20))}
     if not specs or any(parent and parent not in specs for _, _, parent, _, _ in specs.values()):
         raise ValueError("Incomplete guide hierarchy")
     # Reject cyclic templates before entering edit mode.
@@ -129,7 +159,7 @@ def template_points(path, scale, up_axis):
                 if curves:
                     shapes[key, role] = curves
                 break
-    return specs, shapes, settings, (scale, up_axis) if biped else None
+    return specs, shapes, settings, (scale, up_axis, reference_positions) if biped else None
 
 
 def new_guide(context, name):
@@ -157,7 +187,8 @@ def import_template(context, template, name):
     names = {}
     span = max(p.z for _, p, *_ in specs.values()) - min(p.z for _, p, *_ in specs.values())
     for key, (label, point, _, deform, limb) in specs.items():
-        bone = joint(edit, label, point, length=max(0.01, span * 0.018))
+        initial = biped[2].get(key, point) if biped else point
+        bone = joint(edit, label, initial, length=max(0.01, span * 0.018))
         bone.use_deform = deform
         names[key] = bone.name
         if limb:
@@ -165,7 +196,15 @@ def import_template(context, template, name):
     references = {component + "_" + locator: actual for (component, locator), actual in names.items()}
     for key, properties in settings.items():
         for prop, value in properties.items():
-            edit[names[key]][prop] = references.get(value, "") if prop.endswith("_reference") else value
+            if prop.endswith("_references"):
+                value = [references[ref] for ref in value.split(",") if ref in references]
+                if not value:
+                    continue
+            elif prop.endswith("_reference"):
+                value = references.get(value, "")
+            edit[names[key]][prop] = value
+            if prop in {"div0", "div1", "division"}:
+                edit[names[key]].id_properties_ui(prop).update(min=2 if prop == "division" else 0, soft_max=20)
     for key, (_, _, parent, _, _) in specs.items():
         if parent:
             edit[names[key]].parent = edit[names[parent]]
@@ -176,12 +215,23 @@ def import_template(context, template, name):
             bone.tail = children[0].head
     bpy.ops.object.mode_set(mode='OBJECT')
     if biped:
-        obj["biped_display_scale"], obj["biped_display_up"] = biped
+        obj["biped_display_scale"], obj["biped_display_up"], reference_positions = biped
         for key, (label, *_) in specs.items():
             bone = obj.data.bones[names[key]]
             bone["biped_locator"] = label
             bone["biped_frame"] = [v for row in bone.matrix_local for v in row]
             bone["biped_length"] = bone.length
+        if reference_positions:
+            bpy.ops.object.mode_set(mode='EDIT')
+            edit = obj.data.edit_bones
+            for key, actual in names.items():
+                bone = edit[actual]
+                bone.translate(specs[key][1] - bone.head)
+            for bone in edit:
+                child = next((b for b in bone.children if (b.head-bone.head).length > 0.0001), None)
+                if child:
+                    bone.tail = child.head
+            bpy.ops.object.mode_set(mode='OBJECT')
     for (key, role), curves in shapes.items():
         bone = obj.data.bones[names[key]]
         inverse = bone.matrix_local.to_3x3().inverted()

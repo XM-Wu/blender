@@ -1,12 +1,121 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import json
+import math
 import tempfile
 from pathlib import Path
 
 import bpy
 import xbone_rigging
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
+
+
+def check_maya_poses(rig):
+    # Evaluated jnt_org transforms from Maya 2027, mGear a7dd129.
+    cases = json.loads(Path(__file__).with_name("xbone_biped_poses.json").read_text())
+    basis = Quaternion((1, 0, 0), math.pi/2)
+    for case in cases:
+        ctrl = rig.pose.bones[case["control"]]
+        saved = ctrl.matrix_basis.copy()
+        m = ctrl.matrix.copy()
+        axis = Vector((1, 0, 0) if case["axis"] == "X" else (0, 0, 1))
+        axis = basis @ Quaternion(case["rotation"]) @ axis
+        delta = Quaternion(axis, math.radians(case["angle"]))
+        ctrl.matrix = Matrix.LocRotScale(m.translation, delta @ m.to_quaternion(), m.to_scale())
+        bpy.context.view_layer.update()
+        for name, frame in case["joints"].items():
+            m = rig.pose.bones[name].matrix
+            assert (m.translation - basis @ Vector(frame[:3])*0.1).length < 0.0001, (case["control"], name)
+            rot = basis @ Quaternion(frame[3:])
+            assert abs(rot.dot(m.to_quaternion())) > math.cos(math.radians(0.15)/2), (case["control"], name)
+        ctrl.matrix_basis = saved
+        bpy.context.view_layer.update()
+
+
+def check_bind_hierarchy(rig):
+    reference = json.loads(Path(xbone_rigging.__file__).with_name("biped_bind.json").read_text())
+    deform = {b.name: b for b in rig.data.bones if b.use_deform}
+    assert len(deform) == 106 and deform.keys() == reference.keys()
+    assert set(rig.data.collections["Skeleton"].bones.keys()) == deform.keys()
+    basis = Quaternion((1, 0, 0), math.pi/2)
+    for name, (parent, frame) in reference.items():
+        bone = deform[name]
+        assert (bone.parent.name if bone.parent else None) == parent, name
+        assert (bone.head_local - (basis @ Vector(frame[:3])) * 0.1).length < 0.00001, name
+        assert abs(bone.matrix_local.to_quaternion().dot(basis @ Quaternion(frame[3:]))) > 0.99999, name
+        assert (rig.pose.bones[name].head - bone.head_local).length < 0.001, name
+    for component, mid, tip, controller in (
+            ("arm_L0", "elbow", "wrist", "FK."), ("arm_R0", "elbow", "wrist", "FK."),
+            ("leg_L0", "knee", "ankle", "IK."), ("leg_R0", "knee", "ankle", "IK.")):
+        end = component + "_" + tip
+        ctl = rig.pose.bones[controller + end]
+        original = ctl.matrix_basis.copy()
+        axis = (rig.pose.bones[end].head - rig.pose.bones[component+"_"+mid].head).normalized()
+        matrix = ctl.matrix.copy()
+        rotation = Quaternion(axis, math.pi/4) @ matrix.to_quaternion()
+        ctl.matrix = Matrix.LocRotScale(matrix.translation, rotation, matrix.to_scale())
+        bpy.context.view_layer.update()
+        for i, t in ((5, 0.02), (6, 1/3), (7, 2/3), (8, 0.98)):
+            name = f"{component}_{i}_jnt"
+            rest = deform[name].matrix_local.to_quaternion()
+            delta = rig.pose.bones[name].matrix.to_quaternion() @ rest.inverted()
+            assert abs(delta.dot(Quaternion(axis, t*math.pi/4))) > 0.9999, (name, delta[:])
+        ctl.matrix_basis = original
+        bpy.context.view_layer.update()
+
+    ctl = rig.pose.bones["IK.leg_L0_ankle"]
+    root, knee, ankle = (rig.pose.bones[n] for n in ctl["joints"])
+    saved = ctl.matrix_basis.copy()
+    length = (knee.head-root.head).length + (ankle.head-knee.head).length
+    direction = (ankle.head-root.head).normalized()
+    m = ctl.matrix.copy()
+    m.translation = root.head + direction * length * 1.25
+    ctl.matrix = m
+    bpy.context.view_layer.update()
+    assert (ankle.head-ctl.head).length < 0.003, (ankle.head[:], ctl.head[:])
+    ctl["maxstretch"] = 1.0
+    rig.update_tag()
+    bpy.context.view_layer.update()
+    assert abs((ankle.head-root.head).length-length) < 0.003
+    ctl["maxstretch"] = 1.5
+    ctl.matrix_basis = saved
+    rig.update_tag()
+    bpy.context.view_layer.update()
+    bent = ctl.matrix.copy()
+    bent.translation = root.head.lerp(ankle.head, 0.65)
+    ctl.matrix = bent
+    bpy.context.view_layer.update()
+    segment = rig.pose.bones["leg_L0_2_jnt"]
+    before = segment.head.copy()
+    ankle_position = ankle.head.copy()
+    ctl["roundness"] = 0.4
+    rig.update_tag()
+    bpy.context.view_layer.update()
+    moved = (segment.head - before).length
+    assert 0.001 < moved < length*0.25, moved
+    assert (ankle_position-ankle.head).length < 0.00001
+    assert (rig.pose.bones["leg_L0_4_jnt"].head-knee.head).length < 0.001
+    ctl["roundness"] = 0.0
+    ctl.matrix_basis = saved
+    rig.update_tag()
+    bpy.context.view_layer.update()
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = str(Path(directory)/"biped.fbx")
+        assert bpy.ops.export_scene.fbx(filepath=path, use_selection=True, use_armature_deform_only=True,
+                                        add_leaf_bones=False, bake_anim=False) == {'FINISHED'}
+        bpy.ops.object.mode_set(mode='OBJECT')
+        assert bpy.ops.wm.xbone_fbx_import(filepath=path) == {'FINISHED'}
+        other, = [o for o in bpy.context.selected_objects if o.type == 'ARMATURE' and o != rig]
+        assert set(other.data.bones.keys()) == deform.keys()
+        for bone in other.data.bones:
+            original = deform[bone.name]
+            assert (bone.parent.name if bone.parent else None) == reference[bone.name][0]
+            assert (bone.head_local-original.head_local).length < 0.001
+        bpy.data.objects.remove(other, do_unlink=True)
+        rig.select_set(True)
+        bpy.context.view_layer.objects.active = rig
+        bpy.ops.object.mode_set(mode='POSE')
 
 
 def check_biped_display(rig):
@@ -52,7 +161,7 @@ def check_biped_controls(rig):
     assert not extra.is_visible
     extra.is_visible = True
     visited = set()
-    assert not any("sizeRef" in n or "UI_" in n for n in widgets)
+    assert not any("sizeRef" in n for n in widgets)
     for mode in (0.0, 1.0):
         for key in switches:
             rig[key] = mode
@@ -67,6 +176,9 @@ def check_biped_controls(rig):
                 continue
             assert any(c.is_visible_effectively for c in p.bone.collections), p.name
             visited.add(p.name)
+            if p.get("limb_control"):
+                assert p["limb_control"] in pose and all(p.lock_location)
+                continue
             name = p.name.split(".", 1)[1]
             translation = False
             if p.name.startswith("IK."):
@@ -87,7 +199,29 @@ def check_biped_controls(rig):
             elif name.startswith("eye") and (name.endswith("_look") or name == "eyeslook_C0"):
                 affected = ["eye_L0", "eye_R0"] if name == "eyeslook_C0" else [name.removesuffix("_look")]
                 translation = True
-            elif pose[name].bone.use_deform:
+            elif p.name.startswith("Display.") and name.endswith("_mid_ctl"):
+                translation = True
+                affected = [name.removesuffix("_mid_ctl") + "_4_jnt"]
+            elif p.name.startswith("Display.foot_"):
+                affected = ["leg_"+name.split("_")[1]+"_end_jnt"]
+            elif p.name.startswith("Display.spine_C0_"):
+                translation = "fk" not in name
+                affected = ["spine_C0_3_jnt"]
+            elif p.name.startswith("Display."):
+                if name.startswith("eye_"):
+                    affected = [name.replace("_Over_ctl", "_eyeOver_jnt").replace("_fk_ctl", "_eye_jnt")]
+                elif name.startswith("mouth_"):
+                    affected = [name.replace("_ctl", "_jnt")]
+                elif name.startswith("neck_"):
+                    translation = True
+                    affected = ["neck_C0_head_jnt"]
+                elif name.startswith("leg_"):
+                    translation = True
+                    affected = [name.replace("_root_ctl", "_0_jnt")]
+                else:
+                    assert name == "world_ctl"
+                    affected = ["spine_C0_0_jnt"]
+            elif rig["rigging_guide"].data.bones[name].use_deform:
                 affected = [name]
             elif name.startswith("thumbRoll_"):
                 affected = [name.replace("thumbRoll_", "thumb_")]
@@ -200,6 +334,8 @@ assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
 assert sum(key.startswith("IK ") for key in rig.keys()) == 4
 check_biped_display(rig)
+check_bind_hierarchy(rig)
+check_maya_poses(rig)
 check_biped_controls(rig)
 body = rig.pose.bones["FK.body_C0"]
 feet = [rig.pose.bones["leg_" + side + "_ankle"] for side in ("L0", "R0")]
@@ -214,6 +350,20 @@ for side in ("L0", "R0"):
 check_pose(rig, "arm_L0_elbow", "arm_L0_wrist")
 check_pose(rig, "leg_R0_knee", "leg_R0_ankle")
 bpy.ops.object.mode_set(mode='OBJECT')
+with tempfile.TemporaryDirectory() as tmp:
+    arm_settings = data["components_dict"]["arm_L0"]["param_values"]
+    arm_settings.update(div0=1, div1=4, supportJoints=False)
+    data["components_dict"]["spine_C0"]["param_values"]["division"] = 7
+    modified = Path(tmp)/"divisions.sgt"
+    modified.write_text(json.dumps(data))
+    assert bpy.ops.xbone.import_guide(filepath=str(modified)) == {'FINISHED'}
+    assert bpy.ops.xbone.build_rig() == {'FINISHED'}
+    arm = bpy.context.object.data
+    skin = {b.name for b in arm.bones if b.use_deform}
+    assert len(skin) == 107 and "arm_L0_8_jnt" not in skin
+    assert arm.bones["arm_L0_end_jnt"].parent.name == "arm_L0_7_jnt"
+    assert arm.bones["neck_C0_0_jnt"].parent.name == "spine_C0_6_jnt"
+    bpy.ops.object.mode_set(mode='OBJECT')
 assert bpy.ops.xbone.biped_guide(template='game_biped') == {'FINISHED'}
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 assert bpy.context.object.pose.bones["FK.arm_L0"].custom_shape.type == 'CURVE'

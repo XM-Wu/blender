@@ -59,6 +59,10 @@ def copy_pose(owner, rig, target, kind='COPY_TRANSFORMS'):
 
 def build(context, guide):
     chains = limb_chains(guide.data.bones)
+    from . import biped_skeleton
+    bind_plan = biped_skeleton.plans(guide) if "biped_display_scale" in guide else None
+    if bind_plan and any(name in guide.data.bones for name in bind_plan):
+        raise ValueError("A guide bone already uses a Shifter output joint name")
     # Copy rest data only. Preserve the guide for variations and keep bound rigs independent.
     arm = guide.data.copy()
     rig = bpy.data.objects.new(guide.name + ".Rig", arm)
@@ -113,6 +117,7 @@ def build(context, guide):
     for name, (eye, reference) in eye_targets.items():
         edit[fk[name]].parent = edit.get(reference) or edit[eye].parent
     limbs = []
+    origins = {}
     for root, mid, tip in chains:
         parent = edit[root].parent
         mechanism = []
@@ -130,6 +135,8 @@ def build(context, guide):
             return edit[root].parent
 
         target = duplicate("IK." + tip, tip, space("ik_reference"), "IK")
+        if bind_plan:
+            origins[target] = duplicate("MCH.Reach." + root, root, edit[root].parent, "Mechanism")
         pole = duplicate("Pole." + mid, mid, space("pole_reference"), "IK")
         offset = pole_point(*(edit[n].head for n in (root, mid, tip))) - edit[pole].head
         edit[pole].translate(offset)
@@ -172,13 +179,17 @@ def build(context, guide):
         pose[target]["fk_controls"] = [fk[name] for name in chain]
         pose[target]["solver_chain"] = mechanism
         pose[target]["joints"] = list(chain)
-        rig.id_properties_ui(prop).update(min=0.0, max=1.0, description="FK at zero, IK at one")
+        rig.id_properties_ui(prop).update(min=0.0, max=1.0, default=rig[prop], description="FK at zero, IK at one")
         solver = pose[mechanism[-1]].constraints.new('IK')
         solver.target = solver.pole_target = rig
         solver.subtarget, solver.pole_subtarget = target, pole
         solver.chain_count = 3
         solver.use_tail = True
         solver.use_stretch = False
+        if bind_plan:
+            from . import limb_parameters
+            limb_parameters.configure(rig, pose[target], pose[origins[target]], mechanism, solver,
+                                      endpoint.get("maxstretch", 1.5), endpoint.get("negate_roll", False))
         blends = []
         for name, solved in zip(chain, mechanism):
             # The solver evaluates after constraints on its own endpoint. Orient
@@ -208,6 +219,15 @@ def build(context, guide):
     if "biped_display_scale" in guide:
         from . import biped_display
         biped_display.apply(rig, guide, fk)
+        from . import biped_foot
+        biped_foot.build(rig, guide)
+        biped_skeleton.build(rig, guide, bind_plan, groups["Skeleton"], groups["Mechanism"])
+        from . import biped_spine
+        biped_spine.build(rig, guide, bind_plan)
+        from . import biped_components
+        biped_components.connect(rig, guide)
+        from . import biped_roundness
+        biped_roundness.build(rig, guide)
     guide.hide_set(True)
     guide.hide_render = True
     return rig

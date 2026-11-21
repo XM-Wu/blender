@@ -48,6 +48,10 @@ def apply(rig, guide, fk):
     up = guide["biped_display_up"]
     with Path(__file__).with_name("biped_display.json").open(encoding="utf-8") as stream:
         source = json.load(stream)
+    from .biped_skeleton import read_frame
+    with Path(__file__).with_name("biped_pivots.json").open() as stream:
+        pivots = json.load(stream)
+    basis = Matrix.Rotation(1.5707963267948966, 3, 'X') if up == 'Y' else Matrix.Identity(3)
     arm = rig.data
     # Resolve by stored guide identity so renaming a joint before building is supported.
     bones = {b["biped_locator"]: b for b in arm.bones if "biped_locator" in b}
@@ -105,6 +109,8 @@ def apply(rig, guide, fk):
             target = fk.get(owner)
         elif role == "display":
             target = helper(name, owner, edit[owner].head)
+            if name in pivots:
+                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
         else:
             target = role + "." + owner
         if not target or target not in edit:

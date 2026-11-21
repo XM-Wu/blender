@@ -205,7 +205,11 @@ class XBONE_OT_match_limb(Operator):
             pole_matrix = pole.matrix.copy()
             pole_matrix.translation = builder.pole_point(*(m.translation for m in matrices))
             pole.matrix = pole_matrix
-            target.matrix = matrices[-1]
+            desired = matrices[-1]
+            if "foot_effector" in target:
+                offset = target.matrix.inverted_safe() @ pose[target["foot_effector"]].matrix
+                desired = desired @ offset.inverted_safe()
+            target.matrix = desired
             changed.extend((pole, target))
         else:
             for name, matrix in zip(target["fk_controls"], matrices):
@@ -276,6 +280,12 @@ class XBONE_PT_rigging(Panel):
             if context.mode == 'EDIT_ARMATURE':
                 layout.operator("xbone.add_component")
                 layout.operator("xbone.tag_limb")
+                bone = context.active_bone
+                if bone:
+                    for key, label in (("div0", "Upper Divisions"), ("div1", "Lower Divisions"),
+                                       ("supportJoints", "Support Joints"), ("division", "Divisions")):
+                        if key in bone:
+                            layout.prop(bone, '["' + key + '"]', text=label)
             layout.operator("xbone.build_rig")
         if role == "RIG":
             layout.operator("xbone.edit_source_guide")
@@ -290,6 +300,19 @@ class XBONE_PT_rigging(Panel):
                 if prop:
                     box = layout.box()
                     box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
+                    active = context.active_pose_bone
+                    if active and (active == control or active.get("limb_control") == control.name) and "ikscale" in control:
+                        from .limb_parameters import PARAMETERS
+                        for key, label, *_ in PARAMETERS:
+                            box.prop(control, '["' + key + '"]', text=label)
+                        if "volume" in control:
+                            box.prop(control, '["volume"]', text="Volume")
+                        if "roundness" in control:
+                            box.prop(control, '["roundness"]', text="Roundness")
+                        for prop_name, label in (("ik_space", "IK Space"), ("pole_space", "Pole Space")):
+                            if prop_name in control:
+                                refs = control[prop_name.replace("_space", "_references")]
+                                box.prop(control, '["'+prop_name+'"]', text=label + " · " + refs[control[prop_name]])
                     row = box.row(align=True)
                     for mode in ('FK', 'IK'):
                         op = row.operator("xbone.match_limb", text="Match " + mode)

@@ -30,9 +30,9 @@ def manifest(rig):
 
 def generated_paths(rig):
     # Also recognizes paths in files built before helper ownership was recorded.
-    return {c.target for p in rig.pose.bones for c in p.constraints
+    return {o for o in rig.children if o.get("xbone_solver_mesh")} | {c.target for p in rig.pose.bones for c in p.constraints
             if c.type == 'FOLLOW_PATH' and c.target and c.target.parent == rig
-            and c.target.name.startswith("RollSpline.")}
+            and (c.target.get("xbone_solver_curve") or c.target.name.startswith("RollSpline."))}
 
 
 def division_layout(arm, *, guide=False):
@@ -161,7 +161,11 @@ def adopt(context, rig, fresh, meshes, changed):
         path.parent = rig
         for mod in path.modifiers:
             if mod.type == 'HOOK' and mod.object == fresh:
+                # Assigning Hook.object recalculates its bind matrix from the
+                # current pose. Retarget the original rest-space binding.
+                bind = mod.matrix_inverse.copy()
                 mod.object = rig
+                mod.matrix_inverse = bind
         collection = rig.users_collection[0]
         if collection not in path.users_collection:
             collection.objects.link(path)
@@ -173,7 +177,7 @@ def adopt(context, rig, fresh, meshes, changed):
         curve = path.data
         bpy.data.objects.remove(path, do_unlink=True)
         if not curve.users:
-            bpy.data.curves.remove(curve)
+            bpy.data.batch_remove([curve])
     if not old_arm.users:
         bpy.data.armatures.remove(old_arm)
         rig.data.name = arm_name

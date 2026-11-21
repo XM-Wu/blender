@@ -21,7 +21,7 @@ def shape(name, lines):
     for line in lines:
         start = len(verts)
         verts.extend(line)
-        edges.extend((i-1, i) for i in range(start+1, len(verts)))
+        edges.extend((i - 1, i) for i in range(start + 1, len(verts)))
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, edges, [])
     mesh.update()
@@ -57,7 +57,7 @@ def apply(rig, guide, fk):
     bones = {b["biped_locator"]: b for b in arm.bones if "biped_locator" in b}
     transforms = {}
     for label, bone in bones.items():
-        original = Matrix([bone["biped_frame"][i:i+4] for i in range(0, 16, 4)])
+        original = Matrix([bone["biped_frame"][i:i + 4] for i in range(0, 16, 4)])
         stretch = Matrix.Diagonal((1, bone.length / bone["biped_length"], 1, 1))
         transforms[label] = bone.matrix_local @ stretch @ original.inverted_safe()
 
@@ -75,7 +75,7 @@ def apply(rig, guide, fk):
     def helper(name, parent, head, tail=None):
         bone = edit.new("Display." + name)
         bone.head = head
-        bone.tail = tail if tail is not None else head + Vector((0, scale/2, 0))
+        bone.tail = tail if tail is not None else head + Vector((0, scale / 2, 0))
         bone.parent = edit[parent]
         bone.use_deform = False
         bone.hide_select = True
@@ -85,6 +85,7 @@ def apply(rig, guide, fk):
         return bone.name
 
     links = []
+    fk_outputs = {}
     for component, position in source["poles"].items():
         mid = component + ("_knee" if component.startswith("leg_") else "_elbow")
         if mid not in anchors:
@@ -107,12 +108,29 @@ def apply(rig, guide, fk):
         role = data["role"]
         if role == "FK":
             target = fk.get(owner)
+            if target and name in pivots and name.split("_")[0] in {
+                    "finger", "thumb", "tongue", "foot", "meta", "mouth", "thumbRoll", "eye", "eyeslook",
+                    "spine", "neck", "global", "local", "body", "shoulder", "leg", "arm"}:
+                original = edit[target].matrix.copy()
+                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
+                ref = edit.new("MCH.FKOutput." + owner)
+                ref.head = original.translation
+                ref.tail = ref.head + Vector((0, scale / 2, 0))
+                ref.matrix = original
+                ref.parent = edit[target]
+                ref.use_deform = False
+                for group in list(ref.collections):
+                    group.unassign(ref)
+                arm.collections["Mechanism"].assign(ref)
+                fk_outputs[owner] = ref.name
         elif role == "display":
             target = helper(name, owner, edit[owner].head)
             if name in pivots:
                 edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
         else:
             target = role + "." + owner
+            if target in edit and name in pivots:
+                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
         if not target or target not in edit:
             continue
         frame = edit[target].matrix.inverted_safe()
@@ -126,10 +144,15 @@ def apply(rig, guide, fk):
         extra.assign(edit[n])
     bpy.ops.object.mode_set(mode='POSE')
     pose = rig.pose.bones
+    for owner, ref in fk_outputs.items():
+        follow = pose[owner].constraints.get("Copy Transforms")
+        if follow:
+            follow.subtarget = ref
+            follow.owner_space = follow.target_space = 'POSE'
     for target, (lines, color) in widgets.items():
         configure(pose[target], shape(target, lines), color)
     for name, joint, length in links:
-        configure(pose[name], shape(name, [[(0,0,0), (0,length,0)]]), "link")
+        configure(pose[name], shape(name, [[(0, 0, 0), (0, length, 0)]]), "link")
         constraint = pose[name].constraints.new('STRETCH_TO')
         constraint.target, constraint.subtarget = rig, joint
         constraint.rest_length, constraint.volume = length, 'NO_VOLUME'
@@ -140,3 +163,4 @@ def apply(rig, guide, fk):
         var.targets[0].id = rig
         var.targets[0].data_path = pole.path_from_id("hide")
     extra.is_visible = False
+    return {name: arm.bones[name].matrix_local.copy() for name in widgets}

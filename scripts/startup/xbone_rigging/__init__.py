@@ -204,16 +204,30 @@ class XBONE_OT_match_limb(Operator):
             pole = pose[target["pole_control"]]
             pole_matrix = pole.matrix.copy()
             pole_matrix.translation = builder.pole_point(*(m.translation for m in matrices))
-            pole.matrix = pole_matrix
             desired = matrices[-1]
             if "foot_effector" in target:
                 offset = target.matrix.inverted_safe() @ pose[target["foot_effector"]].matrix
                 desired = desired @ offset.inverted_safe()
             target.matrix = desired
+            context.view_layer.update()
+            pole.matrix = pole_matrix
+            for name, matrix in zip(target.get("ik_match_frames", ()), matrices):
+                context.view_layer.update()
+                frame = pose[name]
+                desired = matrix.copy()
+                desired.translation = frame.head
+                frame.matrix = desired
+                changed.append(frame)
+            if "wrist_rotation" in target:
+                context.view_layer.update()
+                rotation = pose[target["wrist_rotation"]]
+                offset = rotation.matrix.inverted_safe() @ pose[target["wrist_result"]].matrix
+                rotation.matrix = matrices[-1] @ offset.inverted_safe()
+                changed.append(rotation)
             changed.extend((pole, target))
         else:
-            for name, matrix in zip(target["fk_controls"], matrices):
-                pose[name].matrix = matrix
+            for name, joint, matrix in zip(target["fk_controls"], target["joints"], matrices):
+                pose[name].matrix = matrix @ pose[joint].bone.matrix_local.inverted_safe() @ pose[name].bone.matrix_local
                 changed.append(pose[name])
                 context.view_layer.update()
         rig[target["blend_property"]] = float(self.mode == 'IK')
@@ -297,6 +311,11 @@ class XBONE_PT_rigging(Panel):
             extra = obj.data.collections.get("Additional FK")
             if extra and obj.data.collections.get("Biped Display"):
                 layout.prop(extra, "is_visible", text="Show Additional FK Controls")
+            active = context.active_pose_bone
+            if active and "UI_" in active.name:
+                for key in active.keys():
+                    if key.startswith(("mouth_","neck_","spine_","shoulder_","control_")):
+                        layout.prop(active,'["'+bpy.utils.escape_identifier(key)+'"]',text=key)
             for control in obj.pose.bones:
                 prop = control.get("blend_property")
                 if prop:
@@ -311,7 +330,10 @@ class XBONE_PT_rigging(Panel):
                             box.prop(control, '["volume"]', text="Volume")
                         if "roundness" in control:
                             box.prop(control, '["roundness"]', text="Roundness")
-                        for prop_name, label in (("ik_space", "IK Space"), ("pole_space", "Pole Space")):
+                        if "aproll" in control:
+                            box.prop(control, '["aproll"]', text="Armpit Roll")
+                        for prop_name, label in (("ik_space", "IK Space"), ("pole_space", "Pole Space"),
+                                                 ("rotation_space", "Wrist Rotation Space"), ("pin_space", "Pin Space")):
                             if prop_name in control:
                                 refs = control[prop_name.replace("_space", "_references")]
                                 box.prop(control, '["'+prop_name+'"]', text=label + " · " + refs[control[prop_name]])

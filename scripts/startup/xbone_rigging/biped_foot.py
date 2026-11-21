@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Shifter foot_bk_01 backward pivots and two forward toe controls."""
 import bpy
+from .limb_parameters import rotation_input
 
 
 def build(rig, guide):
@@ -41,28 +42,20 @@ def build(rig, guide):
             spaces[key] = base.name
             ctl.parent = base
             parent = ctl
-        effector = pivot(foot + ".effector", ik, parent)
-        toes = []
+        effector = pivot(foot + ".effector", edit[ankle], parent)
         for i in range(2):
-            toe = names[foot + f"_{i}_loc"]
-            fk = edit["FK." + toe]
+            fk = edit["FK." + names[foot + f"_{i}_loc"]]
             space = pivot(foot + f".toeSpace{i}", fk, fk.parent)
-            ref = pivot(foot + f".toeRef{i}", fk, controls["bk" + str(1 - i)])
             fk.parent = space
-            toes.append((toe, space.name, ref.name))
         for ctl in controls.values():
             ctl.hide_select = False
         feet.append((ankle, guide.data.bones[names[foot]].get("rollAngle", -20),
-                     {k: v.name for k, v in controls.items()}, spaces, effector.name, toes))
+                     {k: v.name for k, v in controls.items()}, spaces, effector.name))
     bpy.ops.object.mode_set(mode='POSE')
     pose = rig.pose.bones
-    for ankle, angle, controls, spaces, effector, toes in feet:
+    for ankle, angle, controls, spaces, effector in feet:
         ik = pose["IK." + ankle]
         ik["foot_effector"] = effector
-        solver = pose[ik["solver_chain"][-1]].constraints["IK"]
-        solver.subtarget = effector
-        pose[ankle].constraints[-1].subtarget = effector
-        pose["MCH.Reach." + ik["joints"][0]].constraints[0].subtarget = effector
         roll = pose[controls["roll"]]
         roll.rotation_mode = 'XYZ'
         for key, name in controls.items():
@@ -89,31 +82,11 @@ def build(rig, guide):
             driver = owner.driver_add("rotation_euler", axis).driver
             for alias, path in (("bank", "rotation_euler[0]"), ("roll", "rotation_euler[2]"),
                                 ("a", '["angle_0"]'), ("b", '["angle_1"]')):
+                if alias in {"bank", "roll"}:
+                    rotation_input(driver, alias, roll, 'X' if alias == "bank" else 'Z')
+                    continue
                 var = driver.variables.new()
                 var.name = alias
                 var.targets[0].id = rig
                 var.targets[0].data_path = roll.path_from_id() + ("" if path.startswith("[") else ".") + path
             driver.expression = expr
-        for toe, space, ref in toes:
-            con = pose[space].constraints.new('COPY_TRANSFORMS')
-            con.target, con.subtarget = rig, ref
-            con.owner_space = con.target_space = 'POSE'
-            # Reverse pivots live beneath the animator's IK goal. Keep their
-            # orientation and toe offsets, but anchor the FK foot at the
-            # reachable ankle when the two-bone solver saturates.
-            constraints = [con]
-            for anchor, subtract in ((effector, True), (ik["solver_chain"][-1], False)):
-                offset = pose[space].constraints.new('COPY_LOCATION')
-                offset.target, offset.subtarget = rig, anchor
-                offset.owner_space = offset.target_space = 'POSE'
-                offset.use_offset = True
-                offset.invert_x = offset.invert_y = offset.invert_z = subtract
-                constraints.append(offset)
-            for constraint in constraints:
-                driver = constraint.driver_add("influence").driver
-                driver.type = 'AVERAGE'
-                var = driver.variables.new()
-                var.targets[0].id = rig
-                var.targets[0].data_path = '["' + bpy.utils.escape_identifier(ik["blend_property"]) + '"]'
-            follow = pose[toe].constraints[0]
-            follow.owner_space = follow.target_space = 'POSE'

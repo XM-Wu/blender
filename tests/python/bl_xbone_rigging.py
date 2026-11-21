@@ -32,6 +32,54 @@ def check_maya_poses(rig):
         bpy.context.view_layer.update()
 
 
+def check_combined_poses(rig):
+    """Maya 2027 compound poses independent of the single-channel audit."""
+    cases = json.loads(Path(__file__).with_name("xbone_biped_combinations.json").read_text())
+    mapping = json.loads(Path(xbone_rigging.__file__).with_name("biped_display.json").read_text())["controls"]
+    basis = Matrix.Rotation(math.pi/2, 4, 'X')
+    def converted(values):
+        matrix = Matrix([values[i:i+4] for i in range(0, 16, 4)])
+        matrix.translation *= 0.1
+        return basis @ matrix @ basis.transposed()
+    for case in cases:
+        initial = {b.name: rig.pose.bones[b.name].matrix.copy() for b in rig.data.bones if b.use_deform}
+        saved = []
+        for name, key, value, *delta in case["inputs"]:
+            record = mapping[name]
+            pb = rig.pose.bones["Display."+name if record["role"] == "display" else record["role"]+"."+record["anchor"]]
+            if delta:
+                saved.append((pb, None, pb.matrix_basis.copy()))
+                pose = converted(delta[0]) @ pb.matrix
+                pose.translation = pb.matrix.translation + (basis.to_3x3() @ Vector(delta[1]))*0.1
+                pb.matrix = pose
+            else:
+                owner = pb
+                if pb.get("limb_control"):
+                    owner = rig.pose.bones[pb["limb_control"]]
+                    key = key.split("_", 1)[1]
+                    if key == "blend":
+                        owner, key = rig, owner["blend_property"]
+                    elif key == "ikRotRef":
+                        key = "rotation_space"
+                saved.append((owner, key, owner[key]))
+                owner[key] = type(owner[key])(value)
+                rig.update_tag()
+            bpy.context.view_layer.update()
+        for name, rest in initial.items():
+            expected = converted(case["changes"][name]) @ rest if name in case["changes"] else rest
+            actual = rig.pose.bones[name].matrix
+            assert (expected.translation-actual.translation).length < 0.001, (case["pose"], name)
+            assert abs(expected.to_quaternion().dot(actual.to_quaternion())) > math.cos(math.radians(.5)/2), (case["pose"], name)
+            assert max(abs(a-b) for a,b in zip(expected.to_scale(),actual.to_scale())) < .01, (case["pose"], name)
+        for owner, key, value in reversed(saved):
+            if key is None:
+                owner.matrix_basis = value
+            else:
+                owner[key] = value
+                rig.update_tag()
+            bpy.context.view_layer.update()
+
+
 def check_bind_hierarchy(rig):
     reference = json.loads(Path(xbone_rigging.__file__).with_name("biped_bind.json").read_text())
     deform = {b.name: b for b in rig.data.bones if b.use_deform}
@@ -145,7 +193,7 @@ def check_bind_hierarchy(rig):
 def check_biped_display(rig):
     source = json.loads(Path(xbone_rigging.__file__).with_name("biped_display.json").read_text())
     assert source["source"].endswith("Maya 2027")
-    assert len(source["controls"]) == 123
+    assert len(source["controls"]) == 125
     offsets = {}
     for name, record in source["controls"].items():
         role, joint = record["role"], record["anchor"]
@@ -207,9 +255,19 @@ def check_rebuild(rig, guide):
         assert abs(skin.vertex_groups["arm_L0_1_jnt"].weight(0) - 0.5) < 1e-5
         assert abs(skin.vertex_groups["arm_L0_2_jnt"].weight(0) - 0.25) < 1e-5
         assert abs(skin.vertex_groups["spine_C0_0_jnt"].weight(0) - 0.25) < 1e-5
-        assert len({d for d in rig.children if d.type == 'CURVE'}) == 8
+        assert len({d for d in rig.children if d.type == 'CURVE'}) == 4
+        assert len({d for d in rig.children if d.get("xbone_solver_mesh")}) == 8
         assert all(d.driver.is_valid for d in rig.animation_data.drivers)
         assert all(mod.object == rig for child in rig.children if child.type == 'CURVE' for mod in child.modifiers)
+        for child in rig.children:
+            if not (child.get("xbone_solver_mesh") or child.get("xbone_solver_curve")):
+                continue
+            for mod in child.modifiers:
+                if mod.type == 'HOOK':
+                    rest = rig.data.bones[mod.subtarget].matrix_local
+                    assert mod.object == rig
+                    assert max(abs(a-b) for row, ref in zip(mod.matrix_inverse, rest.inverted())
+                               for a,b in zip(row,ref)) < 0.0001, (child.name, mod.subtarget)
         check_ik_drag(rig, "leg_L0_ankle", "foot_L0")
 
 
@@ -241,6 +299,9 @@ def check_biped_controls(rig):
             if p.get("limb_control"):
                 assert p["limb_control"] in pose and all(p.lock_location)
                 continue
+            if p.name in {"Display.faceUI_C0_ctl","Display.spineUI_C0_ctl"}:
+                assert any(k.startswith(("mouth_", "neck_")) for k in p.keys())
+                continue
             name = p.name.split(".", 1)[1]
             translation = False
             if p.name.startswith("IK."):
@@ -264,6 +325,9 @@ def check_biped_controls(rig):
             elif p.name.startswith("Display.") and name.endswith("_mid_ctl"):
                 translation = True
                 affected = [name.removesuffix("_mid_ctl") + "_4_jnt"]
+            elif name.endswith(("_ikRot_ctl", "_ikcns_ctl")):
+                translation = name.endswith("_ikcns_ctl")
+                affected = [name.rsplit("_",1)[0].rsplit("_",1)[0]+"_end_jnt"]
             elif p.name.startswith("Display.foot_"):
                 affected = ["leg_"+name.split("_")[1]+"_end_jnt"]
             elif p.name.startswith("Display.spine_C0_"):
@@ -283,6 +347,11 @@ def check_biped_controls(rig):
                 else:
                     assert name == "world_ctl"
                     affected = ["spine_C0_0_jnt"]
+            elif name.startswith("meta_") and name.count("_") == 1:
+                affected = [name+"_3_jnt"]
+            elif name == "mouth_C0_jaw":
+                translation = True
+                affected = ["mouth_C0_jaw_jnt"]
             elif rig["rigging_guide"].data.bones[name].use_deform:
                 affected = [name]
             elif name.startswith("thumbRoll_"):
@@ -303,7 +372,8 @@ def check_biped_controls(rig):
                     direction = (pose["FK." + j + "_look"].head - pose[j].head).normalized()
                     assert after.to_3x3().col[1].normalized().dot(direction) > 0.999, (p.name, j)
                 elif not translation and name == j:
-                    assert abs(after.to_quaternion().dot(p.matrix.to_quaternion())) > 0.999, p.name
+                    expected = p.matrix @ p.bone.matrix_local.inverted_safe() @ pose[j].bone.matrix_local
+                    assert abs(after.to_quaternion().dot(expected.to_quaternion())) > 0.999, p.name
             p.matrix_basis = original
             if p.name.startswith("Pole."):
                 target.matrix_basis = original_target
@@ -333,9 +403,20 @@ def check_ik_drag(rig, ankle, foot=None):
     assert (knee.head - old_knee).length > 0.01
     if foot:
         assert ((pose[foot].head - old_foot) - (dest.translation - old_ankle)).length < 0.005
+    orientation_before = pose[ankle].matrix.to_quaternion()
     control.matrix = dest @ Matrix.Rotation(0.3, 4, 'X')
     bpy.context.view_layer.update()
-    assert abs(pose[ankle].matrix.to_quaternion().dot(control.matrix.to_quaternion())) > 0.999, ankle
+    if "wrist_rotation" in control:
+        assert abs(pose[ankle].matrix.to_quaternion().dot(orientation_before)) > 0.99999
+        wrist = pose[control["wrist_rotation"]]
+        saved = wrist.matrix_basis.copy()
+        wrist.matrix_basis = saved @ Matrix.Rotation(.3,4,'X')
+        bpy.context.view_layer.update()
+        assert abs(pose[ankle].matrix.to_quaternion().dot(orientation_before)) < .995
+        wrist.matrix_basis = saved
+    else:
+        expected = control.matrix @ control.bone.matrix_local.inverted_safe() @ pose[ankle].bone.matrix_local
+        assert abs(pose[ankle].matrix.to_quaternion().dot(expected.to_quaternion())) > 0.999, ankle
     control.matrix_basis = old_control
     bpy.context.view_layer.update()
 
@@ -398,6 +479,7 @@ assert sum(key.startswith("IK ") for key in rig.keys()) == 4
 check_biped_display(rig)
 check_bind_hierarchy(rig)
 check_maya_poses(rig)
+check_combined_poses(rig)
 check_biped_controls(rig)
 body = rig.pose.bones["FK.body_C0"]
 feet = [rig.pose.bones["leg_" + side + "_ankle"] for side in ("L0", "R0")]

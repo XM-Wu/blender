@@ -7,7 +7,6 @@ from pathlib import Path
 
 import bpy
 from mathutils import Matrix, Quaternion, Vector
-from .limb_parameters import drive
 
 
 def limb_samples(upper, lower, support):
@@ -154,175 +153,18 @@ def build(rig, guide, output, skeleton, mechanism):
         group.assign(bone)
         return bone.name
 
-    probes = {}
     followers = {}
-    bend_frames = {}
-    rolls = {}
-    neutral = {}
-    ankle_roll = {}
-    with Path(__file__).with_name("biped_pivots.json").open() as stream:
-        reference_frames = json.load(stream)
-    basis_change = Matrix.Rotation(math.pi / 2, 3, 'X') if guide["biped_display_up"] == 'Y' else Matrix.Identity(3)
-    mid_controls = {}
-    planes = {}
-    for bone in guide.data.bones:
-        component = bone.get("ik_limb")
-        if component and bone.parent:
-            name = "Display." + component + "_mid_ctl"
-            if name in edit:
-                edit[name].hide_select = False
-                mid_controls[bone.parent.name] = name
-                upper = bone.parent.parent.name
-                planes[upper, name] = (bone.name, "IK." + bone.name)
-                planes[name, bone.name] = (upper, "IK." + bone.name)
-    for name, (_, rest, anchor, end, factor) in output.items():
+    for name, (_, rest, anchor, end, _) in output.items():
         joint(name, rest, skeleton)
-        anchor = mid_controls.get(anchor, anchor)
-        end = mid_controls.get(end, end)
-        parent = edit[anchor]
-        if end and not name.startswith("spine_C0_"):
-            span = (anchor, end)
-            if span not in probes:
-                axis = edit[end].head - parent.head
-                basis = axis.to_track_quat('Y', 'Z').to_matrix().to_4x4() if axis.length else Matrix.Identity(4)
-                if span in planes:
-                    direction = axis.normalized()
-                    toward = edit[planes[span][0]].head - parent.head
-                    across = toward - direction * toward.dot(direction)
-                    if across.length > 0.00001:
-                        x = across.normalized()
-                        basis = Matrix((x, direction, x.cross(direction))).transposed().to_4x4()
-                    else:
-                        del planes[span]
-                basis.translation = parent.head
-                carrier = joint("MCH.Span." + anchor, basis, mechanism, parent)
-                probe = joint("MCH.RollRead." + anchor, basis, mechanism, edit[carrier])
-                target = joint("MCH.RollEnd." + anchor, basis, mechanism, edit[end])
-                probes[span] = (carrier, probe, target, basis, axis.length)
-                if end in mid_controls.values():
-                    aim = joint("MCH.RollBase." + anchor, basis, mechanism, parent.parent)
-                    read = joint("MCH.RollBaseRead." + anchor, basis, mechanism, edit[carrier])
-                    neutral[probe] = (aim, read, end, anchor)
-                elif anchor in mid_controls.values() and edit[end].get("ik_limb", "").startswith("leg_"):
-                    component = edit[end]["ik_limb"]
-                    tip = guide.data.bones[end]
-                    original = Matrix([tip["biped_frame"][i:i + 4] for i in range(0, 16, 4)])
-                    correction = tip.matrix_local @ original.inverted_safe()
-                    ref = correction @ read_frame(reference_frames[component +
-                                                                   "_tws2_loc"], guide["biped_display_scale"], basis_change)
-                    end_ref = correction @ read_frame(reference_frames[component +
-                                                                       "_tws2_rot"], guide["biped_display_scale"], basis_change)
-                    base = joint("MCH.AnkleBase." + end, ref, mechanism, edit[carrier])
-                    read = joint("MCH.AnkleRead." + end, ref, mechanism, edit[base])
-                    goal = joint("MCH.AnkleEnd." + end, end_ref, mechanism, edit[end])
-                    ankle_roll[probe] = (read, goal, -1 if component.endswith("_R0") else 1)
-            carrier, probe, _, basis, _ = probes[span]
-            frame = basis.copy()
-            frame.translation = rest.translation
-            roll = joint("MCH.Roll." + name, frame, mechanism, edit[carrier])
-            rolls[roll] = (probe, factor)
-            parent = edit[roll]
-        followers[name] = joint("MCH.Bind." + name, rest, mechanism, parent)
-        if end and anchor in mid_controls.values() and factor == 0:
-            bend_frames[name] = joint("MCH.Bend." + name, rest, mechanism, edit[anchor].parent.parent)
+        # Roll-spline meshes supply the final transform of each limb division.
+        if end and name.startswith(("arm_", "leg_")):
+            continue
+        followers[name] = joint("MCH.Bind." + name, rest, mechanism, edit[anchor])
     for name, (parent, *_) in output.items():
         if parent:
             edit[name].parent = edit[parent]
     bpy.ops.object.mode_set(mode='POSE')
-    pose = rig.pose.bones
-    for aim, read, end, anchor in neutral.values():
-        loc = pose[aim].constraints.new('COPY_LOCATION')
-        loc.target, loc.subtarget = rig, anchor
-        track = pose[aim].constraints.new('DAMPED_TRACK')
-        track.target, track.subtarget, track.track_axis = rig, end, 'TRACK_Y'
-        con = pose[read].constraints.new('COPY_ROTATION')
-        con.target, con.subtarget = rig, aim
-        con.owner_space = con.target_space = 'POSE'
-    for read, goal, _ in ankle_roll.values():
-        con = pose[read].constraints.new('COPY_ROTATION')
-        con.target, con.subtarget = rig, goal
-        con.owner_space = con.target_space = 'POSE'
-    for (anchor, end), (carrier, probe, target, _, distance) in probes.items():
-        span = pose[carrier].constraints.new('STRETCH_TO')
-        span.target, span.subtarget = rig, end
-        span.rest_length, span.volume = distance, 'NO_VOLUME'
-        if (anchor, end) in planes:
-            reference, control = planes[anchor, end]
-            plane = pose[carrier].constraints.new('LOCKED_TRACK')
-            plane.target, plane.subtarget = rig, reference
-            plane.lock_axis, plane.track_axis = 'LOCK_Y', 'TRACK_X'
-            driver = plane.driver_add("influence").driver
-            driver.type = 'AVERAGE'
-            var = driver.variables.new()
-            var.targets[0].id = rig
-            var.targets[0].data_path = '["' + bpy.utils.escape_identifier(pose[control]["blend_property"]) + '"]'
-        con = pose[probe].constraints.new('COPY_ROTATION')
-        con.target, con.subtarget = rig, target
-        con.owner_space = con.target_space = 'POSE'
-    for name, (probe, factor) in rolls.items():
-        pb = pose[name]
-        pb.rotation_mode = 'XYZ'
-        driver = pb.driver_add("rotation_euler", 1).driver
-        var = driver.variables.new()
-        var.type = 'TRANSFORMS'
-        var.name = "twist"
-        target = var.targets[0]
-        target.id, target.bone_target = rig, probe
-        target.transform_space = 'LOCAL_SPACE'
-        target.rotation_mode, target.transform_type = 'SWING_TWIST_Y', 'ROT_Y'
-        driver.expression = f"twist * {factor:.12g}"
-        if probe in neutral:
-            var = driver.variables.new()
-            var.name, var.type = "base", 'TRANSFORMS'
-            target = var.targets[0]
-            target.id, target.bone_target = rig, neutral[probe][1]
-            target.transform_space = 'LOCAL_SPACE'
-            target.rotation_mode, target.transform_type = 'SWING_TWIST_Y', 'ROT_Y'
-            driver.expression += f"+base*{1 - factor:.12g}"
-        elif probe in ankle_roll:
-            read, _, sign = ankle_roll[probe]
-            target.bone_target = read
-            target.rotation_mode, target.transform_type = 'XYZ', 'ROT_X'
-            driver.expression = f"twist*{factor * sign:.12g}"
     for name, target in followers.items():
-        con = pose[name].constraints.new('COPY_TRANSFORMS')
-        con.target, con.subtarget = rig, target
-        con.owner_space = con.target_space = 'POSE'
-        if name in bend_frames:
-            center = pose[name].constraints.new('COPY_ROTATION')
-            center.target, center.subtarget = rig, bend_frames[name]
-            center.owner_space = center.target_space = 'POSE'
-            center.influence = 0.5
-
-    for tip in guide.data.bones:
-        component = tip.get("ik_limb")
-        if not component or tip.parent.name not in mid_controls:
-            continue
-        upper = tip.parent.parent
-        mid = mid_controls[tip.parent.name]
-        first = probes[upper.name, mid]
-        second = probes[mid, tip.name]
-        ctl = pose["IK." + tip.name]
-        ctl["volume"] = 1.0
-        ctl.id_properties_ui("volume").update(min=0.0, max=1.0, description="Squash/stretch volume")
-        distance = pose[first[0]]
-        distance["length_ratio"] = 1.0
-        total = first[-1] + second[-1]
-        drive(distance, '["length_ratio"]', f"(a*{first[-1]:.12g}+b*{second[-1]:.12g})/{total:.12g}",
-              {"a": (distance, "SCALE_Y"), "b": (pose[second[0]], "SCALE_Y")})
-        samples = limb_samples(upper.get("div0", 2), upper.get("div1", 2), upper.get("supportJoints", True))
-
-        def coefficient(prop, i, fallback):
-            profile = upper.get(prop)
-            if not profile:
-                return fallback * math.sin(math.pi * i / (len(samples) - 1))**2
-            pos = i * (len(profile) - 1) / (len(samples) - 1)
-            lo = int(pos)
-            return profile[lo] + (profile[min(lo + 1, len(profile) - 1)] - profile[lo]) * (pos - lo)
-        for i in range(len(samples)):
-            follower = pose[followers[f"{component}_{i}_jnt"]]
-            stretch = coefficient("st_profile", i, -0.5)
-            squash = coefficient("sq_profile", i, 0.5)
-            expr = f"max(0.0001,1+v*({stretch:.10g}*min(max(d-1,0),1)+{squash:.10g}*min(max(2*(1-d),0),1)))"
-            for axis in (1, 2):  # Maya joint X is the longitudinal axis.
-                drive(follower, "scale", expr, {"v": (ctl, "volume"), "d": (distance, "length_ratio")}, axis)
+        follow = rig.pose.bones[name].constraints.new('COPY_TRANSFORMS')
+        follow.target, follow.subtarget = rig, target
+        follow.owner_space = follow.target_space = 'POSE'

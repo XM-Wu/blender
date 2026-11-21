@@ -180,16 +180,17 @@ def build(context, guide):
         pose[target]["solver_chain"] = mechanism
         pose[target]["joints"] = list(chain)
         rig.id_properties_ui(prop).update(min=0.0, max=1.0, default=rig[prop], description="FK at zero, IK at one")
-        solver = pose[mechanism[-1]].constraints.new('IK')
-        solver.target = solver.pole_target = rig
-        solver.subtarget, solver.pole_subtarget = target, pole
-        solver.chain_count = 3
-        solver.use_tail = True
-        solver.use_stretch = False
         if bind_plan:
             from . import limb_parameters
-            limb_parameters.configure(rig, pose[target], pose[origins[target]], mechanism, solver,
-                                      endpoint.get("maxstretch", 1.5), endpoint.get("negate_roll", False))
+            limb_parameters.configure(rig, pose[target], pose[origins[target]], mechanism,
+                                      endpoint.get("maxstretch", 1.5))
+        else:
+            solver = pose[mechanism[-1]].constraints.new('IK')
+            solver.target = solver.pole_target = rig
+            solver.subtarget, solver.pole_subtarget = target, pole
+            solver.chain_count = 3
+            solver.use_tail = True
+            solver.use_stretch = False
         blends = []
         for name, solved in zip(chain, mechanism):
             # The solver evaluates after constraints on its own endpoint. Orient
@@ -218,7 +219,7 @@ def build(context, guide):
     groups["Mechanism"].is_visible = groups["Skeleton"].is_visible = False
     if "biped_display_scale" in guide:
         from . import biped_display
-        biped_display.apply(rig, guide, fk)
+        widget_frames = biped_display.apply(rig, guide, fk)
         from . import biped_foot
         biped_foot.build(rig, guide)
         biped_skeleton.build(rig, guide, bind_plan, groups["Skeleton"], groups["Mechanism"])
@@ -226,8 +227,17 @@ def build(context, guide):
         biped_spine.build(rig, guide, bind_plan)
         from . import biped_components
         biped_components.connect(rig, guide)
+        from . import biped_detail
+        biped_detail.connect(rig, guide)
+        from . import biped_two_bone
+        biped_two_bone.build(rig, guide)
+        from . import biped_endpoints
+        biped_endpoints.build(rig, guide)
         from . import biped_roundness
-        biped_roundness.build(rig, guide)
+        biped_roundness.build(rig, guide, bind_plan)
+        for name, frame in widget_frames.items():
+            p = rig.pose.bones[name]
+            p.custom_shape.data.transform(p.bone.matrix_local.inverted_safe() @ frame)
     guide.hide_set(True)
     guide.hide_render = True
     return rig

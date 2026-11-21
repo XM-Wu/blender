@@ -6,18 +6,119 @@ from pathlib import Path
 
 import bpy
 import xbone_rigging
-from mathutils import Vector
+from mathutils import Matrix, Vector
+
+
+def check_biped_controls(rig):
+    """Exercise every selectable widget in both endpoint modes via its pose transform."""
+    pose = rig.pose.bones
+    layer = bpy.context.view_layer
+    switches = {p["blend_property"]: rig[p["blend_property"]] for p in pose if "blend_property" in p}
+    widgets = {p.name for p in pose if p.custom_shape}
+    visited = set()
+    assert not any("sizeRef" in n or "UI_" in n for n in widgets)
+    for mode in (0.0, 1.0):
+        for key in switches:
+            rig[key] = mode
+        rig.update_tag()
+        layer.update()
+        for target in (p for p in pose if "blend_property" in p):
+            assert target.hide == (mode == 0)
+            assert pose[target["pole_control"]].hide == target.hide
+            assert all(pose[n].hide != target.hide for n in target["fk_controls"])
+        for p in pose:
+            if p.name not in widgets or p.hide:
+                continue
+            assert any(c.is_visible_effectively for c in p.bone.collections), p.name
+            visited.add(p.name)
+            name = p.name.split(".", 1)[1]
+            translation = False
+            if p.name.startswith("IK."):
+                assert mode == 1
+                check_ik_drag(rig, name)
+                continue
+            if p.name.startswith("Pole."):
+                assert mode == 1
+                # Bend the limb before checking pole motion away from a straight rest pose.
+                target, = [t for t in pose if t.get("pole_control") == p.name]
+                original_target = target.matrix_basis.copy()
+                m = target.matrix.copy()
+                m.translation = m.translation.lerp(pose[target["joints"][0]].head, 0.2)
+                target.matrix = m
+                layer.update()
+                translation = True
+                affected = [name]
+            elif name.startswith("eye") and (name.endswith("_look") or name == "eyeslook_C0"):
+                affected = ["eye_L0", "eye_R0"] if name == "eyeslook_C0" else [name.removesuffix("_look")]
+                translation = True
+            elif pose[name].bone.use_deform:
+                affected = [name]
+            elif name.startswith("thumbRoll_"):
+                affected = [name.replace("thumbRoll_", "thumb_")]
+            else:
+                assert name in {"global_C0", "local_C0", "body_C0"}, name
+                affected = ["spine_C0", "neck_C0"]
+
+            original = p.matrix_basis.copy()
+            before = [pose[j].matrix.copy() for j in affected]
+            delta = Matrix.Translation((0.12, 0.09, 0.06)) if translation else Matrix.Rotation(0.3, 4, 'Z')
+            p.matrix_basis = original @ delta
+            layer.update()
+            for j, prev in zip(affected, before):
+                after = pose[j].matrix
+                assert max(abs(a-b) for x, y in zip(prev, after) for a, b in zip(x, y)) > 0.0001, (p.name, j)
+                if translation and j.startswith("eye_"):
+                    direction = (pose["FK." + j + "_look"].head - pose[j].head).normalized()
+                    assert after.to_3x3().col[1].normalized().dot(direction) > 0.999, (p.name, j)
+                elif not translation and name == j:
+                    assert abs(after.to_quaternion().dot(p.matrix.to_quaternion())) > 0.999, p.name
+            p.matrix_basis = original
+            if p.name.startswith("Pole."):
+                target.matrix_basis = original_target
+            layer.update()
+    assert visited == widgets, widgets - visited
+    for key, default in switches.items():
+        rig[key] = default
+    rig.update_tag()
+    layer.update()
+    print(f"Biped: {len(visited)} distinct controllers exercised in FK and IK modes")
+
+
+def check_ik_drag(rig, ankle, foot=None):
+    pose = rig.pose.bones
+    control = pose["IK." + ankle]
+    knee = pose[ankle].parent
+    old_knee = knee.head.copy()
+    old_ankle = pose[ankle].head.copy()
+    old_control = control.matrix_basis.copy()
+    old_foot = pose[foot].head.copy() if foot else None
+    dest = control.matrix.copy()
+    dest.translation = old_ankle.lerp(knee.parent.head, 0.15) + Vector((0, -0.04, 0))
+    control.matrix = dest
+    bpy.context.view_layer.update()
+    assert (pose[ankle].head - dest.translation).length < 0.005, ankle
+    assert (knee.head - old_knee).length > 0.01
+    if foot:
+        assert ((pose[foot].head - old_foot) - (dest.translation - old_ankle)).length < 0.005
+    control.matrix = dest @ Matrix.Rotation(0.3, 4, 'X')
+    bpy.context.view_layer.update()
+    assert abs(pose[ankle].matrix.to_quaternion().dot(control.matrix.to_quaternion())) > 0.999, ankle
+    control.matrix_basis = old_control
+    bpy.context.view_layer.update()
 
 
 def check_pose(rig, elbow, wrist):
     pose = rig.pose.bones
     tip = pose[wrist]
+    key = "IK " + tip.bone["ik_limb"]
+    rig[key] = 0.0
+    rig.update_tag()
+    bpy.context.view_layer.update()
     fk = pose["FK." + elbow]
     fk.rotation_mode = 'XYZ'
     fk.rotation_euler.z += 0.35
     bpy.context.view_layer.update()
     assert (tip.head - rig.data.bones[wrist].head_local).length > 0.01
-    key = "IK " + tip.bone["ik_limb"]
     rig[key] = 1.0
     rig.update_tag()
     control = pose["IK." + wrist]
@@ -42,6 +143,7 @@ def check_pose(rig, elbow, wrist):
         before = [b.head.copy() for b in (tip.parent.parent, tip.parent, tip)]
         orientations = [b.matrix.to_quaternion() for b in (tip.parent.parent, tip.parent, tip)]
         assert bpy.ops.xbone.match_limb(control=control.name, mode=mode) == {'FINISHED'}
+        assert bpy.context.active_pose_bone.name == (control.name if mode == 'IK' else "FK." + wrist)
         for old, current in zip(before, (tip.parent.parent, tip.parent, tip)):
             assert (old - current.head).length < 0.005, (mode, current.name, old[:], current.head[:])
         for rotation, current in zip(orientations, (tip.parent.parent, tip.parent, tip)):
@@ -60,13 +162,31 @@ assert guide.data.bones["shoulder_L0"].parent.name == "spine_C0_eff"
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
 assert sum(key.startswith("IK ") for key in rig.keys()) == 4
+check_biped_controls(rig)
+body = rig.pose.bones["FK.body_C0"]
+feet = [rig.pose.bones["leg_" + side + "_ankle"] for side in ("L0", "R0")]
+planted = [foot.head.copy() for foot in feet]
+body.location.z -= 0.08
+bpy.context.view_layer.update()
+assert all((foot.head - old).length < 0.005 for foot, old in zip(feet, planted))
+body.location.z += 0.08
+bpy.context.view_layer.update()
+for side in ("L0", "R0"):
+    check_ik_drag(rig, "leg_" + side + "_ankle", "foot_" + side)
 check_pose(rig, "arm_L0_elbow", "arm_L0_wrist")
 check_pose(rig, "leg_R0_knee", "leg_R0_ankle")
 bpy.ops.object.mode_set(mode='OBJECT')
 assert bpy.ops.xbone.biped_guide(template='game_biped') == {'FINISHED'}
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 assert bpy.context.object.pose.bones["FK.arm_L0"].custom_shape.type == 'CURVE'
+for side in ("L0", "R0"):
+    check_ik_drag(bpy.context.object, "leg_" + side + "_ankle", "foot_" + side)
 check_pose(bpy.context.object, "arm_R0_elbow", "arm_R0_wrist")
+bpy.ops.object.mode_set(mode='OBJECT')
+assert bpy.ops.xbone.new_guide() == {'FINISHED'}
+assert bpy.ops.xbone.add_component(kind='LEG') == {'FINISHED'}
+assert bpy.ops.xbone.build_rig() == {'FINISHED'}
+check_ik_drag(bpy.context.object, "Foot.L")
 bpy.ops.object.mode_set(mode='OBJECT')
 assert bpy.ops.xbone.new_guide() == {'FINISHED'}
 assert bpy.ops.xbone.add_component(kind='ARM') == {'FINISHED'}

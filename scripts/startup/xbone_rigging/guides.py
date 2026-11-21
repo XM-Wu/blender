@@ -12,6 +12,7 @@ def template_points(path, scale, up_axis):
     with open(path, encoding="utf-8") as stream:
         data = json.load(stream)
     specs = {}
+    settings = {}
     components = data["components_dict"]
     for name in data["components_list"]:
         component = components[name]
@@ -63,6 +64,17 @@ def template_points(path, scale, up_axis):
             label = name if key == "root" else name + "_" + key
             limb = name if (kind, key) in {("arm_2jnt_01", "wrist"), ("leg_2jnt_01", "ankle")} else ""
             specs[name, key] = (label, point, parent, deform, limb)
+            if limb:
+                settings[name, key] = {
+                    "ik_default": float(params.get("blend", key == "ankle")),
+                    "ik_reference": (params.get("ikrefarray") or "").split(",")[0],
+                    "pole_reference": (params.get("upvrefarray") or "").split(",")[0],
+                }
+            if kind == "eye_01" and key == "look":
+                ref = (params.get("ikrefarray") or "").split(",")[0]
+                settings[name, key] = {"eye_target": True, "eye_reference": ref}
+            if kind == "foot_bk_01" and key == "root":
+                settings[name, key] = {"foot_root": True}
     if not specs or any(parent and parent not in specs for _, _, parent, _, _ in specs.values()):
         raise ValueError("Incomplete guide hierarchy")
     # Reject cyclic templates before entering edit mode.
@@ -112,7 +124,7 @@ def template_points(path, scale, up_axis):
                 if curves:
                     shapes[key, role] = curves
                 break
-    return specs, shapes
+    return specs, shapes, settings
 
 
 def new_guide(context, name):
@@ -134,7 +146,7 @@ def joint(edit, name, point, parent=None, length=0.1):
 
 
 def import_template(context, template, name):
-    specs, shapes = template
+    specs, shapes, settings = template
     obj = new_guide(context, name)
     edit = obj.data.edit_bones
     names = {}
@@ -145,6 +157,10 @@ def import_template(context, template, name):
         names[key] = bone.name
         if limb:
             bone["ik_limb"] = limb
+    references = {component + "_" + locator: actual for (component, locator), actual in names.items()}
+    for key, properties in settings.items():
+        for prop, value in properties.items():
+            edit[names[key]][prop] = references.get(value, "") if prop.endswith("_reference") else value
     for key, (_, _, parent, _, _) in specs.items():
         if parent:
             edit[names[key]].parent = edit[names[parent]]

@@ -145,6 +145,7 @@ class XBONE_OT_add_component(Operator):
             parent = bone
         if len(names) == 3:
             bone["ik_limb"] = bone.name
+            bone["ik_default"] = float(self.kind == 'LEG')
         edit.active = bone
         return {'FINISHED'}
 
@@ -220,6 +221,10 @@ class XBONE_OT_match_limb(Operator):
                     bone.keyframe_insert(data_path=channel, group=bone.name)
         rig.update_tag()
         context.view_layer.update()
+        bpy.ops.pose.select_all(action='DESELECT')
+        active = target if self.mode == 'IK' else pose[target["fk_controls"][-1]]
+        rig.data.bones.active = active.bone
+        active.select = True
         return {'FINISHED'}
 
 
@@ -274,6 +279,9 @@ class XBONE_PT_rigging(Panel):
             layout.operator("xbone.build_rig")
         if role == "RIG":
             layout.operator("xbone.edit_source_guide")
+            skeleton = obj.data.collections.get("Skeleton")
+            if skeleton:
+                layout.prop(skeleton, "is_visible", text="Show Skeleton")
             for control in obj.pose.bones:
                 prop = control.get("blend_property")
                 if prop:

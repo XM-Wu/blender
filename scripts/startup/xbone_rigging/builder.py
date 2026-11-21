@@ -89,11 +89,29 @@ def build(context, guide):
         move_to(bone, group)
         return bone.name
 
+    # Guide references and UI-host locators have no transform to animate.
+    controls = {name for name in originals if edit[name].use_deform}
+    controls.update(name for chain in chains for name in chain)
+    eye_targets = {}
+    for name in originals:
+        src = edit[name]
+        if src.get("eye_target") and src.parent:
+            reference = src.get("eye_reference")
+            eye_targets[name] = (src.parent.name, reference)
+            controls.add(name)
+            if reference in edit:
+                controls.add(reference)
+    for name in tuple(controls):
+        controls.update(b.name for b in edit[name].parent_recursive)
+    controls.difference_update(eye for eye, _ in eye_targets.values())
     fk = {}
     for name in originals:
         src = edit[name]
         move_to(src, "Skeleton")
-        fk[name] = duplicate("FK." + name, name, src.parent, "FK")
+        if name in controls:
+            fk[name] = duplicate("FK." + name, name, src.parent, "FK")
+    for name, (eye, reference) in eye_targets.items():
+        edit[fk[name]].parent = edit.get(reference) or edit[eye].parent
     limbs = []
     for root, mid, tip in chains:
         parent = edit[root].parent
@@ -105,8 +123,14 @@ def build(context, guide):
         # FK rotations propagate down an independent chain during blending.
         edit[fk[mid]].parent = edit[fk[root]]
         edit[fk[tip]].parent = edit[fk[mid]]
-        target = duplicate("IK." + tip, tip, edit[root].parent, "IK")
-        pole = duplicate("Pole." + mid, mid, edit[root].parent, "IK")
+        def space(prop):
+            reference = edit.get(edit[tip].get(prop, ""))
+            if reference and reference != edit[root] and edit[root] not in reference.parent_recursive:
+                return reference
+            return edit[root].parent
+
+        target = duplicate("IK." + tip, tip, space("ik_reference"), "IK")
+        pole = duplicate("Pole." + mid, mid, space("pole_reference"), "IK")
         offset = pole_point(*(edit[n].head for n in (root, mid, tip))) - edit[pole].head
         edit[pole].translate(offset)
         limbs.append(((root, mid, tip), mechanism, target, pole))
@@ -124,10 +148,16 @@ def build(context, guide):
         control.custom_shape_scale_xyz = (size,) * 3
         control.bone.color.palette = {"FK": "THEME04", "IK": "THEME03", "Pole": "THEME09"}[shape]
 
-    for name in originals:
-        follow = copy_pose(pose[name], rig, fk[name])
-        follow.owner_space = follow.target_space = 'LOCAL'
+    for name in fk:
+        if name not in eye_targets:
+            follow = copy_pose(pose[name], rig, fk[name])
+            follow.owner_space = follow.target_space = 'LOCAL'
         style(fk[name], "FK", max(0.015, pose[name].length * 0.24), name)
+    for name, (eye, _) in eye_targets.items():
+        aim = pose[eye].constraints.new('DAMPED_TRACK')
+        aim.target = rig
+        aim.subtarget = fk[name]
+        aim.track_axis = 'TRACK_Y'
     for chain, mechanism, target, pole in limbs:
         length = (arm.bones[chain[0]].head_local - arm.bones[chain[1]].head_local).length
         style(target, "IK", length * 0.16, chain[-1])
@@ -135,7 +165,8 @@ def build(context, guide):
         prop = "IK " + pose[chain[-1]].bone["ik_limb"]
         while prop in rig:
             prop += "_"
-        rig[prop] = 0.0
+        endpoint = arm.bones[chain[-1]]
+        rig[prop] = float(endpoint.get("ik_default", endpoint.name.endswith("_ankle")))
         pose[target]["blend_property"] = prop
         pose[target]["pole_control"] = pole
         pose[target]["fk_controls"] = [fk[name] for name in chain]
@@ -148,15 +179,31 @@ def build(context, guide):
         solver.chain_count = 3
         solver.use_tail = True
         solver.use_stretch = False
-        copy_pose(pose[mechanism[-1]], rig, target, 'COPY_ROTATION')
+        blends = []
         for name, solved in zip(chain, mechanism):
-            blend = copy_pose(pose[name], rig, solved)
+            # The solver evaluates after constraints on its own endpoint. Orient
+            # the deformation endpoint from the animator's target after solving.
+            kind = 'COPY_LOCATION' if name == chain[-1] else 'COPY_TRANSFORMS'
+            blend = copy_pose(pose[name], rig, solved, kind)
             blend.owner_space = blend.target_space = 'LOCAL'
+            blends.append(blend)
+        blends.append(copy_pose(pose[chain[-1]], rig, target, 'COPY_ROTATION'))
+        for blend in blends:
             driver = blend.driver_add("influence").driver
             driver.type = 'AVERAGE'
             var = driver.variables.new()
             var.targets[0].id = rig
             var.targets[0].data_path = '["' + bpy.utils.escape_identifier(prop) + '"]'
+        # Keep overlapping ankle widgets selectable only in their active mode.
+        fk_names = [fk[n] for n in chain]
+        fk_names.extend(fk[b.name] for b in endpoint.children if b.get("foot_root") and b.name in fk)
+        for name in [*fk_names, target, pole]:
+            driver = pose[name].driver_add("hide").driver
+            var = driver.variables.new()
+            var.name = "blend"
+            var.targets[0].id = rig
+            var.targets[0].data_path = '["' + bpy.utils.escape_identifier(prop) + '"]'
+            driver.expression = "blend >= 1" if name in fk_names else "blend <= 0"
     groups["Mechanism"].is_visible = groups["Skeleton"].is_visible = False
     guide.hide_set(True)
     guide.hide_render = True

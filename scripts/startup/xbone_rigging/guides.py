@@ -159,7 +159,9 @@ def template_points(path, scale, up_axis):
                 if curves:
                     shapes[key, role] = curves
                 break
-    return specs, shapes, settings, (scale, up_axis, reference_positions) if biped else None
+    game = any(c["param_values"]["comp_type"].startswith("EPIC_") for c in components.values())
+    return specs, shapes, settings, (scale, up_axis, reference_positions) if biped else None, (
+        "game_biped" if game else "biped", scale, up_axis)
 
 
 def new_guide(context, name):
@@ -168,6 +170,7 @@ def new_guide(context, name):
     obj.name = name
     obj.data.edit_bones.remove(obj.data.edit_bones.active)
     obj["rigging_role"] = "GUIDE"
+    obj["show_shifter_guide"] = True
     obj.show_in_front = True
     return obj
 
@@ -181,7 +184,7 @@ def joint(edit, name, point, parent=None, length=0.1):
 
 
 def import_template(context, template, name):
-    specs, shapes, settings, biped = template
+    specs, shapes, settings, biped, display = template
     obj = new_guide(context, name)
     edit = obj.data.edit_bones
     names = {}
@@ -232,6 +235,8 @@ def import_template(context, template, name):
                 if child:
                     bone.tail = child.head
             bpy.ops.object.mode_set(mode='OBJECT')
+    from . import guide_display
+    guide_display.install(obj, names, *display)
     for (key, role), curves in shapes.items():
         bone = obj.data.bones[names[key]]
         inverse = bone.matrix_local.to_3x3().inverted()

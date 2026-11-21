@@ -9,6 +9,8 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
 from . import builder, guides, rebuild
+from . import guide_display
+from .guide_symmetry import XBONE_OT_symmetrize_guide
 
 
 class XBONE_OT_biped_guide(Operator):
@@ -84,6 +86,7 @@ class XBONE_OT_copy_guide(Operator):
         context.collection.objects.link(guide)
         guide.matrix_world = source.matrix_world.copy()
         guide["rigging_role"] = "GUIDE"
+        guide["show_shifter_guide"] = True
         guide.show_in_front = True
         source.select_set(False)
         guide.select_set(True)
@@ -263,12 +266,41 @@ class XBONE_OT_edit_source_guide(Operator):
         if context.mode == 'POSE':
             bpy.ops.object.mode_set(mode='OBJECT')
         guide = rig["rigging_guide"]
+        guide_display.ensure(guide)
         guide["rigging_target"] = rig
         rig.hide_set(True)
         guide.hide_set(False)
         guide.select_set(True)
         context.view_layer.objects.active = guide
         bpy.ops.object.mode_set(mode='EDIT')
+        return {'FINISHED'}
+
+
+class XBONE_OT_toggle_guide_display(Operator):
+    bl_idname = "xbone.toggle_guide_display"
+    bl_label = "Shifter Guide Display"
+    bl_description = "Display the component roots, locators and connections of this guide"
+    bl_options = {'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj and obj.type == 'ARMATURE' and obj.get("rigging_role") == "GUIDE"
+
+    def execute(self, context):
+        obj = context.active_object
+        if "show_shifter_guide" in obj:
+            obj["show_shifter_guide"] = not obj["show_shifter_guide"]
+        else:
+            was_edit = context.mode == 'EDIT_ARMATURE'
+            if was_edit:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            try:
+                guide_display.ensure(obj)
+            finally:
+                if was_edit:
+                    bpy.ops.object.mode_set(mode='EDIT')
+        obj.update_tag()
         return {'FINISHED'}
 
 
@@ -290,6 +322,10 @@ class XBONE_PT_rigging(Panel):
             if XBONE_OT_copy_guide.poll(context):
                 layout.operator("xbone.copy_guide")
         if role == "GUIDE":
+            layout.operator("xbone.toggle_guide_display", depress=bool(obj.get("show_shifter_guide")))
+            row = layout.row(align=True)
+            row.operator("xbone.symmetrize_guide", text="Left to Right").side = 'L'
+            row.operator("xbone.symmetrize_guide", text="Right to Left").side = 'R'
             if context.mode == 'OBJECT':
                 layout.operator("object.mode_set", text="Edit Guide").mode = 'EDIT'
             if context.mode == 'EDIT_ARMATURE':
@@ -345,5 +381,6 @@ class XBONE_PT_rigging(Panel):
 
 classes = (XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
-           XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_PT_rigging)
+           XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
+           XBONE_OT_toggle_guide_display, XBONE_PT_rigging)
 register, unregister = bpy.utils.register_classes_factory(classes)

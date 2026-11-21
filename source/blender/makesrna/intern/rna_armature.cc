@@ -925,6 +925,28 @@ static void rna_EditBone_matrix_set(PointerRNA *ptr, const float *values)
   ED_armature_ebone_from_mat4(ebone, reinterpret_cast<float (*)[4]>(const_cast<float *>(values)));
 }
 
+static void rna_EditBone_transform_children(bArmature *arm, EditBone *joint, const float4x4 &delta)
+{
+  if (!(arm->flag & ARM_XBONE) || (arm->flag & ARM_XBONE_ROTATE_SELECTED_ONLY)) {
+    return;
+  }
+  MultiValueMap<EditBone *, EditBone *> children;
+  for (EditBone &child : *arm->edbo) {
+    if (child.parent && !(child.flag & BONE_EDITMODE_LOCKED)) {
+      children.add(child.parent, &child);
+    }
+  }
+  Vector<EditBone *> pending(children.lookup(joint));
+  while (!pending.is_empty()) {
+    EditBone *child = pending.pop_last();
+    float4x4 frame;
+    ED_armature_ebone_to_mat4(child, frame.ptr());
+    frame = delta * frame;
+    ED_armature_ebone_from_mat4(child, frame.ptr());
+    pending.extend(children.lookup(child));
+  }
+}
+
 static void rna_EditBone_joint_position_set(PointerRNA *ptr, const float *value)
 {
   EditBone *edit = static_cast<EditBone *>(ptr->data);
@@ -932,6 +954,9 @@ static void rna_EditBone_joint_position_set(PointerRNA *ptr, const float *value)
   sub_v3_v3v3(delta, value, edit->head);
   add_v3_v3(edit->tail, delta);
   copy_v3_v3(edit->head, value);
+  float4x4 transform = float4x4::identity();
+  transform.location() = float3(delta);
+  rna_EditBone_transform_children(id_cast<bArmature *>(ptr->owner_id), edit, transform);
 }
 
 static void rna_EditBone_joint_orientation_get(PointerRNA *ptr, float *value)
@@ -957,21 +982,7 @@ static void rna_EditBone_joint_orientation_set(PointerRNA *ptr, const float *val
     ED_armature_ebone_to_mat4(joint, after.ptr());
     invert_m4_m4(inverse_before.ptr(), before.ptr());
     const float4x4 delta = after * inverse_before;
-    MultiValueMap<EditBone *, EditBone *> children;
-    for (EditBone &child : *arm->edbo) {
-      if (child.parent && !(child.flag & BONE_EDITMODE_LOCKED)) {
-        children.add(child.parent, &child);
-      }
-    }
-    Vector<EditBone *> pending(children.lookup(joint));
-    while (!pending.is_empty()) {
-      EditBone *child = pending.pop_last();
-      float4x4 child_frame;
-      ED_armature_ebone_to_mat4(child, child_frame.ptr());
-      child_frame = delta * child_frame;
-      ED_armature_ebone_from_mat4(child, child_frame.ptr());
-      pending.extend(children.lookup(child));
-    }
+    rna_EditBone_transform_children(arm, joint, delta);
   }
 }
 
@@ -2442,7 +2453,14 @@ static void rna_def_armature(BlenderRNA *brna)
   RNA_def_property_boolean_default(prop, true);
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(
-      prop, "Rotate Child Joints", "Rotate the joint hierarchy when editing an XBone rest pose");
+      prop, "Transform Children", "Alias for use_xbone_transform_children");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+  prop = RNA_def_property(srna, "use_xbone_transform_children", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "flag", ARM_XBONE_ROTATE_SELECTED_ONLY);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Transform Children", "Move, rotate, and scale descendants with their parent in Edit Mode");
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
 
   prop = RNA_def_property(srna, "is_xbone", PROP_BOOLEAN, PROP_NONE);

@@ -2,6 +2,10 @@
 
 Open **3D Viewport → Sidebar (N) → Rigging** in Object Mode.
 
+In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
+
+Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
+
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.
 - To keep an existing skeleton's joint names, hierarchy and rest frames, select the XBone object and choose **Create Guide from Selected XBone**. Select a wrist or ankle in Edit Mode and choose **Toggle Two-Joint IK at Active Joint**. The two ancestors form the limb. Give a straight limb a small bend toward its intended elbow or knee direction.

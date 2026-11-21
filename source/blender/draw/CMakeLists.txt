@@ -248,6 +248,7 @@ set(SRC
   engines/image/image_usage.hh
   engines/overlay/overlay_antialiasing.hh
   engines/overlay/overlay_armature.hh
+  engines/overlay/overlay_armature_guide.hh
   engines/overlay/overlay_attribute_text.hh
   engines/overlay/overlay_attribute_viewer.hh
   engines/overlay/overlay_axes.hh

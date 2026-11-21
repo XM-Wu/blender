@@ -800,6 +800,8 @@ struct XBoneRestFrame {
 
 struct XBoneBranch {
   EditBone *driver;
+  EditBone *source;
+  float3 pivot;
   float4x4 inverse_start;
   Vector<XBoneRestFrame> descendants;
 };
@@ -822,6 +824,7 @@ static void xbone_capture_branches(bArmature &arm, EditArmatureTransformData &da
 {
   MultiValueMap<EditBone *, EditBone *> children;
   Set<EditBone *> drivers;
+  Map<EditBone *, EditBone *> mirror_sources;
   for (EditBone &joint : *arm.edbo) {
     if (joint.parent) {
       children.add(joint.parent, &joint);
@@ -833,6 +836,7 @@ static void xbone_capture_branches(bArmature &arm, EditArmatureTransformData &da
       if (arm.flag & ARM_MIRROR_EDIT) {
         if (EditBone *mirror = ED_armature_ebone_get_mirrored(arm.edbo, &joint)) {
           drivers.add(mirror);
+          mirror_sources.add_overwrite(mirror, &joint);
         }
       }
     }
@@ -840,6 +844,9 @@ static void xbone_capture_branches(bArmature &arm, EditArmatureTransformData &da
   for (EditBone *driver : drivers) {
     XBoneBranch branch;
     branch.driver = driver;
+    branch.source = (driver->flag & BONE_SELECTED) ? driver :
+                                                    mirror_sources.lookup_default(driver, driver);
+    branch.pivot = float3(driver->head);
     float4x4 start;
     ED_armature_ebone_to_mat4(driver, start.ptr());
     invert_m4_m4(branch.inverse_start.ptr(), start.ptr());
@@ -860,14 +867,53 @@ static void xbone_capture_branches(bArmature &arm, EditArmatureTransformData &da
   }
 }
 
-static void xbone_update_branches(EditArmatureTransformData &data, const bool rotating)
+static void xbone_update_branches(EditArmatureTransformData &data,
+                                  const TransInfo *t,
+                                  const TransDataContainer *tc)
 {
-  if (!rotating && !data.branches_transformed) {
+  const bool apply = t->state != TRANS_CANCEL &&
+                     ELEM(t->mode, TFM_ROTATION, TFM_TRACKBALL, TFM_TRANSLATION, TFM_RESIZE);
+  if (data.branches.is_empty() || (!apply && !data.branches_transformed)) {
     return;
   }
+  Map<EditBone *, TransData *> heads;
+  if (apply && t->mode == TFM_RESIZE) {
+    for (int i = 0; i < tc->data_len; i++) {
+      TransData &td = tc->data[i];
+      EditBone *bone = static_cast<EditBone *>(td.extra);
+      if (bone && td.loc == bone->head) {
+        heads.add(bone, &td);
+      }
+    }
+  }
   for (const XBoneBranch &branch : data.branches) {
-    float4x4 delta;
-    if (rotating) {
+    float4x4 delta = float4x4::identity();
+    if (apply && t->mode == TFM_RESIZE) {
+      if (TransData *td = heads.lookup_default(branch.source, nullptr)) {
+        /* Use the same local linear transform as ElementResize, anchored at the
+         * evaluated driver pivot. A bone matrix alone loses nonuniform scale. */
+        float scale[3][3], world[3][3];
+        mul_m3_m3m3(world, t->mat, td->mtx);
+        mul_m3_m3m3(scale, td->smtx, world);
+        if (t->con.applySize) {
+          t->con.applySize(t, tc, td, scale);
+        }
+        if (branch.source != branch.driver) {
+          for (int i = 1; i < 3; i++) {
+            scale[0][i] *= -1;
+            scale[i][0] *= -1;
+          }
+        }
+        copy_m4_m3(delta.ptr(), scale);
+        float3 pivot = branch.pivot;
+        mul_m3_v3(scale, pivot);
+        delta.location() = float3(branch.driver->head) - pivot;
+      }
+    }
+    else if (apply && t->mode == TFM_TRANSLATION) {
+      delta.location() = float3(branch.driver->head) - branch.pivot;
+    }
+    else if (apply) {
       float4x4 current;
       ED_armature_ebone_to_mat4(branch.driver, current.ptr());
       delta = current * branch.inverse_start;
@@ -876,13 +922,21 @@ static void xbone_update_branches(EditArmatureTransformData &data, const bool ro
       copy_v3_v3(rest.joint->head, rest.matrix.location());
       copy_v3_v3(rest.joint->tail, rest.tail);
       rest.joint->roll = rest.roll;
-      if (rotating) {
+      if (apply) {
+        mul_m4_v3(delta.ptr(), rest.joint->head);
+        mul_m4_v3(delta.ptr(), rest.joint->tail);
         const float4x4 matrix = delta * rest.matrix;
-        ED_armature_ebone_from_mat4(rest.joint, matrix.ptr());
+        float3 up = matrix.z_axis();
+        if (t->mode != TFM_TRANSLATION &&
+            len_squared_v3v3(rest.joint->head, rest.joint->tail) > 1e-16f &&
+            normalize_v3(up) > 1e-8f)
+        {
+          rest.joint->roll = ED_armature_ebone_roll_to_vector(rest.joint, up, false);
+        }
       }
     }
   }
-  data.branches_transformed = rotating;
+  data.branches_transformed = apply;
 }
 
 static void free_bone_init_data(TransInfo * /*t*/,
@@ -1312,7 +1366,7 @@ static void recalcData_edit_armature(TransInfo *t)
       }
     }
     if (data) {
-      xbone_update_branches(*data, rotating);
+      xbone_update_branches(*data, t, tc);
     }
   }
 }

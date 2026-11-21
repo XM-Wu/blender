@@ -470,6 +470,23 @@ path = Path(xbone_rigging.__file__).with_name("biped.sgt")
 assert bpy.ops.xbone.import_guide(filepath=str(path)) == {'FINISHED'}
 guide = bpy.context.object
 assert guide.data.is_xbone
+assert guide["show_shifter_guide"] and guide["shifter_guide_paths"]
+assert len(guide["shifter_guide_aux"]) == 210
+for side, target in (("L", "R"), ("R", "L")):
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.armature.select_all(action='DESELECT')
+    edit = guide.data.edit_bones
+    a, b = (edit["arm_" + s + "0_wrist"] for s in (side, target))
+    old_a, old_b = a.matrix.copy(), b.matrix.copy()
+    a.translate(Vector((0.04, 0.12, -0.02)))
+    a.roll += 0.38
+    a.select = True
+    assert bpy.ops.xbone.symmetrize_guide(side=side, selected_only=True) == {'FINISHED'}
+    reflection = Matrix.Diagonal((-1, 1, 1, 1))
+    expected = reflection @ a.matrix @ reflection
+    assert max(abs(x-y) for row, ref in zip(b.matrix, expected) for x,y in zip(row, ref)) < 1e-5
+    a.matrix, b.matrix = old_a, old_b
+    bpy.ops.object.mode_set(mode='OBJECT')
 data = json.loads(path.read_text())
 assert len(guide.data.bones) == sum(len(c["pos"]) for c in data["components_dict"].values())
 assert guide.data.bones["shoulder_L0"].parent.name == "spine_C0_eff"
@@ -571,4 +588,15 @@ with tempfile.TemporaryDirectory() as directory:
     check_pose(bpy.context.object, "Forearm.L", "Hand.L")
     assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
     assert bpy.context.edit_object == guide
+    assert bpy.ops.xbone.toggle_guide_display() == {'FINISHED'}
+    assert not guide["show_shifter_guide"]
+    assert bpy.ops.xbone.toggle_guide_display() == {'FINISHED'}
+    assert guide["show_shifter_guide"]
+    bpy.ops.armature.select_all(action='DESELECT')
+    edit = guide.data.edit_bones
+    edit["Hand.L"].select = True
+    assert bpy.ops.xbone.symmetrize_guide(side='L', selected_only=True) == {'FINISHED'}
+    assert edit["Hand.R"].parent == edit["Forearm.R"]
+    assert edit["Forearm.R"].parent.name == bpy.utils.flip_name(edit["Forearm.L"].parent.name)
+    assert abs(edit["Hand.R"].head.x + edit["Hand.L"].head.x) < 1e-6
 print("Shifter templates, custom and imported guides, FK/IK, matching, reload and FBX passed")

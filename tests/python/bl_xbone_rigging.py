@@ -12,7 +12,7 @@ from mathutils import Matrix, Vector
 def check_biped_display(rig):
     source = json.loads(Path(xbone_rigging.__file__).with_name("biped_display.json").read_text())
     assert source["source"].endswith("Maya 2027")
-    assert len(source["controls"]) == 123 and len(source["joints"]) == 106
+    assert len(source["controls"]) == 123
     offsets = {}
     for name, record in source["controls"].items():
         role, joint = record["role"], record["anchor"]
@@ -27,8 +27,10 @@ def check_biped_display(rig):
         offsets[owner.name] = start
     for name, count in offsets.items():
         assert count == len(rig.pose.bones[name].custom_shape.data.vertices)
-    for joint in source["joints"]:
-        assert not rig.data.bones["Display." + joint].use_deform
+    display = rig.data.collections["Biped Display"]
+    expected = {"Display." + n for n, record in source["controls"].items() if record["role"] == "display"}
+    expected.update("Display." + component + ".pole" for component in source["poles"])
+    assert set(display.bones.keys()) == expected
     pole = rig.pose.bones["Pole.leg_L0_knee"]
     old = pole.location.copy()
     pole.location.x += 0.13

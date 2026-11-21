@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Maya 2027 Shifter rest curves, expressed in editable XBone guide frames."""
 import json
-import math
 from pathlib import Path
 
 import bpy
@@ -9,7 +8,7 @@ from mathutils import Matrix, Vector
 
 # Display sRGB from the supplied Maya viewport. Keys are Maya override color indices.
 PALETTE = {6: "0000ff", 13: "ff0100", 14: "00ff10", 17: "fdff88", 18: "64dcff", 23: "009954",
-           "joint": "260043", "link": "787878"}
+           "link": "787878"}
 
 
 def xyz(value, scale, up):
@@ -42,11 +41,6 @@ def configure(pose_bone, widget, color):
     palette.custom.normal = tuple((50 + channel * gain) / 255 for channel in rgb)
     palette.custom.select = (0.55, 1.0, 0.55)
     palette.custom.active = (1, 1, 1)
-
-
-def rings(radius):
-    circle = [(radius * math.cos(i * math.tau/12), radius * math.sin(i * math.tau/12)) for i in range(13)]
-    return [[(a, b, 0) for a, b in circle], [(a, 0, b) for a, b in circle], [(0, a, b) for a, b in circle]]
 
 
 def apply(rig, guide, fk):
@@ -124,41 +118,15 @@ def apply(rig, guide, fk):
         for collection in list(edit[n].collections):
             collection.unassign(edit[n])
         extra.assign(edit[n])
-    markers = {}
-    for name, data in source["joints"].items():
-        label = data["anchor"]
-        if label in anchors:
-            markers[name] = helper(name, anchors[label], point(label, data["point"]))
-    struts = []
-    for name, marker in markers.items():
-        parent = markers.get(source["joints"][name]["parent"])
-        if not parent:
-            continue
-        a, b = edit[parent].head, edit[marker].head
-        length = (b-a).length
-        if length > scale * 0.02:
-            struts.append((helper(name+".link", parent, a, b), marker, length))
     bpy.ops.object.mode_set(mode='POSE')
     pose = rig.pose.bones
     for target, (lines, color) in widgets.items():
         configure(pose[target], shape(target, lines), color)
-    joint_shape = shape("Shifter Joint", rings(scale * 0.17))
-    for marker in markers.values():
-        configure(pose[marker], joint_shape, "joint")
-
-    def stretch(name, target, length):
-        c = pose[name].constraints.new('STRETCH_TO')
-        c.target, c.subtarget = rig, target
-        c.rest_length, c.volume = length, 'NO_VOLUME'
-
-    for name, target, length in struts:
-        r = min(scale * 0.15, length/4)
-        lines = [[(x, 0, z), (0, length, 0)] for x, z in ((r,0),(-r,0),(0,r),(0,-r))]
-        configure(pose[name], shape(name, lines), "joint")
-        stretch(name, target, length)
     for name, joint, length in links:
         configure(pose[name], shape(name, [[(0,0,0), (0,length,0)]]), "link")
-        stretch(name, joint, length)
+        constraint = pose[name].constraints.new('STRETCH_TO')
+        constraint.target, constraint.subtarget = rig, joint
+        constraint.rest_length, constraint.volume = length, 'NO_VOLUME'
         pole = pose["Pole." + joint]
         driver = pose[name].driver_add("hide").driver
         driver.type = 'AVERAGE'

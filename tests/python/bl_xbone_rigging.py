@@ -151,6 +151,44 @@ def check_biped_display(rig):
     bpy.context.view_layer.update()
 
 
+def check_rebuild(rig, guide):
+    mesh = bpy.data.meshes.new("Rebuild skin")
+    mesh.from_pydata([(0.2, 0, 1)], [], [])
+    skin = bpy.data.objects.new(mesh.name, mesh)
+    bpy.context.collection.objects.link(skin)
+    skin.parent = rig
+    skin.modifiers.new("Skin", 'ARMATURE').object = rig
+    skin.vertex_groups.new(name="arm_L0_1_jnt").add([0], 0.75, 'REPLACE')
+    skin.vertex_groups.new(name="spine_C0_0_jnt").add([0], 0.25, 'REPLACE')
+    rig.pose.bones["FK.body_C0"].keyframe_insert(data_path="location", frame=1)
+    anim = rig.animation_data
+    action, slot = anim.action, anim.action_slot
+    track = anim.nla_tracks.new()
+    track.name = "User track"
+    track.strips.new("User strip", 20, action)
+    rig.pose.bones["IK.leg_L0_ankle"]["maxstretch"] = 1.25
+    constraint = rig.pose.bones["FK.body_C0"].constraints.new('LIMIT_LOCATION')
+    constraint.name = "Animator limit"
+    original = rig.as_pointer()
+    for divisions in (3, 3):
+        assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
+        guide.data.edit_bones["arm_L0"]["div0"] = divisions
+        assert bpy.ops.xbone.build_rig() == {'FINISHED'}
+        assert bpy.context.object.as_pointer() == original
+        assert rig.animation_data.action == action and rig.animation_data.action_slot == slot
+        assert rig.animation_data.nla_tracks[track.name].strips[0].action == action
+        assert rig.pose.bones["IK.leg_L0_ankle"]["maxstretch"] == 1.25
+        assert "Animator limit" in rig.pose.bones["FK.body_C0"].constraints
+        assert skin.parent == rig and skin.modifiers["Skin"].object == rig
+        assert abs(skin.vertex_groups["arm_L0_1_jnt"].weight(0) - 0.5) < 1e-5
+        assert abs(skin.vertex_groups["arm_L0_2_jnt"].weight(0) - 0.25) < 1e-5
+        assert abs(skin.vertex_groups["spine_C0_0_jnt"].weight(0) - 0.25) < 1e-5
+        assert len({d for d in rig.children if d.type == 'CURVE'}) == 8
+        assert all(d.driver.is_valid for d in rig.animation_data.drivers)
+        assert all(mod.object == rig for child in rig.children if child.type == 'CURVE' for mod in child.modifiers)
+        check_ik_drag(rig, "leg_L0_ankle", "foot_L0")
+
+
 def check_biped_controls(rig):
     """Exercise every selectable widget in both endpoint modes via its pose transform."""
     pose = rig.pose.bones
@@ -349,6 +387,7 @@ for side in ("L0", "R0"):
     check_ik_drag(rig, "leg_" + side + "_ankle", "foot_" + side)
 check_pose(rig, "arm_L0_elbow", "arm_L0_wrist")
 check_pose(rig, "leg_R0_knee", "leg_R0_ankle")
+check_rebuild(rig, guide)
 bpy.ops.object.mode_set(mode='OBJECT')
 with tempfile.TemporaryDirectory() as tmp:
     arm_settings = data["components_dict"]["arm_L0"]["param_values"]

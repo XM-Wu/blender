@@ -8,7 +8,7 @@ from bpy.types import Operator, Panel
 from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
-from . import builder, guides
+from . import builder, guides, rebuild
 
 
 class XBONE_OT_biped_guide(Operator):
@@ -168,7 +168,7 @@ class XBONE_OT_build_rig(Operator):
             self.report({'ERROR'}, "Guide contains no joints")
             return {'CANCELLED'}
         try:
-            builder.build(context, guide)
+            rebuild.build(context, guide)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
@@ -235,7 +235,7 @@ class XBONE_OT_match_limb(Operator):
 class XBONE_OT_edit_source_guide(Operator):
     bl_idname = "xbone.edit_source_guide"
     bl_label = "Edit Source Guide"
-    bl_description = "Hide this rig and edit the guide. Building again creates a separate rig"
+    bl_description = "Edit this rig's guide and rebuild the same rig"
     bl_options = {'UNDO'}
 
     @classmethod
@@ -249,6 +249,7 @@ class XBONE_OT_edit_source_guide(Operator):
         if context.mode == 'POSE':
             bpy.ops.object.mode_set(mode='OBJECT')
         guide = rig["rigging_guide"]
+        guide["rigging_target"] = rig
         rig.hide_set(True)
         guide.hide_set(False)
         guide.select_set(True)
@@ -286,7 +287,8 @@ class XBONE_PT_rigging(Panel):
                                        ("supportJoints", "Support Joints"), ("division", "Divisions")):
                         if key in bone:
                             layout.prop(bone, '["' + key + '"]', text=label)
-            layout.operator("xbone.build_rig")
+            label = "Rebuild Rig" if rebuild.target_for(context, obj) else "Build Rig"
+            layout.operator("xbone.build_rig", text=label)
         if role == "RIG":
             layout.operator("xbone.edit_source_guide")
             skeleton = obj.data.collections.get("Skeleton")

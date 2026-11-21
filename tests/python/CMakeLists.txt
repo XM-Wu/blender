@@ -806,6 +806,10 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     bl_xbone_rigging
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging.py
   )
+  add_blender_test(
+    bl_xbone_selector
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
+  )
 endif()
 
 if(WITH_IK_SOLVER AND WITH_IK_ITASC)

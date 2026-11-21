@@ -1215,8 +1215,9 @@ enum eSpace_Type : char {
   SPACE_SPREADSHEET = 23,
   SPACE_PROJECT = 24,
   SPACE_WEIGHT_LAYERS = 25,
+  SPACE_SELECTOR = 26,
 
-#define SPACE_TYPE_NUM (SPACE_WEIGHT_LAYERS + 1)
+#define SPACE_TYPE_NUM (SPACE_SELECTOR + 1)
 };
 
 /* use for function args */

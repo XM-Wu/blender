@@ -9,7 +9,7 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
 from . import builder, guides, rebuild
-from . import guide_display
+from . import guide_display, selector
 from .guide_symmetry import XBONE_OT_symmetrize_guide
 
 
@@ -383,4 +383,14 @@ classes = (XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, XBONE_PT_rigging)
-register, unregister = bpy.utils.register_classes_factory(classes)
+_register, _unregister = bpy.utils.register_classes_factory(classes)
+
+
+def register():
+    _register()
+    selector.register()
+
+
+def unregister():
+    selector.unregister()
+    _unregister()

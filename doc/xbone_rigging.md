@@ -15,6 +15,14 @@ Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guid
 - Rotate FK controls to pose their chains. The limb property blends from FK at 0 to IK at 1. **Match IK** and **Match FK** preserve the pose and select the incoming endpoint control. With Auto Key enabled the operator keys the matched channels and the switch at the current frame. The Biped eye targets aim each eye individually, and the shared eye control moves both targets.
 - To export a rest skeleton to FBX, select the generated rig, set the armature to **Rest Position**, and enable **Selected Objects** and **Only Deform Bones** in the FBX exporter. Return to **Pose Position** for animation. Controller and solver bones have deformation disabled.
 
+## Selector
+
+Split an area and choose **Animation → Selector** in its editor type menu. Choose the character in the header. Classic Biped opens the mGear Biped picker. Game Biped and custom rigs open a board of their selectable controls. The header also switches pages and imports or exports polygon pickers in mGear's `.pkr` format. Imported layouts and available background images are stored on the character in the blend file.
+
+Click a shape to select its pose controls, Shift-click to extend, or Ctrl-click to toggle. Drag on the empty board for box selection. The wheel zooms around the cursor, middle-drag pans, and **F** frames the page. Right-click to place a button bound to the current pose selection, move or rebind an existing button, or remove it.
+
+The stock board includes native limb IK/FK matching, reference-space selection, Select All and transform keying. A dimmed button indicates a missing control or unsupported action. Maya scripts, arbitrary context-menu commands, animated widgets and the spine IK/FK transfer script require separate Blender implementations.
+
 ## Classic Biped build
 
 The stock template creates 106 skin joints in the Skeleton collection. Their names, parents and rest frames come from a Maya 2027 Shifter build using mGear revision `a7dd129`. Joint X is the longitudinal axis. Controls, intermediate guide transforms and solver bones have deformation disabled. Skin a mesh using the `*_jnt` names. A mesh bound to an older Biped with guide-based vertex group names needs its weights mapped to this hierarchy.

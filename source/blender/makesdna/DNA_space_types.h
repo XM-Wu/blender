@@ -108,6 +108,19 @@ struct SpaceLink {
 /** \name Space Info
  * \{ */
 
+struct SpaceSelector {
+  SpaceLink *next = nullptr, *prev = nullptr;
+  ListBaseT<ARegion> regionbase = {nullptr, nullptr};
+  char spacetype = 0;
+  eSpace_Link_Flag link_flag = {};
+  char _pad0[6] = {};
+  /* End 'SpaceLink' header. */
+
+  int page = 0;
+  float zoom = 1.0f;
+  float pan[2] = {};
+};
+
 /** Info Header. */
 struct SpaceInfo {
   SpaceLink *next = nullptr, *prev = nullptr;

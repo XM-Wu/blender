@@ -158,6 +158,7 @@ const uchar *get_color_ptr(const bTheme *btheme, int spacetype, int colorid)
         case SPACE_OUTLINER:
           ts = &btheme->space_outliner;
           break;
+        case SPACE_SELECTOR:
         case SPACE_INFO:
           ts = &btheme->space_info;
           break;

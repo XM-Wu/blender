@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+import math
+
+import bpy
+from mathutils import Vector
+
+
+def widgets(rig):
+    shapes = {}
+    ring = [(math.cos(i * math.tau / 24), 0, math.sin(i * math.tau / 24)) for i in range(24)]
+    cube = [(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    diamond = [(1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    for name, vertices, edges in (
+            ("FK", ring, [(i, (i + 1) % 24) for i in range(24)]),
+            ("IK", cube, [(i, i ^ bit) for i in range(8) for bit in (1, 2, 4) if not i & bit]),
+            ("Pole", diamond, [(i, j) for i in range(4) for j in ((i + 1) % 4, 4, 5)])):
+        mesh = bpy.data.meshes.new(rig.name + "." + name)
+        mesh.from_pydata(vertices, edges, [])
+        shapes[name] = bpy.data.objects.new(mesh.name, mesh)
+    return shapes
+
+
+def limb_chains(bones):
+    limbs = []
+    used = set()
+    for tip in bones:
+        if not tip.get("ik_limb"):
+            continue
+        mid = tip.parent
+        root = mid.parent if mid else None
+        if root is None:
+            raise ValueError("IK endpoint needs two parents: " + tip.name)
+        chain = (root.name, mid.name, tip.name)
+        if used.intersection(chain):
+            raise ValueError("Overlapping IK limbs at " + tip.name)
+        if min((tip.head_local - mid.head_local).length, (mid.head_local - root.head_local).length) < 0.0001:
+            raise ValueError("Coincident IK pivots at " + tip.name)
+        used.update(chain)
+        limbs.append(chain)
+    return limbs
+
+
+def pole_point(a, b, c):
+    axis = (c - a).normalized()
+    bend = b - a - axis * (b - a).dot(axis)
+    if bend.length < 0.0001:
+        bend = axis.orthogonal() if axis.length else Vector((0, -1, 0))
+    return b + bend.normalized() * ((a - b).length + (b - c).length) * 0.6
+
+
+def copy_pose(owner, rig, target, kind='COPY_TRANSFORMS'):
+    constraint = owner.constraints.new(kind)
+    constraint.target = rig
+    constraint.subtarget = target
+    constraint.owner_space = constraint.target_space = 'POSE'
+    return constraint
+
+
+def build(context, guide):
+    chains = limb_chains(guide.data.bones)
+    # Copy rest data only. Preserve the guide for variations and keep bound rigs independent.
+    arm = guide.data.copy()
+    rig = bpy.data.objects.new(guide.name + ".Rig", arm)
+    context.collection.objects.link(rig)
+    rig.matrix_world = guide.matrix_world.copy()
+    rig.show_in_front = True
+    rig["rigging_role"] = "RIG"
+    rig["rigging_guide"] = guide
+    guide.select_set(False)
+    rig.select_set(True)
+    context.view_layer.objects.active = rig
+    groups = {key: arm.collections.new(key) for key in ("Skeleton", "FK", "IK", "Mechanism")}
+    originals = [b.name for b in arm.bones]
+    bpy.ops.object.mode_set(mode='EDIT')
+    edit = arm.edit_bones
+
+    def move_to(bone, group):
+        for collection in list(bone.collections):
+            collection.unassign(bone)
+        groups[group].assign(bone)
+
+    def duplicate(name, source, parent, group):
+        original = edit[source]
+        bone = edit.new(name)
+        bone.head, bone.tail, bone.roll = original.head, original.tail, original.roll
+        bone.parent = parent
+        bone.use_deform = False
+        move_to(bone, group)
+        return bone.name
+
+    fk = {}
+    for name in originals:
+        src = edit[name]
+        move_to(src, "Skeleton")
+        fk[name] = duplicate("FK." + name, name, src.parent, "FK")
+    limbs = []
+    for root, mid, tip in chains:
+        parent = edit[root].parent
+        mechanism = []
+        for name in (root, mid, tip):
+            solver = duplicate("MCH." + name, name, parent, "Mechanism")
+            mechanism.append(solver)
+            parent = edit[solver]
+        # FK rotations propagate down an independent chain during blending.
+        edit[fk[mid]].parent = edit[fk[root]]
+        edit[fk[tip]].parent = edit[fk[mid]]
+        target = duplicate("IK." + tip, tip, edit[root].parent, "IK")
+        pole = duplicate("Pole." + mid, mid, edit[root].parent, "IK")
+        offset = pole_point(*(edit[n].head for n in (root, mid, tip))) - edit[pole].head
+        edit[pole].translate(offset)
+        limbs.append(((root, mid, tip), mechanism, target, pole))
+    bpy.ops.object.mode_set(mode='POSE')
+    shapes = widgets(rig)
+    pose = rig.pose.bones
+
+    def style(name, shape, size, joint):
+        control = pose[name]
+        authored = arm.bones[joint].get("widget_" + shape)
+        control.custom_shape = authored or shapes[shape]
+        control.use_custom_shape_bone_size = False
+        if authored:
+            size = 1.0
+        control.custom_shape_scale_xyz = (size,) * 3
+        control.bone.color.palette = {"FK": "THEME04", "IK": "THEME03", "Pole": "THEME09"}[shape]
+
+    for name in originals:
+        follow = copy_pose(pose[name], rig, fk[name])
+        follow.owner_space = follow.target_space = 'LOCAL'
+        style(fk[name], "FK", max(0.015, pose[name].length * 0.24), name)
+    for chain, mechanism, target, pole in limbs:
+        length = (arm.bones[chain[0]].head_local - arm.bones[chain[1]].head_local).length
+        style(target, "IK", length * 0.16, chain[-1])
+        style(pole, "Pole", length * 0.1, chain[1])
+        prop = "IK " + pose[chain[-1]].bone["ik_limb"]
+        while prop in rig:
+            prop += "_"
+        rig[prop] = 0.0
+        pose[target]["blend_property"] = prop
+        pose[target]["pole_control"] = pole
+        pose[target]["fk_controls"] = [fk[name] for name in chain]
+        pose[target]["solver_chain"] = mechanism
+        pose[target]["joints"] = list(chain)
+        rig.id_properties_ui(prop).update(min=0.0, max=1.0, description="FK at zero, IK at one")
+        solver = pose[mechanism[-1]].constraints.new('IK')
+        solver.target = solver.pole_target = rig
+        solver.subtarget, solver.pole_subtarget = target, pole
+        solver.chain_count = 3
+        solver.use_tail = True
+        solver.use_stretch = False
+        copy_pose(pose[mechanism[-1]], rig, target, 'COPY_ROTATION')
+        for name, solved in zip(chain, mechanism):
+            blend = copy_pose(pose[name], rig, solved)
+            blend.owner_space = blend.target_space = 'LOCAL'
+            driver = blend.driver_add("influence").driver
+            driver.type = 'AVERAGE'
+            var = driver.variables.new()
+            var.targets[0].id = rig
+            var.targets[0].data_path = '["' + bpy.utils.escape_identifier(prop) + '"]'
+    groups["Mechanism"].is_visible = groups["Skeleton"].is_visible = False
+    guide.hide_set(True)
+    guide.hide_render = True
+    return rig

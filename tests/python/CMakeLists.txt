@@ -801,6 +801,13 @@ if(WITH_IO_FBX)
   )
 endif()
 
+if(WITH_IK_SOLVER AND WITH_IO_FBX)
+  add_blender_test(
+    bl_xbone_rigging
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging.py
+  )
+endif()
+
 if(WITH_IK_SOLVER AND WITH_IK_ITASC)
   add_blender_test(
     bl_xbone_ik

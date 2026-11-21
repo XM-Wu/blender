@@ -98,10 +98,22 @@ def build(rig, guide):
             con = pose[space].constraints.new('COPY_TRANSFORMS')
             con.target, con.subtarget = rig, ref
             con.owner_space = con.target_space = 'POSE'
-            driver = con.driver_add("influence").driver
-            driver.type = 'AVERAGE'
-            var = driver.variables.new()
-            var.targets[0].id = rig
-            var.targets[0].data_path = '["' + bpy.utils.escape_identifier(ik["blend_property"]) + '"]'
+            # Reverse pivots live beneath the animator's IK goal. Keep their
+            # orientation and toe offsets, but anchor the FK foot at the
+            # reachable ankle when the two-bone solver saturates.
+            constraints = [con]
+            for anchor, subtract in ((effector, True), (ik["solver_chain"][-1], False)):
+                offset = pose[space].constraints.new('COPY_LOCATION')
+                offset.target, offset.subtarget = rig, anchor
+                offset.owner_space = offset.target_space = 'POSE'
+                offset.use_offset = True
+                offset.invert_x = offset.invert_y = offset.invert_z = subtract
+                constraints.append(offset)
+            for constraint in constraints:
+                driver = constraint.driver_add("influence").driver
+                driver.type = 'AVERAGE'
+                var = driver.variables.new()
+                var.targets[0].id = rig
+                var.targets[0].data_path = '["' + bpy.utils.escape_identifier(ik["blend_property"]) + '"]'
             follow = pose[toe].constraints[0]
             follow.owner_space = follow.target_space = 'POSE'

@@ -100,6 +100,30 @@ def check_bind_hierarchy(rig):
     rig.update_tag()
     bpy.context.view_layer.update()
 
+    # The reverse pivots travel with the goal. Skin toes stay attached to
+    # the solved ankle, including when the goal lies beyond maximum stretch.
+    for side in ("L0", "R0"):
+        goal = rig.pose.bones["IK.leg_" + side + "_ankle"]
+        hip, mid, ankle = (rig.pose.bones[n] for n in goal["joints"])
+        toes = [rig.pose.bones[f"foot_{side}_{i}_jnt"] for i in range(2)]
+        offsets = [b.head - ankle.head for b in toes]
+        initial, limit = goal.matrix_basis.copy(), goal["maxstretch"]
+        rest_length = (mid.head-hip.head).length + (ankle.head-mid.head).length
+        for maximum in (1.0, 1.5):
+            goal["maxstretch"] = maximum
+            rig.update_tag()
+            for axis in ((0, 0, -1), (1 if side == "L0" else -1, 0, -0.5)):
+                m = goal.matrix.copy()
+                m.translation = hip.head + Vector(axis).normalized() * rest_length * 2.2
+                goal.matrix = m
+                bpy.context.view_layer.update()
+                assert (ankle.head-goal.head).length > rest_length * 0.65
+                for b, offset in zip(toes, offsets):
+                    assert (b.head-ankle.head-offset).length < 0.001, b.name
+        goal["maxstretch"], goal.matrix_basis = limit, initial
+        rig.update_tag()
+        bpy.context.view_layer.update()
+
     with tempfile.TemporaryDirectory() as directory:
         path = str(Path(directory)/"biped.fbx")
         assert bpy.ops.export_scene.fbx(filepath=path, use_selection=True, use_armature_deform_only=True,

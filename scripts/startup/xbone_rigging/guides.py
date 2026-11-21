@@ -3,6 +3,7 @@
 
 import json
 import math
+from pathlib import Path
 
 import bpy
 from mathutils import Matrix, Vector
@@ -11,6 +12,10 @@ from mathutils import Matrix, Vector
 def template_points(path, scale, up_axis):
     with open(path, encoding="utf-8") as stream:
         data = json.load(stream)
+    builtin = Path(__file__).with_name("biped.sgt")
+    biped = Path(path).resolve() == builtin or (
+        "global_C0" in data["components_dict"] and data == json.loads(builtin.read_text(encoding="utf-8"))
+    )
     specs = {}
     settings = {}
     components = data["components_dict"]
@@ -124,7 +129,7 @@ def template_points(path, scale, up_axis):
                 if curves:
                     shapes[key, role] = curves
                 break
-    return specs, shapes, settings
+    return specs, shapes, settings, (scale, up_axis) if biped else None
 
 
 def new_guide(context, name):
@@ -146,7 +151,7 @@ def joint(edit, name, point, parent=None, length=0.1):
 
 
 def import_template(context, template, name):
-    specs, shapes, settings = template
+    specs, shapes, settings, biped = template
     obj = new_guide(context, name)
     edit = obj.data.edit_bones
     names = {}
@@ -170,6 +175,13 @@ def import_template(context, template, name):
         if children:
             bone.tail = children[0].head
     bpy.ops.object.mode_set(mode='OBJECT')
+    if biped:
+        obj["biped_display_scale"], obj["biped_display_up"] = biped
+        for key, (label, *_) in specs.items():
+            bone = obj.data.bones[names[key]]
+            bone["biped_locator"] = label
+            bone["biped_frame"] = [v for row in bone.matrix_local for v in row]
+            bone["biped_length"] = bone.length
     for (key, role), curves in shapes.items():
         bone = obj.data.bones[names[key]]
         inverse = bone.matrix_local.to_3x3().inverted()

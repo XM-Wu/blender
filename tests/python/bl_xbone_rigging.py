@@ -9,12 +9,46 @@ import xbone_rigging
 from mathutils import Matrix, Vector
 
 
+def check_biped_display(rig):
+    source = json.loads(Path(xbone_rigging.__file__).with_name("biped_display.json").read_text())
+    assert source["source"].endswith("Maya 2027")
+    assert len(source["controls"]) == 123 and len(source["joints"]) == 106
+    offsets = {}
+    for name, record in source["controls"].items():
+        role, joint = record["role"], record["anchor"]
+        owner = rig.pose.bones["Display." + name if role == "display" else role + "." + joint]
+        mesh = owner.custom_shape.data
+        start = offsets.get(owner.name, 0)
+        for path in record["lines"]:
+            for x, y, z in path:
+                actual = owner.bone.matrix_local @ mesh.vertices[start].co
+                assert (actual - Vector((x,-z,y))*0.1).length < 0.00001, (name, start)
+                start += 1
+        offsets[owner.name] = start
+    for name, count in offsets.items():
+        assert count == len(rig.pose.bones[name].custom_shape.data.vertices)
+    for joint in source["joints"]:
+        assert not rig.data.bones["Display." + joint].use_deform
+    pole = rig.pose.bones["Pole.leg_L0_knee"]
+    old = pole.location.copy()
+    pole.location.x += 0.13
+    bpy.context.view_layer.update()
+    line = rig.pose.bones["Display.leg_L0.pole"]
+    assert (line.head - pole.head).length < 0.0001
+    assert (line.tail - rig.pose.bones["leg_L0_knee"].head).length < 0.0001
+    pole.location = old
+    bpy.context.view_layer.update()
+
+
 def check_biped_controls(rig):
     """Exercise every selectable widget in both endpoint modes via its pose transform."""
     pose = rig.pose.bones
     layer = bpy.context.view_layer
     switches = {p["blend_property"]: rig[p["blend_property"]] for p in pose if "blend_property" in p}
-    widgets = {p.name for p in pose if p.custom_shape}
+    widgets = {p.name for p in pose if p.custom_shape and not p.bone.hide_select}
+    extra = rig.data.collections["Additional FK"]
+    assert not extra.is_visible
+    extra.is_visible = True
     visited = set()
     assert not any("sizeRef" in n or "UI_" in n for n in widgets)
     for mode in (0.0, 1.0):
@@ -77,6 +111,7 @@ def check_biped_controls(rig):
                 target.matrix_basis = original_target
             layer.update()
     assert visited == widgets, widgets - visited
+    extra.is_visible = False
     for key, default in switches.items():
         rig[key] = default
     rig.update_tag()
@@ -162,6 +197,7 @@ assert guide.data.bones["shoulder_L0"].parent.name == "spine_C0_eff"
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
 assert sum(key.startswith("IK ") for key in rig.keys()) == 4
+check_biped_display(rig)
 check_biped_controls(rig)
 body = rig.pose.bones["FK.body_C0"]
 feet = [rig.pose.bones["leg_" + side + "_ankle"] for side in ("L0", "R0")]

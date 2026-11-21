@@ -282,6 +282,9 @@ class XBONE_PT_rigging(Panel):
             skeleton = obj.data.collections.get("Skeleton")
             if skeleton:
                 layout.prop(skeleton, "is_visible", text="Show Skeleton")
+            extra = obj.data.collections.get("Additional FK")
+            if extra and obj.data.collections.get("Biped Display"):
+                layout.prop(extra, "is_visible", text="Show Additional FK Controls")
             for control in obj.pose.bones:
                 prop = control.get("blend_property")
                 if prop:

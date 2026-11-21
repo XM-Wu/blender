@@ -205,6 +205,9 @@ def build(context, guide):
             var.targets[0].data_path = '["' + bpy.utils.escape_identifier(prop) + '"]'
             driver.expression = "blend >= 1" if name in fk_names else "blend <= 0"
     groups["Mechanism"].is_visible = groups["Skeleton"].is_visible = False
+    if "biped_display_scale" in guide:
+        from . import biped_display
+        biped_display.apply(rig, guide, fk)
     guide.hide_set(True)
     guide.hide_render = True
     return rig

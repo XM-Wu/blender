@@ -246,7 +246,7 @@ class TexelPackTest(unittest.TestCase):
         specs = [{'size': (1 + i * 0.3, 1), 'uv': (0.1 * i, 0.1)} for i in range(6)]
         ob, ranges = make_islands(specs)
         before = all_uvs(ob)
-        pack(rotation='FREE')
+        pack(rotation='FREE', heuristic_search=False)
         first = all_uvs(ob)
         bm = bmesh.from_edit_mesh(ob.data)
         layer = bm.loops.layers.uv.active
@@ -255,7 +255,7 @@ class TexelPackTest(unittest.TestCase):
             for loop in f.loops:
                 loop[layer].uv = next(it)
         bmesh.update_edit_mesh(ob.data)
-        pack(rotation='FREE')
+        pack(rotation='FREE', heuristic_search=False)
         self.assertEqual(first, all_uvs(ob))
 
     def test_rotation_and_flip_constraints(self):

@@ -9149,6 +9149,18 @@ def generate_keymaps(params=None):
     return [
         # Window, screen, area, region.
         km_window(params),
+        ("SDF Paint", {"space_type": 'EMPTY', "region_type": 'WINDOW'},
+         {"items": [("sdf.canvas_control", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+                    ("sdf.stroke", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+                    ("sdf.select_tool", {"type": 'Q', "value": 'PRESS'}, {"properties": [("tool", 'BRUSH')]}),
+                    ("sdf.select_tool", {"type": 'P', "value": 'PRESS'}, {"properties": [("tool", 'PEN')]}),
+                    ("sdf.radius", {"type": 'F', "value": 'PRESS'}, None),
+                    ("sdf.brush_setting", {"type": 'X', "value": 'PRESS'},
+                     {"properties": [("action", 'SWAP')]}),
+                    *[("sdf.brush_setting", {"type": key, "value": 'PRESS', "shift": shift, "repeat": True},
+                       {"properties": [("action", action)]})
+                      for key, action in (('LEFT_BRACKET', 'SMALLER'), ('RIGHT_BRACKET', 'LARGER'))
+                      for shift in (False, True)]]}),
         km_screen(params),
         km_screen_editing(params),
         km_screen_region_context_menu(params),

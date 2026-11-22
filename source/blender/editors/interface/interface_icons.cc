@@ -2182,6 +2182,7 @@ int icon_from_object_mode(const int mode)
     case OB_MODE_WEIGHT_PAINT:
     case OB_MODE_WEIGHT_GREASE_PENCIL:
       return ICON_WPAINT_HLT;
+    case OB_MODE_SDF_PAINT:
     case OB_MODE_TEXTURE_PAINT:
       return ICON_TPAINT_HLT;
     case OB_MODE_PARTICLE_EDIT:

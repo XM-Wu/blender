@@ -154,6 +154,21 @@ class ApplyAllTests(unittest.TestCase):
         self.assertIn(group_b, b.vertex_groups)
         self.assertEqual(keep.vertex_group, group_b)
 
+    def test_constraint_on_another_object_keeps_target_group(self):
+        obj, _ = self.targets()
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.object.quick_lattice()
+        name = obj.modifiers[0].vertex_group
+        follower = bpy.data.objects.new('Follower', None)
+        bpy.context.collection.objects.link(follower)
+        constraint = follower.constraints.new('COPY_LOCATION')
+        constraint.target = obj
+        constraint.subtarget = name
+        self.assertEqual(bpy.ops.object.lattice_apply_all(), {'FINISHED'})
+        self.assertIn(name, obj.vertex_groups)
+        self.assertEqual(constraint.subtarget, name)
+
     def test_apply_multiple_references_preserves_other_modifiers(self):
         a, b = self.targets()
         bpy.ops.object.quick_lattice()

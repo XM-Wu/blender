@@ -3665,6 +3665,35 @@ class _defs_sequencer_select:
         )
 
 
+_sdf_brush = ToolDef.from_dict(dict(
+    idname="builtin.sdf_paint",
+    label="SDF Brush",
+    icon="brush.generic",
+    keymap="SDF Paint",
+    cursor='PAINT_BRUSH',
+))
+
+
+_sdf_pen = ToolDef.from_dict(dict(
+    idname="builtin.sdf_pen",
+    label="SDF Pen",
+    description="Click surface points or drag Bezier handles, then press Enter to paint the line",
+    icon="ops.curve.pen",
+    keymap="SDF Paint",
+    cursor='CROSSHAIR',
+))
+
+
+_sdf_fill = ToolDef.from_dict(dict(
+    idname="builtin.sdf_fill",
+    label="Bucket Fill",
+    description="Fill a connected black or white region inside the active SDF mask",
+    icon="brush.paint_texture.fill",
+    keymap="SDF Paint",
+    cursor='CROSSHAIR',
+))
+
+
 class IMAGE_PT_tools_active(ToolSelectPanelHelper, Panel):
     bl_space_type = 'IMAGE_EDITOR'
     bl_region_type = 'TOOLS'
@@ -3761,6 +3790,7 @@ class IMAGE_PT_tools_active(ToolSelectPanelHelper, Panel):
         None: [
             # for all modes
         ],
+        'SDF': [_sdf_brush, _sdf_pen, _sdf_fill],
         'VIEW': [
             _defs_image_generic.sample,
             *_tools_annotate,
@@ -4245,6 +4275,7 @@ class VIEW3D_PT_tools_active(ToolSelectPanelHelper, Panel):
                 else ()
             ),
         ],
+        'PAINT_SDF': [_sdf_brush, _sdf_pen, _sdf_fill],
         'PAINT_TEXTURE': [
             _brush_tool,
             _defs_texture_paint.blur,

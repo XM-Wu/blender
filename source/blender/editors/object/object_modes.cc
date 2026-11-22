@@ -73,6 +73,9 @@ static const char *object_mode_op_string(eObjectMode mode)
   if (mode == OB_MODE_WEIGHT_PAINT) {
     return "PAINT_OT_weight_paint_toggle";
   }
+  if (mode == OB_MODE_SDF_PAINT) {
+    return "OBJECT_OT_sdf_paint_toggle";
+  }
   if (mode == OB_MODE_TEXTURE_PAINT) {
     return "PAINT_OT_texture_paint_toggle";
   }
@@ -109,7 +112,7 @@ bool mode_compat_test(const Object *ob, eObjectMode mode)
   switch (ob->type) {
     case OB_MESH:
       if (mode & (OB_MODE_EDIT | OB_MODE_SCULPT | OB_MODE_VERTEX_PAINT | OB_MODE_WEIGHT_PAINT |
-                  OB_MODE_TEXTURE_PAINT))
+                  OB_MODE_TEXTURE_PAINT | OB_MODE_SDF_PAINT))
       {
         return true;
       }
@@ -317,6 +320,13 @@ static bool ed_object_mode_generic_exit_ex(
       }
       ED_object_posemode_exit_ex(bmain, ob);
     }
+  }
+  else if (ob->mode & OB_MODE_SDF_PAINT) {
+    if (only_test) {
+      return true;
+    }
+    ob->mode = OB_MODE_OBJECT;
+    DEG_id_tag_update_ex(bmain, &ob->id, ID_RECALC_SYNC_TO_EVAL);
   }
   else if (ob->mode & OB_MODE_TEXTURE_PAINT) {
     if (only_test) {

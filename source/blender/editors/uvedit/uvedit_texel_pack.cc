@@ -1279,9 +1279,11 @@ static void texel_pack_endjob(void *job_v)
 
 static void texel_pack_freejob(void *job_v)
 {
-  WM_cursor_wait(false);
   TexelPackJob *job = static_cast<TexelPackJob *>(job_v);
-  WM_locked_interface_set(job->wm, false);
+  if (job->use_job) {
+    WM_cursor_wait(false);
+    WM_locked_interface_set(job->wm, false);
+  }
   free_islands(job->islands);
   MEM_delete(job);
 }
@@ -1363,6 +1365,12 @@ struct TexelPackModal {
   wmTimer *timer;
 };
 
+static TexelPackJob *texel_pack_job(bContext *C, const Scene *scene)
+{
+  return static_cast<TexelPackJob *>(
+      WM_jobs_customdata_from_type(CTX_wm_manager(C), scene, WM_JOB_TYPE_UV_TEXEL_PACK));
+}
+
 static void texel_pack_modal_free(bContext *C, wmOperator *op)
 {
   if (auto *modal = static_cast<TexelPackModal *>(op->customdata)) {
@@ -1375,8 +1383,7 @@ static void texel_pack_modal_free(bContext *C, wmOperator *op)
 static wmOperatorStatus texel_pack_modal(bContext *C, wmOperator *op, const wmEvent *event)
 {
   auto *modal = static_cast<TexelPackModal *>(op->customdata);
-  auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
-      CTX_wm_manager(C), modal->scene, WM_JOB_TYPE_UV_PACK));
+  TexelPackJob *job = texel_pack_job(C, modal->scene);
   if (!job) {
     texel_pack_modal_free(C, op);
     return OPERATOR_FINISHED;
@@ -1398,8 +1405,7 @@ static void texel_pack_cancel(bContext *C, wmOperator *op)
 {
   auto *modal = static_cast<TexelPackModal *>(op->customdata);
   if (modal) {
-    auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
-        CTX_wm_manager(C), modal->scene, WM_JOB_TYPE_UV_PACK));
+    TexelPackJob *job = texel_pack_job(C, modal->scene);
     if (job) {
       job->cancel_request.store(true, std::memory_order_relaxed);
     }
@@ -1463,7 +1469,7 @@ static wmOperatorStatus texel_pack_exec(bContext *C, wmOperator *op)
                                 scene,
                                 "Texel Packing UVs...",
                                 WM_JOB_PROGRESS,
-                                WM_JOB_TYPE_UV_PACK);
+                                WM_JOB_TYPE_UV_TEXEL_PACK);
     WM_jobs_customdata_set(wm_job, job, texel_pack_freejob);
     WM_jobs_timer(wm_job, 0.05, 0, 0, texel_pack_updatejob);
     WM_locked_interface_set_with_flags(job->wm, REGION_DRAW_LOCK_RENDER);
@@ -1498,6 +1504,7 @@ static bool texel_pack_poll(bContext *C)
   const Object *obedit = CTX_data_edit_object(C);
   return obedit && obedit->type == OB_MESH &&
          !CTX_wm_manager(C)->runtime->is_interface_locked &&
+         !texel_pack_job(C, CTX_data_scene(C)) &&
          !WM_jobs_customdata_from_type(CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK);
 }
 
@@ -1730,13 +1737,12 @@ void UV_OT_pack_to_others(wmOperatorType *ot)
 
 static bool texel_pack_control_poll(bContext *C)
 {
-  return WM_jobs_customdata_from_type(CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK) != nullptr;
+  return texel_pack_job(C, CTX_data_scene(C)) != nullptr;
 }
 
 static wmOperatorStatus texel_pack_control_exec(bContext *C, wmOperator *op)
 {
-  auto *job = static_cast<TexelPackJob *>(WM_jobs_customdata_from_type(
-      CTX_wm_manager(C), CTX_data_scene(C), WM_JOB_TYPE_UV_PACK));
+  TexelPackJob *job = texel_pack_job(C, CTX_data_scene(C));
   if (!job) {
     return OPERATOR_CANCELLED;
   }

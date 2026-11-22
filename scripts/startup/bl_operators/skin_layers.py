@@ -16,88 +16,10 @@ from bpy.props import (
 )
 from bpy.types import Operator, PropertyGroup
 
-
-def token():
-    return uuid.uuid4().hex[:12]
-
-
-def rig_modifier(obj):
-    if not obj or obj.type != 'MESH':
-        return None
-    mods = [m for m in obj.modifiers if m.type == 'ARMATURE']
-    if len(mods) == 1 and mods[0].object and mods[0].use_vertex_groups:
-        return mods[0]
-    return None
-
-
-def channels(obj):
-    mod = rig_modifier(obj)
-    if not mod:
-        return []
-    bones = mod.object.data.bones
-    return [g for g in obj.vertex_groups if g.skin_channel and
-            (bone := bones.get(g.name)) and bone.use_deform]
-
-
-def layer_key(state, layer):
-    return state.prefix + "_" + layer.key
-
-
-def read_values(mesh, key, default=0.0):
-    attr = mesh.attributes.get(key)
-    if attr is None:
-        return np.full(len(mesh.vertices), default, dtype=np.float32)
-    values = np.empty(len(mesh.vertices), dtype=np.float32)
-    attr.data.foreach_get("value", values)
-    return values
-
-
-def write_values(mesh, key, values):
-    attr = mesh.attributes.get(key)
-    if attr is None:
-        attr = mesh.attributes.new(key, 'FLOAT', 'POINT')
-    attr.data.foreach_set("value", np.ascontiguousarray(values, dtype=np.float32))
-
-
-def unique_storage(obj):
-    # Linked duplicates have their own layer metadata but initially share point attributes.
-    state = obj.skin_layers
-    if obj.data.users < 2 or not any(
-        other != obj and other.type == 'MESH' and other.data == obj.data and
-        other.skin_layers.prefix == state.prefix for other in bpy.data.objects
-    ):
-        return
-    old = state.prefix
-    state.prefix = ".skin_" + token()
-    mesh = obj.data
-    for key in tuple(mesh.attributes.keys()):
-        if key == old or key.startswith(old + "_"):
-            if key == old:
-                copy_marker(mesh, old, state.prefix)
-            else:
-                write_values(mesh, state.prefix + key[len(old):], read_values(mesh, key))
-    if "_skin_source" in obj:
-        obj["_skin_source"] = state.prefix
-
-
-def copy_marker(mesh, source, destination):
-    indices = np.arange(1, len(mesh.vertices) + 1, dtype=np.int32)
-    if source:
-        mesh.attributes[source].data.foreach_get("value", indices)
-    mesh.attributes.new(destination, 'INT', 'POINT').data.foreach_set("value", indices)
-
-
-def topology_error(obj):
-    state = obj.skin_layers
-    mesh = obj.data
-    marker = mesh.attributes.get(state.prefix)
-    if not marker or len(mesh.vertices) != state.vertex_count:
-        return "Mesh topology changed; restore the source topology before painting or baking"
-    ids = np.empty(len(mesh.vertices), dtype=np.int32)
-    marker.data.foreach_get("value", ids)
-    if not np.array_equal(ids, np.arange(1, len(ids) + 1, dtype=np.int32)):
-        return "Vertex order changed; restore the source topology before painting or baking"
-    return None
+from .skin_layers_storage import (
+    channels, copy_marker, layer_key, original_vertex_order, read_values, rig_modifier,
+    token, topology_error, unique_storage, write_values,
+)
 
 
 def current_layer(state):
@@ -444,12 +366,23 @@ class PAINT_OT_skin_layer_edit(Operator):
         if (error := topology_error(obj)):
             self.report({'ERROR'}, error)
             return {'CANCELLED'}
-        unique_storage(obj)
         i = state.index
         layer = current_layer(state)
         parent, key = layer.parent_key, layer.key
         siblings = [item.key for item in children(state, parent)]
         rank = siblings.index(key)
+        if self.action == 'MERGE' and rank == 0:
+            self.report({'WARNING'}, "No lower sibling in this group")
+            return {'CANCELLED'}
+        if self.action == 'DELETE' and len(list(subtree(state, layer))) == len(state.layers):
+            self.report({'WARNING'}, "Keep at least one root layer")
+            return {'CANCELLED'}
+        if self.action in {'UP', 'DOWN'}:
+            next_rank = rank + (1 if self.action == 'UP' else -1)
+            if not 0 <= next_rank < len(siblings):
+                return {'CANCELLED'}
+
+        unique_storage(obj)
         if self.action in {'ADD', 'GROUP'}:
             group = self.action == 'GROUP'
             item = add_layer(obj, "Group" if group else "Layer %d" % len(state.layers), parent, group)
@@ -465,24 +398,15 @@ class PAINT_OT_skin_layer_edit(Operator):
             state.layers[layer_index(state, key)].expanded = True
             add_layer(obj, "Child Layer", key)
         elif self.action == 'MERGE':
-            if rank == 0:
-                self.report({'WARNING'}, "No lower sibling in this group")
-                return {'CANCELLED'}
             merge_down(obj, state.layers[layer_index(state, siblings[rank - 1])], layer)
         elif self.action == 'DUPLICATE':
             new_key = duplicate_subtree(obj, layer, parent)
             state.layers.move(layer_index(state, new_key), i + 1)
             state.index = i + 1
         elif self.action == 'DELETE':
-            if len(list(subtree(state, layer))) == len(state.layers):
-                self.report({'WARNING'}, "Keep at least one root layer")
-                return {'CANCELLED'}
             remove_subtree(obj, layer)
             state.index = min(i, len(state.layers) - 1)
         else:
-            next_rank = rank + (1 if self.action == 'UP' else -1)
-            if not 0 <= next_rank < len(siblings):
-                return {'CANCELLED'}
             destination = layer_index(state, siblings[next_rank])
             state.layers.move(i, destination)
             state.index = destination
@@ -858,13 +782,7 @@ class PAINT_OT_skin_layer_stroke(Operator):
             return {'CANCELLED'}
         evaluated = obj.evaluated_get(context.evaluated_depsgraph_get())
         marker = evaluated.data.attributes.get(obj.skin_layers.prefix)
-        if marker and len(marker.data) == len(obj.data.vertices):
-            ids = np.empty(len(marker.data), dtype=np.int32)
-            marker.data.foreach_get("value", ids)
-            matched = np.array_equal(ids, np.arange(1, len(ids) + 1, dtype=np.int32))
-        else:
-            matched = False
-        if not matched:
+        if not original_vertex_order(marker, len(obj.data.vertices)):
             self.report({'WARNING'}, "Painting requires a viewport mesh with original vertex correspondence")
             return {'CANCELLED'}
         unique_storage(obj)

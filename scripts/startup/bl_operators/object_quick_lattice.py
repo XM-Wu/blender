@@ -132,7 +132,23 @@ def is_quick_lattice_group(name):
     return name == 'Quick Lattice' or (name.startswith('Quick Lattice.') and name[14:].isdigit())
 
 
-def group_still_used(obj, name):
+def constraint_uses_group(owner, obj, name):
+    constraints = list(owner.constraints)
+    if owner.pose:
+        for bone in owner.pose.bones:
+            constraints.extend(bone.constraints)
+    for constraint in constraints:
+        for target, subtarget in (('target', 'subtarget'), ('pole_target', 'pole_subtarget'),
+                                  ('space_object', 'space_subtarget')):
+            if getattr(constraint, target, None) == obj and getattr(constraint, subtarget, '') == name:
+                return True
+        if any(target.target == obj and target.subtarget == name for target in getattr(constraint, 'targets', ())
+               if hasattr(target, 'subtarget')):
+            return True
+    return False
+
+
+def group_still_used(obj, name, users):
     owners = list(obj.modifiers) + list(obj.constraints) + list(obj.particle_systems)
     for modifier in obj.modifiers:
         # Geometry Nodes may read a group by name through arbitrary node graphs.
@@ -152,7 +168,7 @@ def group_still_used(obj, name):
             if prop.type == 'STRING' and ('vertex_group' in prop.identifier or prop.identifier == 'subtarget'):
                 if getattr(owner, prop.identifier) == name:
                     return True
-    return False
+    return any(constraint_uses_group(owner, obj, name) for owner in users)
 
 
 class OBJECT_OT_lattice_apply_all(bpy.types.Operator):
@@ -181,6 +197,10 @@ class OBJECT_OT_lattice_apply_all(bpy.types.Operator):
                     self.report({'ERROR'}, 'Native modifier Apply does not support shape keys: ' + obj.name)
                     return {'CANCELLED'}
                 targets.append((obj, [m.name for m in modifiers]))
+
+        grouped = [obj for obj, names in targets
+                   if any(is_quick_lattice_group(obj.modifiers[name].vertex_group) for name in names)]
+        users = bpy.data.user_map(subset=grouped, value_types={'OBJECT'}) if grouped else {}
 
         editing = context.mode == 'EDIT_LATTICE'
         selected = list(context.selected_objects)
@@ -232,7 +252,7 @@ class OBJECT_OT_lattice_apply_all(bpy.types.Operator):
             bpy.data.objects.remove(stage, do_unlink=True)
             for name in groups:
                 group = obj.vertex_groups.get(name)
-                if group is not None and not group_still_used(obj, name):
+                if group is not None and not group_still_used(obj, name, users.get(obj, ())):
                     obj.vertex_groups.remove(group)
         for child in list(lattice.children):
             matrix = child.matrix_world.copy()

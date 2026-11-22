@@ -2046,6 +2046,52 @@ static bool object_mode_set_poll(bContext *C)
   return ED_operator_object_active_editable_ex(C, ob);
 }
 
+static wmOperatorStatus sdf_paint_toggle_exec(bContext *C, wmOperator *op)
+{
+  Object *active = CTX_data_active_object(C);
+  if (active->type != OB_MESH) {
+    return OPERATOR_CANCELLED;
+  }
+  const bool entering = active->mode != OB_MODE_SDF_PAINT;
+  if (entering && !mode_compat_set(C, active, OB_MODE_SDF_PAINT, op->reports)) {
+    return OPERATOR_CANCELLED;
+  }
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  Scene *scene = CTX_data_scene(C);
+  BKE_view_layer_synced_ensure(*CTX_data_main(C), scene, view_layer);
+  for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
+    Object *ob = base.object;
+    if (entering) {
+      if (ob->type != OB_MESH || ob->mode != OB_MODE_OBJECT ||
+          (ob != active && !BASE_SELECTED(CTX_wm_view3d(C), &base)) ||
+          !ID_IS_EDITABLE(ob)) {
+        continue;
+      }
+      ob->mode = OB_MODE_SDF_PAINT;
+    }
+    else if (ob->mode == OB_MODE_SDF_PAINT) {
+      ob->mode = OB_MODE_OBJECT;
+    }
+    else {
+      continue;
+    }
+    DEG_id_tag_update(&ob->id, ID_RECALC_SYNC_TO_EVAL | ID_RECALC_GEOMETRY);
+  }
+  WM_event_add_notifier(C, NC_SCENE | ND_MODE, scene);
+  WM_toolsystem_update_from_context_view3d(C);
+  return OPERATOR_FINISHED;
+}
+
+void OBJECT_OT_sdf_paint_toggle(wmOperatorType *ot)
+{
+  ot->name = "Toggle SDF Paint";
+  ot->idname = "OBJECT_OT_sdf_paint_toggle";
+  ot->description = "Enter or leave SDF painting for the selected meshes";
+  ot->exec = sdf_paint_toggle_exec;
+  ot->poll = object_mode_set_poll;
+  ot->flag = OPTYPE_UNDO;
+}
+
 static wmOperatorStatus object_mode_set_exec(bContext *C, wmOperator *op)
 {
   const bool use_submode = STREQ(op->idname, "OBJECT_OT_mode_set_with_submode");

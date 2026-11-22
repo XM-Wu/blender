@@ -339,6 +339,9 @@ static void view3d_main_region_init(wmWindowManager *wm, ARegion *region)
   wmKeyMap *keymap;
 
   /* object ops. */
+  keymap = WM_keymap_ensure(wm->runtime->defaultconf, "SDF Paint", SPACE_EMPTY, RGN_TYPE_WINDOW);
+  WM_event_add_keymap_handler(&region->runtime->handlers, keymap);
+
 
   /* important to be before Pose keymap since they can both be enabled at once */
   keymap = WM_keymap_ensure(wm->runtime->defaultconf,

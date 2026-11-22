@@ -313,12 +313,14 @@ const EnumPropertyItem rna_enum_space_action_mode_items[] = {
 #define SI_ITEM_VIEW(identifier, name, icon) \
   {SI_MODE_VIEW, identifier, icon, name, "Inspect images or render results"}
 #define SI_ITEM_UV {SI_MODE_UV, "UV", ICON_UV, "UV Editor", "View and edit UVs"}
+#define SI_ITEM_SDF {SI_MODE_SDF, "SDF", ICON_IMAGE_DATA, "SDF Editor", "Paint facial shadow thresholds"}
 #define SI_ITEM_PAINT {SI_MODE_PAINT, "PAINT", ICON_TPAINT_HLT, "Paint", "Paint images in 2D"}
 #define SI_ITEM_MASK {SI_MODE_MASK, "MASK", ICON_MOD_MASK, "Mask", "View and edit masks"}
 
 const EnumPropertyItem rna_enum_space_image_mode_all_items[] = {
     SI_ITEM_VIEW("VIEW", "View", ICON_FILE_IMAGE),
     SI_ITEM_UV,
+    SI_ITEM_SDF,
     SI_ITEM_PAINT,
     SI_ITEM_MASK,
     {0, nullptr, 0, nullptr, nullptr},
@@ -334,11 +336,13 @@ static const EnumPropertyItem rna_enum_space_image_mode_ui_items[] = {
 const EnumPropertyItem rna_enum_space_image_mode_items[] = {
     SI_ITEM_VIEW("IMAGE_EDITOR", "Image Editor", ICON_IMAGE),
     SI_ITEM_UV,
+    SI_ITEM_SDF,
     {0, nullptr, 0, nullptr, nullptr},
 };
 
 #undef SI_ITEM_VIEW
 #undef SI_ITEM_UV
+#undef SI_ITEM_SDF
 #undef SI_ITEM_PAINT
 #undef SI_ITEM_MASK
 

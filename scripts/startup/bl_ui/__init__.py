@@ -78,6 +78,7 @@ _modules = [
     "space_filebrowser",
     "space_graph",
     "space_image",
+    "space_sdf",
     "space_info",
     "space_nla",
     "space_node",
@@ -127,6 +128,7 @@ def register():
             register_class(cls)
 
     space_filebrowser.register_props()
+    space_sdf.register_runtime()
     properties_paint_common.register()
 
     from bpy.props import (
@@ -186,6 +188,7 @@ def unregister():
     from bpy.utils import unregister_class
 
     properties_paint_common.unregister()
+    space_sdf.unregister_runtime()
 
     for mod in reversed(_modules_loaded):
         for cls in reversed(mod.classes):

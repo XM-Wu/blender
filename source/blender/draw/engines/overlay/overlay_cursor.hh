@@ -196,6 +196,7 @@ class Cursor : Overlay {
       case SI_MODE_VIEW:
         return false;
         break;
+      case SI_MODE_SDF:
       case SI_MODE_PAINT:
         return false;
         break;

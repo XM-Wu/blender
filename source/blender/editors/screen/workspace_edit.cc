@@ -595,6 +595,7 @@ static void workspace_add_menu_draw(ui::Layout &layout)
   }
   layout.separator();
 
+  layout.op("SDF_OT_workspace", IFACE_("SDF Paint"), ICON_TPAINT_HLT);
   layout.menu_fn(IFACE_("General"), ICON_NONE, workspace_add_menu, nullptr);
 
   ListBaseT<LinkData> templates;

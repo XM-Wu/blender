@@ -933,6 +933,22 @@ class VIEW3D_HT_header(Header):
         )
         del act_mode_item
 
+        if object_mode == 'SDF_PAINT':
+            from .space_sdf import draw_brush_ink, draw_brush_radius, draw_onion_control, draw_wire_control, key_at
+            settings = context.scene.sdf_editor
+            draw_brush_ink(layout, settings)
+            draw_brush_radius(layout, context)
+            draw_wire_control(layout, context)
+            draw_onion_control(layout, context)
+            layout.menu("SDF_MT_fill", text="Fill")
+            if not context.workspace.get("sdf_paint_layout"):
+                layout.operator("sdf.workspace", text="SDF Paint Workspace", icon='WORKSPACE')
+            if not settings.mask:
+                layout.operator("sdf.add_mask", icon='ADD')
+            elif not settings.auto_key and not key_at(settings.mask, settings.value):
+                layout.operator("sdf.key", text="Add Paint Key", icon='KEY_HLT')
+            else:
+                layout.label(text=f"{settings.mask.name}  {settings.value:.4f}", icon='KEY_HLT')
         layout.template_header_3D_mode()
 
         # Contains buttons like Mode, Pivot, Layer, Mesh Select Mode...
@@ -1275,7 +1291,7 @@ class VIEW3D_MT_editor_menus(Menu):
                 layout.menu("VIEW3D_MT_select_paint_mask_vertex")
         elif mode_string not in {
                 'SCULPT', 'SCULPT_CURVES', 'SCULPT_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL',
-                'VERTEX_GREASE_PENCIL',
+                'VERTEX_GREASE_PENCIL', 'PAINT_SDF',
         }:
             layout.menu("VIEW3D_MT_select_" + mode_string.lower())
 
@@ -1319,7 +1335,7 @@ class VIEW3D_MT_editor_menus(Menu):
 
         elif obj:
             if mode_string not in {
-                'PAINT_TEXTURE', 'SCULPT_CURVES', 'PAINT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL'
+                'PAINT_TEXTURE', 'PAINT_SDF', 'SCULPT_CURVES', 'PAINT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL'
             }:
                 layout.menu("VIEW3D_MT_" + mode_string.lower())
             if mode_string == 'SCULPT':

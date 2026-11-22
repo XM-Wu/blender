@@ -794,6 +794,7 @@ enum eSpaceImage_Mode : char {
   SI_MODE_PAINT = 1,
   SI_MODE_MASK = 2,
   SI_MODE_UV = 3,
+  SI_MODE_SDF = 4,
 };
 
 /** #SpaceImage.flag */

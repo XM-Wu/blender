@@ -854,6 +854,13 @@ class IMAGE_HT_header(Header):
 
         layout.template_header()
 
+        if sima.mode == 'SDF':
+            from .space_sdf import draw_header
+            draw_header(layout, context)
+            return
+
+        from . import sdf_controls
+        sdf_controls.leave_space(context.area)
         if sima.mode == 'UV':
             layout.prop(context.scene, "uv_tools_distortion", text="", toggle=True, icon='COLOR')
             layout.prop(context.scene, "uv_tools_distortion_metric", text="")

@@ -1003,6 +1003,11 @@ static void object_get_datamask(const Depsgraph &depsgraph,
   if (actob) {
     actob = DEG_get_original(actob);
   }
+  if (ob.mode & OB_MODE_SDF_PAINT) {
+    /* Resolve strokes on evaluated surfaces back to the selected UV faces. */
+    r_mask.pmask |= CD_MASK_ORIGINDEX;
+    r_mask.lmask |= CD_MASK_PROP_FLOAT2;
+  }
   if (DEG_get_original(&ob) == actob) {
     bool editing = BKE_paint_select_face_test(actob);
 

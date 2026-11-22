@@ -133,6 +133,9 @@ const EnumPropertyItem rna_enum_space_type_items[] = {
      "Edit drivers and keyframe interpolation"},
     {SPACE_NLA, "NLA_EDITOR", ICON_NLA, "Nonlinear Animation", "Combine and layer Actions"},
 
+    {SPACE_RIGGING, "RIGGING", ICON_BONE_DATA, "Rigging", "Build and edit XBone character rigs"},
+    {SPACE_SELECTOR, "SELECTOR", ICON_ARMATURE_DATA, "Selector", "Select rig controls on a 2D picker"},
+
     /* Scripting. */
     RNA_ENUM_ITEM_HEADING(N_("Scripting"), nullptr),
     {SPACE_TEXT,
@@ -833,6 +836,10 @@ static StructRNA *rna_Space_refine(PointerRNA *ptr)
       return RNA_SpaceClipEditor;
     case SPACE_SPREADSHEET:
       return RNA_SpaceSpreadsheet;
+    case SPACE_RIGGING:
+      return RNA_SpaceRigging;
+    case SPACE_SELECTOR:
+      return RNA_SpaceSelector;
     case SPACE_WEIGHT_LAYERS:
       return RNA_SpaceWeightLayers;
     case SPACE_PROJECT:
@@ -9840,6 +9847,20 @@ void RNA_def_space(BlenderRNA *brna)
   StructRNA *weight_layers = RNA_def_struct(brna, "SpaceWeightLayers", "Space");
   RNA_def_struct_sdna(weight_layers, "SpaceLink");
   RNA_def_struct_ui_text(weight_layers, "Weight Layers", "Layered skin weight editor");
+  StructRNA *rigging = RNA_def_struct(brna, "SpaceRigging", "Space");
+  RNA_def_struct_sdna(rigging, "SpaceLink");
+  RNA_def_struct_ui_text(rigging, "Rigging", "XBone guide and rig editor");
+  StructRNA *selector = RNA_def_struct(brna, "SpaceSelector", "Space");
+  RNA_def_struct_ui_text(selector, "Selector", "Rig control picker");
+  PropertyRNA *prop = RNA_def_property(selector, "page", PROP_INT, PROP_NONE);
+  RNA_def_property_range(prop, 0, INT_MAX);
+  RNA_def_property_ui_text(prop, "Page", "Active picker page");
+  prop = RNA_def_property(selector, "zoom", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_range(prop, 0.1f, 20.0f);
+  RNA_def_property_ui_text(prop, "Zoom", "Picker magnification relative to fit");
+  prop = RNA_def_property(selector, "pan", PROP_FLOAT, PROP_XYZ);
+  RNA_def_property_array(prop, 2);
+  RNA_def_property_ui_text(prop, "Pan", "Picker view offset in board coordinates");
   rna_def_space_info(brna);
   rna_def_space_userpref(brna);
   rna_def_node_tree_path(brna);

@@ -2465,6 +2465,16 @@ def km_node_editor(params):
 # ------------------------------------------------------------------------------
 # Editor (Info)
 
+def km_selector(_params):
+    return ("Selector", {"space_type": 'SELECTOR', "region_type": 'WINDOW'}, {"items": [
+        ("xbone.selector_pick", {"type": 'LEFTMOUSE', "value": 'PRESS', "any": True}, None),
+        ("xbone.selector_context", {"type": 'RIGHTMOUSE', "value": 'PRESS'}, None),
+        *(("xbone.selector_view", {"type": key, "value": 'PRESS'}, {"properties": [("operation", operation)]})
+          for key, operation in (('MIDDLEMOUSE', 'PAN'), ('WHEELUPMOUSE', 'IN'), ('WHEELDOWNMOUSE', 'OUT'),
+                                 ('F', 'FRAME'), ('HOME', 'FRAME'))),
+    ]})
+
+
 def km_info(params):
     items = []
     keymap = (
@@ -9178,6 +9188,7 @@ def generate_keymaps(params=None):
         km_node_editor(params),
         km_spreadsheet_generic(params),
         km_info(params),
+        km_selector(params),
         km_file_browser(params),
         km_file_browser_main(params),
         km_file_browser_buttons(params),

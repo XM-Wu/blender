@@ -117,3 +117,4 @@ scripts/modules/_bpy_internal/assets/remote_library/*_openapi.py linguist-genera
 # The customized factory workspace ships in Git because this public fork cannot upload new LFS objects.
 /release/datafiles/startup.blend -filter -diff -merge -text
 /scripts/presets/workspaces/sdf_paint.blend -filter -diff -merge -text
+/scripts/presets/workspaces/rigging.blend -filter -diff -merge -text

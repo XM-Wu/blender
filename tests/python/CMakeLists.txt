@@ -812,6 +812,29 @@ if(WITH_IO_FBX)
   set_tests_properties(bl_io_xbone_fbx PROPERTIES LABELS "xblender")
 endif()
 
+if(WITH_IK_SOLVER AND WITH_IO_FBX)
+  add_blender_test(
+    bl_xbone_rigging
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging.py
+  )
+  add_blender_test(
+    bl_xbone_selector
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
+  )
+  add_blender_test(
+    bl_xbone_rigging_editor
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging_editor.py
+  )
+  add_blender_test(
+    bl_xbone_xbiped
+    --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_xbiped.py
+  )
+  set_tests_properties(
+    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_xbiped
+    PROPERTIES LABELS "xblender"
+  )
+endif()
+
 if(WITH_IK_SOLVER AND WITH_IK_ITASC)
   add_blender_test(
     bl_xbone_ik

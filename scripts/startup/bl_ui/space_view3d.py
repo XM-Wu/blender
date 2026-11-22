@@ -810,7 +810,7 @@ class VIEW3D_HT_header(Header):
                 row.prop_enum(obj.data, "display_type", 'WIRE', text="Wire")
 
         if context.mode == 'EDIT_ARMATURE' and obj.data.is_xbone:
-            layout.prop(obj.data, "use_xbone_rotate_children", text="Rotate Children",
+            layout.prop(obj.data, "use_xbone_transform_children", text="Transform Children",
                         icon='CON_CHILDOF', toggle=True)
             layout.popover(panel="VIEW3D_PT_xbone_orientation", text="Joint Orient")
 

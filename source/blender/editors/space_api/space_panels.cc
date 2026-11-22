@@ -15,13 +15,15 @@
 
 namespace blender {
 
-static SpaceLink *weight_layers_create(const ScrArea *, const Scene *)
+template<eSpace_Type Type> static SpaceLink *panel_space_create(const ScrArea *, const Scene *)
 {
   SpaceLink *space = MEM_new<SpaceLink>(__func__);
-  space->spacetype = SPACE_WEIGHT_LAYERS;
+  space->spacetype = Type;
   ARegion *header = BKE_area_region_new();
   header->regiontype = RGN_TYPE_HEADER;
-  header->alignment = RGN_ALIGN_BOTTOM;
+  header->alignment = (Type == SPACE_WEIGHT_LAYERS || (U.uiflag & USER_HEADER_BOTTOM)) ?
+                          RGN_ALIGN_BOTTOM :
+                          RGN_ALIGN_TOP;
   BLI_addtail(&space->regionbase, header);
   ARegion *window = BKE_area_region_new();
   window->regiontype = RGN_TYPE_WINDOW;
@@ -30,13 +32,13 @@ static SpaceLink *weight_layers_create(const ScrArea *, const Scene *)
   return space;
 }
 
-void ED_spacetype_weight_layers()
+template<eSpace_Type Type> static void register_panel_space(const char *name)
 {
   auto st = std::make_unique<SpaceType>();
-  st->spaceid = SPACE_WEIGHT_LAYERS;
-  STRNCPY(st->name, "Weight Layers");
+  st->spaceid = Type;
+  STRNCPY(st->name, name);
   st->struct_size = sizeof(SpaceLink);
-  st->create = weight_layers_create;
+  st->create = panel_space_create<Type>;
   st->duplicate = [](SpaceLink *space) { return MEM_dupalloc(space); };
   st->blend_write = [](BlendWriter *writer, SpaceLink *space) { writer->write_struct(space); };
 
@@ -58,8 +60,21 @@ void ED_spacetype_weight_layers()
   header->init = [](wmWindowManager *, ARegion *region) { ED_region_header_init(region); };
   header->layout = ED_region_header_layout;
   header->draw = ED_region_header_draw;
+  if (Type == SPACE_RIGGING) {
+    header->listener = window->listener;
+  }
   BLI_addtail(&st->regiontypes, header);
   BKE_spacetype_register(std::move(st));
+}
+
+void ED_spacetype_weight_layers()
+{
+  register_panel_space<SPACE_WEIGHT_LAYERS>("Weight Layers");
+}
+
+void ED_spacetype_rigging()
+{
+  register_panel_space<SPACE_RIGGING>("Rigging");
 }
 
 }  // namespace blender

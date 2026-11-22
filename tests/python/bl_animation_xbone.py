@@ -63,6 +63,44 @@ def verify_edit_rotation(rig):
     bpy.context.scene.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
 
 
+def verify_edit_transform(rig):
+    arm = rig.data
+    joints = arm.edit_bones
+    initial = {j.name: (j.head.copy(), j.tail.copy(), j.roll) for j in joints}
+    area = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    pivot = initial["Trunk"][0]
+    def reset():
+        for j in joints:
+            j.head, j.tail, j.roll = initial[j.name]
+            j.select = j.select_head = j.select_tail = j.name == "Trunk"
+        joints.active = joints["Trunk"]
+    with bpy.context.temp_override(area=area, region=region):
+        bpy.context.scene.tool_settings.transform_pivot_point = 'ACTIVE_ELEMENT'
+        for follow in (True, False):
+            arm.use_xbone_transform_children = follow
+            assert arm.use_xbone_rotate_children == follow
+            for operation in ("translate", "scale", "position"):
+                reset()
+                delta = Vector((0.7, -0.4, 0.3))
+                factors = Vector((2.0, 0.5, 1.5))
+                if operation == "translate":
+                    bpy.ops.transform.translate(value=delta)
+                elif operation == "scale":
+                    bpy.ops.transform.resize(value=factors, orient_type='GLOBAL')
+                else:
+                    joints["Trunk"].joint_position = pivot + delta
+                for name in ("Trunk", "Tip", "Branch", "Root"):
+                    for actual, original in zip((joints[name].head, joints[name].tail), initial[name][:2]):
+                        expected = original
+                        if name == "Trunk" or (follow and name in {"Tip", "Branch"}):
+                            expected = pivot + factors * (original - pivot) if operation == "scale" else original + delta
+                        near(actual, expected)
+        reset()
+        arm.use_xbone_transform_children = True
+        bpy.context.scene.tool_settings.transform_pivot_point = 'MEDIAN_POINT'
+
+
 def make_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.object.armature_add()
@@ -112,6 +150,7 @@ def make_scene():
     near(branch.joint_orientation, frame)
     branch.joint_position = (2, 0, 2)
     verify_edit_rotation(rig)
+    verify_edit_transform(rig)
     bpy.ops.object.mode_set(mode='POSE')
     for name in ("Branch", "Trunk"):
         joint = rig.pose.bones[name]

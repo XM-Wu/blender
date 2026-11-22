@@ -80,6 +80,11 @@ def _keymap_items(keyconfig_data, km_name):
 
 
 def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
+    outliner = _keymap_items(keyconfig_data, "Outliner")
+    for index, (operator, event, options) in enumerate(outliner):
+        if operator == "outliner.delete" and event == {"type": 'DEL', "value": 'PRESS'}:
+            outliner[index] = (operator, event, {"properties": [("hierarchy", True)]})
+
     # Move Frame All off A before assigning Apply, removing any Alt+F conflict.
     view_items = _keymap_items(keyconfig_data, '3D View')
     view_items[:] = [item for item in view_items if not (

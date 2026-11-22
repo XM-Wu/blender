@@ -49,6 +49,7 @@
 #include "draw_manager_text.hh"
 
 #include "overlay_armature.hh"
+#include "overlay_armature_guide.hh"
 
 #include "draw_cache_impl.hh"
 
@@ -2106,6 +2107,7 @@ static void bone_draw_update_display_matrix(const eArmature_Drawtype drawtype,
 
 void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
 {
+  ShifterGuideDrawing guide(*ctx);
   Object *ob = ctx->ob;
   EditBone *eBone;
   int index;
@@ -2170,7 +2172,14 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
       draw_bone_relations(ctx, bone, boneflag);
     }
 
-    if (xbone) {
+    if (xbone && guide.enabled()) {
+      float4x4 frame;
+      ED_armature_ebone_to_mat4(eBone, frame.ptr());
+      guide.add(frame, eBone->prop, eBone->parent ? eBone->parent->head : nullptr,
+                select_id, boneflag & BONE_SELECTED);
+      draw_bone_update_disp_matrix_default(bone);
+    }
+    else if (xbone) {
       draw_xbone_joint(ctx, bone, boneflag, select_id, child_origins.lookup(eBone), reference_size);
     }
     else {
@@ -2191,10 +2200,12 @@ void Armatures::draw_armature_edit(Armatures::DrawContext *ctx)
       }
     }
   }
+  guide.finish();
 }
 
 void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
 {
+  ShifterGuideDrawing guide(*ctx);
   Object *ob = ctx->ob;
   const DRWContext *draw_ctx = DRW_context_get();
   const Scene *scene = draw_ctx->scene;
@@ -2326,7 +2337,12 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       draw_bone_relations(ctx, bone_ptr, boneflag);
     }
 
-    if (xbone && !use_custom_shape) {
+    if (xbone && guide.enabled()) {
+      guide.add(float4x4(pchan->pose_mat), bone->prop, pchan->parent ? pchan->parent->pose_head : nullptr,
+                select_id, boneflag & BONE_SELECTED);
+      draw_bone_update_disp_matrix_default(bone_ptr);
+    }
+    else if (xbone && !use_custom_shape) {
       draw_xbone_joint(ctx, bone_ptr, boneflag, select_id, child_origins.lookup(pchan), reference_size);
     }
     else {
@@ -2352,6 +2368,7 @@ void Armatures::draw_armature_pose(Armatures::DrawContext *ctx)
       draw_axes(ctx, bone_ptr, arm);
     }
   }
+  guide.finish();
 }
 
 /** \} */

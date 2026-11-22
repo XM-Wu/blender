@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import bpy
+from bpy.app.handlers import persistent
 from bpy.props import EnumProperty, FloatProperty, StringProperty
 from bpy.types import Header, Operator, Panel
 from bpy_extras.io_utils import ImportHelper
@@ -11,6 +12,32 @@ from mathutils import Vector
 from . import builder, guides, rebuild
 from . import guide_display, selector
 from .guide_symmetry import XBONE_OT_symmetrize_guide
+
+
+def ensure_rigging_workspace():
+    for workspace in bpy.data.workspaces:
+        if workspace.library is None and workspace.get("xbone_rigging_workspace"):
+            return workspace
+    path = Path(__file__).resolve().parents[2] / "presets/workspaces/rigging.blend"
+    with bpy.data.libraries.load(str(path)) as (_, data):
+        data.workspaces = ["Rigging"]
+    return data.workspaces[0]
+
+
+@persistent
+def add_factory_workspace(_):
+    if not bpy.context.preferences.app_template:
+        ensure_rigging_workspace()
+
+
+class XBONE_OT_workspace(Operator):
+    bl_idname = "xbone.workspace"
+    bl_label = "Rigging Workspace"
+    bl_description = "Open the XBone rigging workspace"
+
+    def execute(self, context):
+        context.window.workspace = ensure_rigging_workspace()
+        return {'FINISHED'}
 
 
 class XBONE_OT_biped_guide(Operator):
@@ -469,7 +496,7 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
                     op.control, op.mode = control.name, mode
 
 
-classes = (XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
+classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
@@ -480,8 +507,10 @@ _register, _unregister = bpy.utils.register_classes_factory(classes)
 def register():
     _register()
     selector.register()
+    bpy.app.handlers.load_factory_startup_post.append(add_factory_workspace)
 
 
 def unregister():
+    bpy.app.handlers.load_factory_startup_post.remove(add_factory_workspace)
     selector.unregister()
     _unregister()

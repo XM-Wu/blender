@@ -11,7 +11,30 @@ def window_region(area):
     return next(r for r in area.regions if r.type == 'WINDOW')
 
 
+def check_workspace(workspace):
+    screen, = workspace.screens
+    areas = {area.type: area for area in screen.areas}
+    assert len(screen.areas) == len(areas) == 4
+    view, rig, tree, props = (areas[k] for k in ('VIEW_3D', 'RIGGING', 'OUTLINER', 'PROPERTIES'))
+    assert view.x < rig.x < tree.x == props.x
+    assert view.y == rig.y == props.y < tree.y
+    assert view.height == rig.height
+    assert tree.width == props.width
+    width = view.width + rig.width + tree.width
+    for size, ratio in zip((view.width, rig.width, tree.width), (.634, .188, .178)):
+        assert abs(size / width - ratio) < .015
+    assert abs(tree.height / (tree.height + props.height) - .185) < .015
+    assert tree.spaces.active.display_mode == 'VIEW_LAYER'
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
+workspace = bpy.data.workspaces["Rigging"]
+check_workspace(workspace)
+assert ui.ensure_rigging_workspace() == workspace
+# Opening the preset in an existing file reuses a previously renamed tab.
+workspace.name = "Character Setup"
+assert ui.ensure_rigging_workspace() == workspace
+workspace.name = "Rigging"
 viewport = next(a for a in bpy.context.screen.areas if a.type == 'VIEW_3D')
 area = next(a for a in bpy.context.screen.areas if a.type == 'PROPERTIES')
 area.ui_type = 'RIGGING'
@@ -52,6 +75,7 @@ with tempfile.TemporaryDirectory() as temp:
     filename = str(Path(temp) / "rigging-editor.blend")
     bpy.ops.wm.save_as_mainfile(filepath=filename)
     bpy.ops.wm.open_mainfile(filepath=filename)
+    check_workspace(bpy.data.workspaces["Rigging"])
     area = next(a for a in bpy.context.screen.areas if a.type == 'RIGGING')
     assert isinstance(area.spaces.active, bpy.types.SpaceRigging)
     assert any(a.type == 'VIEW_3D' for a in bpy.context.screen.areas)

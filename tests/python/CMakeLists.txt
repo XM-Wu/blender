@@ -375,6 +375,7 @@ foreach(test_name IN ITEMS
   skin_layers
   skin_layers_v2
   skin_layer_brush
+  skin_layer_io
   uv_fit_align
   uv_fit_lifetime
   uv_group_buttons

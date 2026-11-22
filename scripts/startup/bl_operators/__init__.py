@@ -38,6 +38,7 @@ _modules = [
     "rigidbody",
     "screen_play_rendered_anim",
     "skin_layers",
+    "skin_layers_io",
     "skin_layers_tools",
     "sequencer",
     "spreadsheet",

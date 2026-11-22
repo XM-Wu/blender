@@ -27748,6 +27748,42 @@ msgid "Show Skeleton"
 msgstr "显示骨架"
 
 
+msgid "Import Layers"
+msgstr "导入层"
+
+
+msgid "Export Layers"
+msgstr "导出层"
+
+
+msgid "Import Skin Layers"
+msgstr "导入蒙皮权重层"
+
+
+msgid "Export Skin Layers"
+msgstr "导出蒙皮权重层"
+
+
+msgid "Vertex Matching"
+msgstr "顶点匹配方式"
+
+
+msgid "Closest Surface Point"
+msgstr "最近表面点"
+
+
+msgid "UV Space"
+msgstr "UV 空间"
+
+
+msgid "Vertex ID"
+msgstr "顶点编号"
+
+
+msgid "Source UV Mesh"
+msgstr "源 UV 网格"
+
+
 msgid "Local mesh axis used to pair symmetric faces"
 msgstr "按此模型局部轴配对对称面"
 

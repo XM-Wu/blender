@@ -124,6 +124,9 @@ class WEIGHT_LAYERS_PT_layers(Panel):
             if "_skin_source" in obj:
                 layout.operator("paint.skin_source", text="Return to Native").layered = False
             return
+        files = layout.row(align=True)
+        files.operator("paint.skin_import_layers", text="Import Layers", icon='IMPORT')
+        files.operator("paint.skin_export_layers", text="Export Layers", icon='EXPORT')
         if not state.prefix:
             layout.operator("paint.skin_source", text="Create Layers from Weights", icon='ADD')
             return

@@ -128,7 +128,32 @@ def plans(guide):
     return output
 
 
-def build(rig, guide, output, skeleton, mechanism):
+def attachment_joint(parent, output):
+    """Find the skin output of the selected guide component, even on a renamed guide."""
+    for anchor in (parent, *parent.parent_recursive):
+        label = anchor.get("biped_locator")
+        if not label:
+            continue
+        kind, side, *rest = label.split("_", 2)
+        component = kind + "_" + side + "_"
+        locator = rest[0] if rest else "root"
+        candidates = [name for name in output if name.startswith(component)]
+        if not candidates:
+            continue
+        if kind in {"arm", "leg"} and locator in {"wrist", "ankle", "eff"}:
+            return component + "end_jnt"
+        if kind == "neck" and locator in {"head", "eff"}:
+            return component + "head_jnt"
+        if kind == "eye":
+            return component + "eye_jnt"
+        # Division counts and edited guides change the set of available joints.
+        # Measure from the attachment locator, not from the offset branch.
+        return min(candidates, key=lambda name: (output[name][1].translation - anchor.head_local).length_squared)
+    # Global/body control components have no skin output of their own.
+    return "spine_C0_0_jnt"
+
+
+def build(rig, guide, output, skeleton, mechanism, fk):
     arm = rig.data
     guide_names = [b.name for b in skeleton.bones if "biped_locator" in b]
     bpy.ops.object.mode_set(mode='EDIT')
@@ -163,8 +188,50 @@ def build(rig, guide, output, skeleton, mechanism):
     for name, (parent, *_) in output.items():
         if parent:
             edit[name].parent = edit[parent]
+    custom_links = []
+    for source in guide.data.bones:
+        if "biped_locator" in source or source.name not in fk or not source.use_deform or not source.parent:
+            continue
+        parent = source.parent.name
+        if "biped_locator" in source.parent:
+            parent = attachment_joint(source.parent, output)
+            # The deformation bone and its FK input must inherit the same rest
+            # offset. XBone draws between joint pivots; keep the authored offset.
+            for n in (source.name, fk[source.name], "MCH." + source.name, "MCH.Reach." + source.name):
+                b = edit.get(n)
+                if b and b.parent == edit[source.parent.name]:
+                    b.use_connect = False
+                    b.parent = edit[parent]
+        # Draw the attachment also when the skin skeleton is hidden. Using
+        # the solved pivots keeps this line correct for animated translations.
+        offset = edit[source.name].head - edit[parent].head
+        frame = offset.to_track_quat('Y', 'Z').to_matrix().to_4x4()
+        frame.translation = edit[parent].head
+        link = joint("Display.Link." + source.name, frame, mechanism)
+        mechanism.unassign(edit[link])
+        for collection in edit[fk[source.name]].collections:
+            collection.assign(edit[link])
+        edit[link].hide_select = True
+        custom_links.append((link, parent, source.name, fk[source.name], max(offset.length, 1e-6)))
     bpy.ops.object.mode_set(mode='POSE')
     for name, target in followers.items():
         follow = rig.pose.bones[name].constraints.new('COPY_TRANSFORMS')
         follow.target, follow.subtarget = rig, target
         follow.owner_space = follow.target_space = 'POSE'
+    if custom_links:
+        from . import biped_display
+        widget = biped_display.shape(rig.name + ".FK Link", [[(0, 0, 0), (0, 1, 0)]])
+        for name, start, end, control, length in custom_links:
+            link = rig.pose.bones[name]
+            biped_display.configure(link, widget, "link")
+            link.custom_shape_scale_xyz = (1, length, 1)
+            origin = link.constraints.new('COPY_LOCATION')
+            origin.target, origin.subtarget = rig, start
+            aim = link.constraints.new('STRETCH_TO')
+            aim.target, aim.subtarget = rig, end
+            aim.rest_length, aim.volume = length, 'NO_VOLUME'
+            driver = link.driver_add("hide").driver
+            driver.type = 'AVERAGE'
+            var = driver.variables.new()
+            var.targets[0].id = rig
+            var.targets[0].data_path = rig.pose.bones[control].path_from_id("hide")

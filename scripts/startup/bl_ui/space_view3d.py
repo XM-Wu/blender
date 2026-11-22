@@ -956,6 +956,11 @@ class VIEW3D_HT_header(Header):
             from .space_weight_layers import draw_source
             draw_source(layout, obj)
             layout.operator("paint.skin_switch_pose", text="Pose Rig", icon='POSE_HLT')
+            rig = obj.find_armature()
+            if rig and rig.get("rigging_role") == "RIG":
+                skeleton = rig.data.collections.get("Skeleton")
+                if skeleton:
+                    layout.prop(skeleton, "is_visible", text="Show Skeleton", toggle=True)
         elif mode_string == 'POSE':
             session = context.view_layer.skin_pose_session
             if session.rig == obj and session.source:

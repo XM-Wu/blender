@@ -27744,6 +27744,10 @@ msgid "Mesh Mirror Axis"
 msgstr "模型镜像轴"
 
 
+msgid "Show Skeleton"
+msgstr "显示骨架"
+
+
 msgid "Local mesh axis used to pair symmetric faces"
 msgstr "按此模型局部轴配对对称面"
 

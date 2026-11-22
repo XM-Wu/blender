@@ -57,7 +57,7 @@ class XBONE_OT_biped_guide(Operator):
         source = "game_biped.sgt" if game else "biped.sgt"
         points = guides.template_points(Path(__file__).with_name(source), 0.01 if game else 0.1, 'Y')
         names = {'biped': "Biped Guide", 'game_biped': "Game Biped Guide", 'xbiped': "XBiped Guide"}
-        guide = guides.import_template(context, points, names[self.template])
+        guide = guides.import_template(context, points, names[self.template], at_origin=self.template == 'xbiped')
         if self.template == 'xbiped':
             from . import xbiped_limb
             guide["xbiped"] = True

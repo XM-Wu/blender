@@ -261,13 +261,18 @@ def check_elbow(rig, comp):
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
+cursor_position = Vector((3, -4, 2))
+bpy.context.scene.cursor.location = cursor_position
 assert bpy.ops.xbone.biped_guide(template='xbiped') == {'FINISHED'}
 guide = bpy.context.object
+close(guide.matrix_world.translation, Vector((0, 0, 0)), "guide at world origin")
 assert guide["xbiped"]
 for side in ("L0", "R0"):
     assert guide.data.bones[f"leg_{side}_ankle"]["maxstretch"] == 1
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
+close(rig.matrix_world.translation, Vector((0, 0, 0)), "rig at world origin")
+close(bpy.context.scene.cursor.location, cursor_position, "cursor position preserved")
 with Path(xbone_rigging.__file__).with_name("biped_bind.json").open() as stream:
     reference = json.load(stream)
 skin = {b.name: b.parent.name if b.parent else None for b in rig.data.bones if b.use_deform}

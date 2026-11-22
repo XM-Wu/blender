@@ -31,7 +31,9 @@ class XBONE_OT_biped_guide(Operator):
         names = {'biped': "Biped Guide", 'game_biped': "Game Biped Guide", 'xbiped': "XBiped Guide"}
         guide = guides.import_template(context, points, names[self.template])
         if self.template == 'xbiped':
+            from . import xbiped_knee
             guide["xbiped"] = True
+            xbiped_knee.set_leg_defaults(guide)
         return {'FINISHED'}
 
 
@@ -238,8 +240,16 @@ class XBONE_OT_match_limb(Operator):
                 changed.append(rotation)
             changed.extend((pole, target))
         else:
+            if "knee_fk_control" in target:
+                changed.append(pose[target["knee_fk_control"]])
             for name, joint, matrix in zip(target["fk_controls"], target["joints"], matrices):
-                pose[name].matrix = matrix @ pose[joint].bone.matrix_local.inverted_safe() @ pose[name].bone.matrix_local
+                if "knee_fk_control" in target and name == target["fk_controls"][0]:
+                    # Retain the animator's knee bend channel while matching the
+                    # thigh upstream of its counter-rotation.
+                    output = pose["MCH.FKOutput." + joint]
+                    pose[name].matrix = matrix @ output.matrix.inverted_safe() @ pose[name].matrix
+                else:
+                    pose[name].matrix = matrix @ pose[joint].bone.matrix_local.inverted_safe() @ pose[name].bone.matrix_local
                 changed.append(pose[name])
                 context.view_layer.update()
                 if "knee_glide_pivot" in target and name == target["fk_controls"][1]:

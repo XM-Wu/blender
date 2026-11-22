@@ -6,12 +6,27 @@ from mathutils import Matrix, Quaternion
 
 from .limb_parameters import drive
 from .builder import copy_pose
+from . import biped_display
 
 
 # An artistic profile in character proportions. The slider scales the peak
 # anterior displacement of the proximal tibia relative to the distal femur.
 MAX_TRAVEL = 0.035  # fraction of shin length
 PROFILE = "smoothstep(-0.5,0.906307787,-c)"  # cosine of flexion, 60 to 155 degrees
+
+
+def set_leg_defaults(guide):
+    """Migrate the inherited Shifter limit once; retain edited XBiped guide settings."""
+    for bone in guide.data.bones:
+        if bone.get("ik_limb") not in {"leg_L0", "leg_R0"}:
+            continue
+        if "maxstretch" not in bone:
+            bone["maxstretch"] = 1.0
+        ui = bone.id_properties_ui("maxstretch")
+        if ui.as_dict()["default"] != 1.0:
+            if bone["maxstretch"] == 1.5:
+                bone["maxstretch"] = 1.0
+            ui.update(min=1, default=1.0)
 
 
 def create_fk(edit, helper, comp, tip, pole_direction):
@@ -30,7 +45,24 @@ def create_fk(edit, helper, comp, tip, pole_direction):
         frame.translation = position
         return helper(comp + "." + label, frame, parent)
 
-    center = marker("fkFemur", fk_knee.head, fk_hip)
+    # A positive local X bend moves the thigh forward and folds the shin
+    # back. Both segments stay rigid and the original FK channels remain additive.
+    hinge = Matrix((x.cross(y), y, -x)).transposed().to_4x4()
+    hinge.translation = fk_hip.head
+    thigh_follow = helper(comp + ".fkThighFollow", hinge, fk_hip)
+    hinge.translation = fk_knee.head
+    control = edit.new("FK." + comp + "_knee_bend")
+    control.head, control.tail = fk_knee.head, fk_knee.head + y * tibia.length * 0.21
+    control.matrix = hinge
+    control.parent = thigh_follow
+    control.use_deform = False
+    for coll in list(control.collections):
+        coll.unassign(control)
+    for coll in fk_knee.collections:
+        coll.assign(control)
+    fk_knee.parent = control
+    edit["MCH.FKOutput." + hip.name].parent = thigh_follow
+    center = marker("fkFemur", fk_knee.head, thigh_follow)
     up = marker("fkUpperRay", fk_knee.head + femur.normalized() * tibia.length, center)
     end = marker("fkLowerRay", fk_knee.head + tibia, fk_knee)
     axes = marker("fkGlideAxes", fk_knee.head, fk_knee)
@@ -41,6 +73,40 @@ def create_fk(edit, helper, comp, tip, pole_direction):
     for label in ("fkDelta", "ikDelta", "glideDelta"):
         helper(comp + "." + label, Matrix.Identity(4), None)
     return (fk_knee.name, center.name, up.name, end.name, axes.name, slider.name, pivot.name, tibia.length)
+
+
+def configure_bend(rig, comp, target, shin_length):
+    bend = rig.pose.bones["FK." + comp + "_knee_bend"]
+    bend.rotation_mode = 'XYZ'
+    bend.lock_location = bend.lock_scale = (True, True, True)
+    bend.lock_rotation = (False, True, True)
+    # Outboard arc on the side of the knee, clear of the central mid control.
+    lateral = shin_length * .19 * (1 if comp.endswith("L0") else -1)
+    radius = shin_length * .16
+    arc = [(lateral, radius * math.cos(t), radius * math.sin(t))
+           for t in (math.radians(i) for i in range(-60, 211, 9))]
+    base = arc[-3]
+    arrow = [(base[0] - radius * .18, base[1], base[2]), arc[-1],
+             (base[0] + radius * .18, base[1], base[2])]
+    widget = biped_display.shape(bend.name, [arc, arrow])
+    biped_display.configure(bend, widget, 18 if comp.endswith("L0") else 14)
+    target["knee_fk_control"] = bend.name
+    bend["limb_control"] = target.name
+    follow = rig.pose.bones["MCH.Triangle." + comp + ".fkThighFollow"]
+    follow.rotation_mode = 'XYZ'
+    driver = follow.driver_add("rotation_euler", 0).driver
+    var = driver.variables.new()
+    var.name = "bend"
+    var.targets[0].id = rig
+    # The raw animator channel is independent of the parent's evaluated pose.
+    var.targets[0].data_path = bend.path_from_id("rotation_euler") + "[0]"
+    driver.expression = "-0.1*bend"
+    driver = bend.driver_add("hide").driver
+    var = driver.variables.new()
+    var.name = "blend"
+    var.targets[0].id = rig
+    var.targets[0].data_path = '["' + target["blend_property"] + '"]'
+    driver.expression = "blend >= 1"
 
 
 def match_pole(rig, target, matrices):
@@ -77,6 +143,7 @@ def solve(rig, target, comp, fk, calc, a, b, d, length):
     pose = rig.pose.bones
     prefix = "MCH.Triangle." + comp + "."
     knee, center, up, end, axes, slider, pivot, rest_shin = fk
+    configure_bend(rig, comp, target, rest_shin)
     target["knee_glide"] = 1.0
     target.id_properties_ui("knee_glide").update(min=0, max=1, default=1.0,
                                                  description="Tibial glide in deep flexion")

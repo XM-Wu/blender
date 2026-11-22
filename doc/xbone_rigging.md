@@ -30,6 +30,13 @@ reverse-foot effector and pole, keeping reachable ankles planted. Use **Match IK
 to retain the current pose when switching. The existing Biped and Game Biped templates keep their
 original solvers and export hierarchies.
 
+XBiped legs default to **Max Stretch = 1**. Raise this setting on a foot IK control for a
+stretchable leg. In FK, select the arc outside either knee or its **Knee FK** button in the
+Selector. Rotate local X to bend: a 90° input folds the knee by 90° and swings the thigh
+forward by 9°, moving the knee pivot and carrying the foot. The original shin FK control
+remains available for independent adjustments. Rebuild from **Edit Source Guide** to add
+the handles to an existing XBiped.
+
 ## Selector
 
 Split an area and choose **Animation → Selector** in its editor type menu. Choose the character in the header. Classic Biped opens the mGear Biped picker. Game Biped and custom rigs open a board of their selectable controls. The header also switches pages and imports or exports polygon pickers in mGear's `.pkr` format. Imported layouts and available background images are stored on the character in the blend file.

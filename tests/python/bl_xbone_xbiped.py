@@ -8,6 +8,7 @@ from pathlib import Path
 import bpy
 from mathutils import Matrix, Vector
 import xbone_rigging
+from xbone_rigging import selector_board
 
 
 def update(rig):
@@ -123,7 +124,7 @@ def check_leg(rig, comp):
         close(p[name].head, saved.translation, ("matched blend", name), .0005)
     rig[blend] = 1.
     update(rig)
-    ctl["maxstretch"] = 1.
+    assert ctl["maxstretch"] == ctl.id_properties_ui("maxstretch").as_dict()["default"] == 1.0
     ctl["reverse"] = 1.
     update(rig)
     reversed_knee = p[knee].head.copy()
@@ -148,10 +149,53 @@ def check_leg(rig, comp):
     update(rig)
 
 
+def check_bend_control(rig, comp):
+    p = rig.pose.bones
+    ctl = p["IK." + comp + "_ankle"]
+    bend = p[ctl["knee_fk_control"]]
+    assert bend.custom_shape and not bend.bone.use_deform and not bend.bone.hide_select
+    assert bend.bone.collections.get("FK")
+    assert bend.name in selector_board.pages(selector_board.layout_source(rig))[0].names
+    rig[ctl["blend_property"]] = 0.
+    for name in ctl["fk_controls"]:
+        p[name].matrix_basis = Matrix.Identity(4)
+    update(rig)
+    assert not bend.hide
+    hip, knee, ankle = (p[n] for n in ctl["joints"])
+    hip_rest, knee_rest, ankle_rest = (joint.head.copy() for joint in (hip, knee, ankle))
+    skin = p[comp + "_4_jnt"]
+    skin_rest = skin.head.copy()
+    upper_length = (knee_rest - hip_rest).length
+    lower_length = (ankle_rest - knee_rest).length
+    rest_angle = (knee_rest-hip_rest).angle(ankle_rest-knee_rest)
+    for degrees in (25, 120):
+        bend.rotation_euler.x = math.radians(degrees)
+        update(rig)
+        femur = p["MCH.Curve." + comp + ".femoralPivot"].head
+        close(hip.head, hip_rest, "hip fixed")
+        close(femur, bend.head, "handle follows moving knee")
+        assert abs((femur-hip.head).length-upper_length) < .00015
+        assert abs((ankle.head-knee.head).length-lower_length) < .00015
+        assert (skin.head-skin_rest).length > .01 and (ankle.head-ankle_rest).length > .05
+        angle = (femur-hip.head).angle(ankle.head-knee.head)
+        assert abs(math.degrees(angle-rest_angle)-degrees) < .05, (comp, degrees, angle)
+    saved = [(joint, joint.matrix.copy()) for joint in (hip, knee, ankle, skin)]
+    for mode in ('IK', 'FK'):
+        assert bpy.ops.xbone.match_limb(control=ctl.name, mode=mode) == {'FINISHED'}
+        update(rig)
+        assert bend.hide == (mode == 'IK')
+        for joint, matrix in saved:
+            close(joint.head, matrix.translation, (comp, mode, joint.name), .0005)
+            assert abs(joint.matrix.to_quaternion().dot(matrix.to_quaternion())) > .999
+    assert abs(bend.rotation_euler.x-math.radians(120)) < .0001
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 assert bpy.ops.xbone.biped_guide(template='xbiped') == {'FINISHED'}
 guide = bpy.context.object
 assert guide["xbiped"]
+for side in ("L0", "R0"):
+    assert guide.data.bones[f"leg_{side}_ankle"]["maxstretch"] == 1
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
 with Path(xbone_rigging.__file__).with_name("biped_bind.json").open() as stream:
@@ -160,11 +204,18 @@ skin = {b.name: b.parent.name if b.parent else None for b in rig.data.bones if b
 assert skin == {name: entry[0] for name, entry in reference.items()}
 for comp in ("leg_L0", "leg_R0"):
     check_leg(rig, comp)
+    check_bend_control(rig, comp)
 assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
 rig_name = rig.name
 saved = {n: rig.pose.bones[n].head.copy() for n in
          ("leg_L0_knee", "leg_L0_4_jnt", "leg_R0_knee", "leg_R0_end_jnt")}
 assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
+# Simulate a previous-version guide and one explicitly authored rig override.
+bpy.ops.object.mode_set(mode='OBJECT')
+old = guide.data.bones["leg_L0_ankle"]
+old["maxstretch"] = 1.5
+old.id_properties_ui("maxstretch").update(default=0.)
+rig.pose.bones["IK.leg_R0_ankle"]["maxstretch"] = 1.25
 assert bpy.ops.xbone.build_rig() == {'FINISHED'} and bpy.context.object == rig
 with tempfile.TemporaryDirectory() as directory:
     path = str(Path(directory) / "xbiped.blend")
@@ -173,6 +224,9 @@ with tempfile.TemporaryDirectory() as directory:
     rig = bpy.data.objects[rig_name]
     assert rig["rigging_guide"]["xbiped"]
     assert "knee_glide" in rig.pose.bones["IK.leg_R0_ankle"]
+    assert rig.pose.bones["IK.leg_L0_ankle"]["maxstretch"] == 1.
+    assert rig.pose.bones["IK.leg_R0_ankle"]["maxstretch"] == 1.25
+    assert abs(rig.pose.bones["FK.leg_L0_knee_bend"].rotation_euler.x-math.radians(120)) < .0001
     for name, location in saved.items():
         close(rig.pose.bones[name].head, location, ("rebuilt and reopened", name), .0005)
     assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)

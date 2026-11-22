@@ -177,6 +177,14 @@ def tick():
                 assert not settings.mask_collapsed
                 assert bpy.ops.wm.tool_set_by_id(name='builtin.sdf_fill') == {'FINISHED'}
                 assert space_sdf.bucket_active(ctx)
+                old_keys = space_sdf.key_images(settings.mask)
+                assert bpy.ops.sdf.stroke('INVOKE_DEFAULT') == {'RUNNING_MODAL'}
+                bucket = next(op for op in ctx.window.modal_operators if hasattr(op, "fill_target"))
+                bucket.fill_uv = (.75,.5)
+                settings.value = .375
+                assert bucket.modal(ctx,event(0,0,'LEFTMOUSE','RELEASE')) == {'CANCELLED'}
+                assert old_keys == space_sdf.key_images(settings.mask)
+                settings.value = 1
                 assert bpy.ops.wm.tool_set_by_id(name='builtin.sdf_paint') == {'FINISHED'}
             for cls, kind in ((bpy.types.SpaceImageEditor, 'uv'), (bpy.types.SpaceView3D, '3d')):
                 cls.draw_handler_add(capture, (kind,), 'WINDOW', 'POST_PIXEL')

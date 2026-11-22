@@ -27828,6 +27828,22 @@ msgid "Jump to the first white-to-black transition and highlight its pixels"
 msgstr "跳到第一组白变黑的关键帧并标红冲突像素"
 
 
+msgid "Use inferred original UVs"
+msgstr "使用推断的原始 UV"
+
+
+msgid "I confirm these inferred face UVs match the original painted layout"
+msgstr "确认推断的逐面 UV 与绘制时一致"
+
+
+msgid "Matching the outline cannot verify the original face UVs"
+msgstr "轮廓一致无法验证原始逐面 UV"
+
+
+msgid "Choose the original UV map or blend file, or confirm the inferred original UVs"
+msgstr "请选择原始 UV 层或工程文件，或确认推断的 UV 确为原始布局"
+
+
 msgid "SDF Paint"
 msgstr "SDF 绘制"
 

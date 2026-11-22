@@ -63,6 +63,22 @@ with TemporaryDirectory() as tmp:
     assert np.array_equal(field.decode(m.coverage,256),cov)
     for key, original in zip(m.keys,images):
         assert np.array_equal(field.decode(key.bitmap,256),original)
+    # A legacy footprint alone cannot identify a mirror within the same bounds.
+    src = m.sources[0]
+    layer = src.object.data.uv_layers[src.uv_name]
+    for uv in layer.uv:
+        uv.vector.x = .5 - uv.vector.x
+    src.uv_snapshot = ""
+    sdf.bind_legacy_uvs(None)
+    assert src.uv_snapshot and src.inferred_snapshot
+    assert bpy.ops.sdf.rematch_uv() == {'CANCELLED'}
+    assert src.inferred_snapshot
+    from shutil import copyfile
+    reference = copyfile(path, Path(tmp) / 'original.blend')
+    assert bpy.ops.sdf.rematch_uv(reference_file=str(reference)) == {'FINISHED'}
+    assert not src.inferred_snapshot
+    for key, original in zip(m.keys, images):
+        assert np.array_equal(field.decode(key.bitmap,256)[:,32:96], original[:,32:96][:,::-1])
 print('SDF remap passed: secondary layer, rotation, same-layer mirror, three keys, save/load, undo')
 
 # Overlaps with different painted values must fail atomically unless the user

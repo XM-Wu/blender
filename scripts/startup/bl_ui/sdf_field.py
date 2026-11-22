@@ -15,13 +15,32 @@ import zlib
 import numpy as np
 
 
+def pack_bytes(raw):
+    return base64.b85encode(zlib.compress(raw)).decode("ascii")
+
+
+def unpack_bytes(text, expected_size):
+    """Decode an existing .blend payload, bounded by its declared shape."""
+    try:
+        compressed = base64.b85decode(text)
+        stream = zlib.decompressobj()
+        raw = stream.decompress(compressed, expected_size + 1)
+    except (ValueError, zlib.error) as ex:
+        raise ValueError("Invalid compressed SDF data") from ex
+    if len(raw) != expected_size or not stream.eof or stream.unused_data:
+        raise ValueError("SDF data does not match the expected size")
+    return raw
+
+
 def encode(bits):
-    return base64.b85encode(zlib.compress(np.packbits(bits).tobytes())).decode("ascii")
+    return pack_bytes(np.packbits(bits).tobytes())
 
 
 @lru_cache(maxsize=12)
 def decode(data, size):
-    raw = np.frombuffer(zlib.decompress(base64.b85decode(data)), dtype=np.uint8)
+    if size <= 0:
+        raise ValueError("Invalid SDF resolution")
+    raw = np.frombuffer(unpack_bytes(data, (size * size + 7) // 8), dtype=np.uint8)
     bits = np.unpackbits(raw, count=size * size).reshape(size, size).view(bool)
     bits.flags.writeable = False
     return bits
@@ -192,6 +211,14 @@ def fields(a, b, coverage, size):
         return -crossing, 1 - crossing
     return endpoint(white_a, db, da), endpoint(white_b, da, db)
 
+
+
+def key_at(mask, value):
+    return next((k for k in mask.keys if abs(k.value - value) < 1e-6), None)
+
+
+def key_images(mask):
+    return tuple((k.value, k.bitmap) for k in mask.keys)
 
 
 def preview(keys, value, coverage, size):

@@ -11,6 +11,16 @@ from bl_ui import space_sdf as sdf
 from bl_ui import sdf_field as field
 
 
+# A truncated packed image must not be padded into a different valid drawing.
+for damaged in (field.pack_bytes(b""), field.pack_bytes(bytes(3)), "invalid data"):
+    try:
+        field.decode(damaged, 4)  # A 4x4 image requires two packed bytes.
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Accepted invalid SDF bitmap")
+
+
 def make_quad(name, x, offset):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])

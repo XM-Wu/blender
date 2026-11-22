@@ -3,64 +3,22 @@
 import bpy
 from pathlib import Path
 from bpy.app.handlers import persistent
-from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty,
-                       PointerProperty, StringProperty)
-from bpy.types import Menu, Operator, PropertyGroup
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
+from bpy.types import Menu, Operator
 from bpy_extras.io_utils import ExportHelper
 from bpy_extras import view3d_utils
-from functools import lru_cache
 from math import ceil, cos, hypot, sin, tau
 from mathutils import Vector
 from mathutils.geometry import barycentric_transform
 
 from . import sdf_field as field
-from .sdf_pick import SurfaceTree, ViewPicker
+from .sdf_field import key_at, key_images
+from .sdf_pick import geometry, face_indices, brush_hit, hit_uv, viewport_picker
 from .sdf_pen import PenPath
-from . import sdf_controls, sdf_remap, sdf_wire
+from . import sdf_controls, sdf_pick, sdf_preview, sdf_remap, sdf_settings
+from .sdf_settings import redraw, remember_interaction, restore_interaction
 
 import numpy as np
-
-
-def redraw(settings, context):
-    for window in context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type in {'IMAGE_EDITOR', 'VIEW_3D'}:
-                area.tag_redraw()
-
-
-# Preserve interaction state across Blender's scene-wide undo snapshots. Keep
-# ordinary scene RNA storage so each scene retains its own saved settings.
-_INTERACTION_PROPERTIES = ("radius", "white", "use_pressure", "show_wire", "wire_opacity", "onion_skin", "auto_key", "value", "mask_collapsed", "mask_offset")
-_undo_interaction = {}
-
-
-@persistent
-def remember_interaction(_):
-    _undo_interaction.clear()
-    for scene in bpy.data.scenes:
-        if scene.is_editable and scene.is_property_set("sdf_editor"):
-            settings = scene.sdf_editor
-            _undo_interaction[scene.session_uid] = (
-                tuple(getattr(settings, prop) for prop in _INTERACTION_PROPERTIES),
-                tuple(mask.name for mask in settings.masks), settings.index)
-
-
-@persistent
-def restore_interaction(_):
-    for scene in bpy.data.scenes:
-        saved = _undo_interaction.get(scene.session_uid)
-        if saved is None or not scene.is_editable:
-            continue
-        values, masks, index = saved
-        settings = scene.sdf_editor
-        for prop, value in zip(_INTERACTION_PROPERTIES, values):
-            if getattr(settings, prop) != value:
-                setattr(settings, prop, value)
-        # Undoing a mask creation/deletion restores its list and selection
-        # together. Undoing paint keeps the user's currently selected mask.
-        if settings.index != index and tuple(mask.name for mask in settings.masks) == masks:
-            settings.index = index
-    _undo_interaction.clear()
 
 
 def draw_brush_ink(layout, settings):
@@ -84,70 +42,9 @@ def draw_wire_control(layout, context):
         row.prop(wm, "sdf_wire_opacity", text="Wire", slider=True)
 
 
-_ONION_MODES = (
-    ('OFF', "Off", "Show the current SDF only", 0),
-    ('PREVIOUS', "Previous Key", "Compare against the nearest earlier SDF key", 1),
-    ('NEXT', "Next Key", "Compare against the nearest later SDF key", 2),
-)
-
-
 def draw_onion_control(layout, context):
     icon = 'ONIONSKIN_OFF' if context.scene.sdf_editor.onion_skin == 'OFF' else 'ONIONSKIN_ON'
     layout.prop(context.window_manager, "sdf_onion_skin", text="Onion Skin", icon=icon)
-
-
-class SDFKey(PropertyGroup):
-    value: FloatProperty()
-    bitmap: StringProperty()
-
-
-class SDFSource(PropertyGroup):
-    object: PointerProperty(type=bpy.types.Object)
-    uv_name: StringProperty()
-    faces: StringProperty()
-    uv_snapshot: StringProperty(options={'HIDDEN'})
-
-
-class SDFMask(PropertyGroup):
-    size: IntProperty()
-    coverage: StringProperty()
-    conflict_pair: FloatVectorProperty(size=2, default=(-1, -1), options={'HIDDEN'})
-    sources: CollectionProperty(type=SDFSource)
-    keys: CollectionProperty(type=SDFKey)
-
-
-class SDFSettings(PropertyGroup):
-    masks: CollectionProperty(type=SDFMask)
-    mask_collapsed: BoolProperty(name="Collapse SDF Masks", update=redraw)
-    mask_offset: IntProperty(min=0, options={'SKIP_SAVE'}, update=redraw)
-    index: IntProperty(update=redraw)
-    auto_key: BoolProperty(name="SDF Auto Key", default=True, update=redraw,
-                           description="Create a key at the preview value when painting changes the image")
-    value: FloatProperty(name="Preview", min=0, max=1, precision=4, update=redraw)
-    radius: IntProperty(name="Radius (texels)", min=1, max=256, default=10, update=redraw,
-                        description="Brush radius in texture pixels. Press F in either paint view to resize")
-    onion_skin: EnumProperty(name="Onion Skin", items=_ONION_MODES, default='OFF', update=redraw)
-    show_wire: BoolProperty(name="SDF Wireframe", default=False, update=redraw,
-                            description="Show the mask mesh edges over the SDF in both paint views")
-    wire_opacity: FloatProperty(name="Wire Opacity", min=0, max=1, default=.65, subtype='FACTOR', update=redraw)
-    use_pressure: BoolProperty(name="Use Pressure for Radius", default=True, update=redraw)
-    white: BoolProperty(name="White Brush", default=True, update=redraw)
-    ink: EnumProperty(name="Brush Color", items=(
-        ('BLACK', "Black", "Paint black", 0), ('WHITE', "White", "Paint white", 1)),
-        get=lambda self: int(self.white), set=lambda self, value: setattr(self, "white", bool(value)))
-
-    @property
-    def mask(self):
-        if 0 <= self.index < len(self.masks):
-            return self.masks[self.index]
-
-
-def key_at(mask, value):
-    return next((k for k in mask.keys if abs(k.value - value) < 1e-6), None)
-
-
-def key_images(mask):
-    return tuple((k.value, k.bitmap) for k in mask.keys)
 
 
 class SDFPaintMode:
@@ -200,13 +97,16 @@ def active_picker(context):
 
 
 def store_mask(context, name, size, coverage, sources, target=None):
+    inferred_sources = set()
     if target is not None and target.keys:
         sdf_remap.bind_legacy(target)
+        inferred_sources = {src.object for src in target.sources if src.inferred_snapshot}
         for src in target.sources:
             layer = src.object.data.uv_layers.get(src.uv_name) if src.object else None
-            if layer is None or not src.uv_snapshot or not np.array_equal(
-                    sdf_remap.unpack(src.uv_snapshot),
-                    sdf_remap.capture(src.object.data, layer, face_indices(src.faces))):
+            if layer is None or not src.uv_snapshot:
+                raise ValueError("UV layout changed. Rematch UV before editing the island selection")
+            current = sdf_remap.capture(src.object.data, layer, face_indices(src.faces))
+            if not np.array_equal(sdf_remap.unpack(src.uv_snapshot, len(current)), current):
                 raise ValueError("UV layout changed. Rematch UV before editing the island selection")
     prepared = [(obj, uv, faces, sdf_remap.pack(sdf_remap.capture(obj.data, obj.data.uv_layers[uv], faces)))
                 for obj, uv, faces in sources]
@@ -220,14 +120,15 @@ def store_mask(context, name, size, coverage, sources, target=None):
     else:
         mask = target
         mask.sources.clear()
-        _geometry.clear()
+        clear_surface_caches()
     mask.coverage = field.encode(coverage)
     for obj, uv_name, faces, snapshot in prepared:
         source = mask.sources.add()
         source.object, source.uv_name = obj, uv_name
         source.faces = ",".join(map(str, faces))
         source.uv_snapshot = snapshot
-    _view_pickers.clear()
+        source.inferred_snapshot = obj in inferred_sources
+    sdf_pick.clear_views()
 
 
 class SDF_OT_island_action(Operator):
@@ -412,6 +313,8 @@ class SDF_OT_rematch_uv(Operator):
 
     reference_file: StringProperty(name="Original Blend File", subtype='FILE_PATH',
                                    description="Optional pre-edit .blend or .blend1 containing the original mesh UVs")
+    accept_inferred: BoolProperty(name="Use inferred original UVs", options={'SKIP_SAVE'},
+                                  description="I confirm these inferred face UVs match the original painted layout")
     merge_white: BoolProperty(name="Merge White on Overlap",
                               description="If multiple surface points share a target texel, keep white if any was white")
 
@@ -442,11 +345,13 @@ class SDF_OT_rematch_uv(Operator):
             layout.prop_search(self, "previous_name", obj.data, "uv_layers")
         else:
             layout.prop(self, "previous_name")
+        if not self.reference_file and not self.previous_name and sdf_remap.needs_original(mask):
+            layout.label(text="Matching the outline cannot verify the original face UVs", icon='INFO')
+            layout.prop(self, "accept_inferred")
         layout.prop(self, "merge_white")
         layout.label(text="Reproject all keys of the selected mask", icon='KEY_HLT')
 
     def execute(self, context):
-        global _texture_token
         mask = context.scene.sdf_editor.mask
         if self.target == 'NAMED' and not self.uv_name:
             self.report({'WARNING'}, "Choose a target UV map")
@@ -455,18 +360,18 @@ class SDF_OT_rematch_uv(Operator):
             coverage, bindings, outputs = sdf_remap.prepare(
                 mask, active=self.target == 'ACTIVE',
                 target_name=self.uv_name if self.target == 'NAMED' else "", previous_name=self.previous_name,
-                reference_file=self.reference_file, merge=self.merge_white)
+                reference_file=self.reference_file, merge=self.merge_white, accept_inferred=self.accept_inferred)
         except (ValueError, OSError, RuntimeError) as ex:
             self.report({'WARNING'}, str(ex))
             return {'CANCELLED'}
         for src, name, snapshot in bindings:
             src.uv_name, src.uv_snapshot = name, snapshot
+            src.inferred_snapshot = False
         mask.coverage = coverage
         for key, bitmap in zip(mask.keys, outputs):
             key.bitmap = bitmap
-        _texture_token = None
-        _geometry.clear()
-        _view_pickers.clear()
+        sdf_preview.invalidate_texture()
+        clear_surface_caches()
         redraw(None, context)
         return {'FINISHED'}
 
@@ -483,8 +388,7 @@ class SDF_OT_remove_mask(SDFPaintMode, Operator):
         s = context.scene.sdf_editor
         if s.mask is None:
             return {'CANCELLED'}
-        _geometry.clear()
-        _view_pickers.clear()
+        clear_surface_caches()
         s.masks.remove(s.index)
         s.index = max(0, min(s.index, len(s.masks) - 1))
         return {'FINISHED'}
@@ -665,6 +569,9 @@ class SDF_OT_check_conflicts(Operator):
                 focus_conflict(context, error)
                 self.report({'WARNING'}, str(error))
                 return {'FINISHED'}
+            except ValueError as error:
+                self.report({'ERROR'}, str(error))
+                return {'CANCELLED'}
             self.report({'INFO'}, "No SDF key conflicts")
         mask.conflict_pair = (-1, -1)
         redraw(None, context)
@@ -688,6 +595,9 @@ class SDF_OT_export(Operator, ExportHelper):
             field.check_keys(key_images(mask), mask.coverage, mask.size)
         except field.KeyConflict as error:
             focus_conflict(context, error)
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        except ValueError as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
         return ExportHelper.invoke(self, context, event)
@@ -714,88 +624,6 @@ class SDF_OT_export(Operator, ExportHelper):
         mask.conflict_pair = (-1, -1)
         redraw(None, context)
         return {'FINISHED'}
-
-
-@lru_cache(maxsize=16)
-def face_indices(data):
-    return frozenset(map(int, data.split(",")))
-
-
-# Evaluated triangles are shared by the viewport overlay and brush picking.
-# Keep the face membership snapshot tied to the original topology.
-_geometry = {}
-
-
-def mesh_array(collection, prop, width, dtype):
-    data = np.empty(len(collection) * width, dtype=dtype)
-    collection.foreach_get(prop, data)
-    return data if width == 1 else data.reshape(-1, width)
-
-
-def geometry(source, depsgraph):
-    """Evaluated triangle positions and UVs, in Blender's polygon order."""
-    obj = source.object
-    token = (depsgraph.as_pointer(), obj.as_pointer(), source.faces, source.uv_name)
-    if token in _geometry:
-        return _geometry[token]
-    mesh = obj.evaluated_get(depsgraph).data
-    layer = mesh.uv_layers.get(source.uv_name)
-    surface = None
-    if layer:
-        originals = mesh_array(mesh.polygons, "original_index", 1, np.int32)
-        # Deformation-only evaluation can share the base topology without
-        # allocating an original-index layer. Check connectivity before using it.
-        if len(originals) == len(obj.data.polygons) and np.all(originals == -1):
-            if (np.array_equal(mesh_array(mesh.polygons, "loop_start", 1, np.int32),
-                               mesh_array(obj.data.polygons, "loop_start", 1, np.int32)) and
-                np.array_equal(mesh_array(mesh.loops, "vertex_index", 1, np.int32),
-                               mesh_array(obj.data.loops, "vertex_index", 1, np.int32))):
-                originals = np.arange(len(originals), dtype=np.int32)
-        faces = mesh_array(mesh.loop_triangles, "polygon_index", 1, np.int32)
-        keep = np.isin(originals[faces], tuple(face_indices(source.faces)))
-        if keep.any():
-            vertices = mesh_array(mesh.loop_triangles, "vertices", 3, np.int32)[keep]
-            loops = mesh_array(mesh.loop_triangles, "loops", 3, np.int32)[keep]
-            surface = (faces[keep], mesh_array(mesh.vertices, "co", 3, np.float32)[vertices],
-                       mesh_array(layer.uv, "vector", 2, np.float32)[loops])
-    _geometry[token] = surface
-    return surface
-
-
-_view_pickers = {}
-
-
-def surface_tree(source, dg):
-    surface = geometry(source, dg)
-    if surface is None:
-        return None
-    key = ('pick', id(surface))
-    if key not in _geometry:
-        mesh = source.object.evaluated_get(dg).data
-        _geometry[key] = SurfaceTree(mesh, surface, mesh_array)
-    return _geometry[key]
-
-
-def viewport_picker(context, region, mask):
-    rv = context.region_data or context.space_data.region_3d
-    key = (region.as_pointer(), region.width, region.height, context.evaluated_depsgraph_get().as_pointer(),
-           tuple(tuple(row) for row in rv.perspective_matrix),
-           tuple((s.as_pointer(), s.object.as_pointer() if s.object else 0) for s in mask.sources))
-    picker = _view_pickers.get(key)
-    if picker is None:
-        if len(_view_pickers) >= 4:
-            _view_pickers.clear()
-        picker = _view_pickers[key] = ViewPicker(context, region, rv, mask)
-    return picker
-
-
-def brush_hit(context, region, xy, mask):
-    return viewport_picker(context, region, mask).pick(context, xy, surface_tree)
-
-
-def hit_uv(context, region, xy, mask):
-    hit = brush_hit(context, region, xy, mask)
-    return hit[0].xy if hit else None
 
 
 def draw_brush_cursor(context, xy):
@@ -842,9 +670,6 @@ def draw_brush_cursor(context, xy):
 
 
 _stroke = None
-_texture = None
-_texture_token = None
-_coverage_pixels = _coverage_texture = _canvas_shader = _wire_shader = None
 
 
 def in_paint_region(context):
@@ -933,7 +758,7 @@ def paint_to(stroke, context, current, radius):
         region = context.region
         picker = viewport_picker(context, region, stroke.mask)
         def sample(point):
-            return picker.pick(context, point, surface_tree)
+            return picker.pick(context, point)
         def segment(left, first, r0, right, last, r1):
             nonlocal touched
             if continuous_hits(first, last):
@@ -972,11 +797,10 @@ class SDF_OT_stroke(Operator):
         return bool(in_paint_region(context))
 
     def dab(self, context, event):
-        global _texture_token
         touched = paint_to(self, context, (event.mouse_region_x, event.mouse_region_y), pressure_radius(self, event))
         if touched and getattr(self, "needs_key", False):
             self.record_key()
-        _texture_token = None
+        sdf_preview.invalidate_texture()
         # Blender queues intermediate pen/mouse samples before the final move.
         # Paint all samples, but request just one redraw for this event batch.
         if getattr(event, "type", None) != 'INBETWEEN_MOUSEMOVE':
@@ -1015,6 +839,7 @@ class SDF_OT_stroke(Operator):
             uv = (hit_uv(context, context.region, xy, s.mask) if context.area.type == 'VIEW_3D' else
                   context.region.view2d.region_to_view(*xy))
             self.fill_uv = tuple(uv) if uv is not None else None
+            self.fill_target = (s.mask.as_pointer(), s.value, s.white)
             self.idle = True
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
@@ -1067,11 +892,14 @@ class SDF_OT_stroke(Operator):
         return {'FINISHED'} if changed else {'CANCELLED'}
 
     def cancel(self, context):
-        global _stroke, _texture_token
+        global _stroke
+        if _stroke is not self:
+            return
         self.discard_recorded_key()
         if getattr(self, "pen", None) is not None:
             context.workspace.status_text_set(None)
-        _stroke = _texture_token = None
+        _stroke = None
+        sdf_preview.invalidate_texture()
         redraw(None, context)
 
     def pen_add(self, context, event):
@@ -1094,7 +922,6 @@ class SDF_OT_stroke(Operator):
         self.pen_preview(context)
 
     def pen_preview(self, context, rebuild=False):
-        global _texture_token
         nodes = self.pen.nodes
         if rebuild:
             self.bits = self.base_bits.copy()
@@ -1106,7 +933,7 @@ class SDF_OT_stroke(Operator):
             self.previous = self.previous_uv = self.previous_hit = None
             for point, radius in self.pen.samples(index):
                 paint_to(self, context, point, radius)
-        _texture_token = None
+        sdf_preview.invalidate_texture()
         redraw(None, context)
 
     def pen_modal(self, context, event):
@@ -1139,14 +966,19 @@ class SDF_OT_stroke(Operator):
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
+        if not self.idle and _stroke is not self:
+            return {'CANCELLED'}
         if context.mode != 'PAINT_SDF' or event.type in {'ESC', 'RIGHTMOUSE', 'WINDOW_DEACTIVATE'}:
             self.cancel(context)
             return {'CANCELLED'}
         if self.idle:
             if event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
                 uv = getattr(self, "fill_uv", None)
-                if uv is not None and bpy.ops.sdf.fill.poll() and fill_key(context, 'BUCKET', uv):
-                    return {'FINISHED'}
+                settings = context.scene.sdf_editor
+                if uv is not None and settings.mask and bpy.ops.sdf.fill.poll():
+                    current = (settings.mask.as_pointer(), settings.value, settings.white)
+                    if current == self.fill_target and fill_key(context, 'BUCKET', uv):
+                        return {'FINISHED'}
                 return {'CANCELLED'}
             return {'RUNNING_MODAL'}
         if self.pen is not None:
@@ -1159,214 +991,16 @@ class SDF_OT_stroke(Operator):
         return {'RUNNING_MODAL'}
 
 
-def grayscale_texture(bits):
-    import gpu
-    pixels = np.asarray(bits, dtype=np.float32, order='C')
-    return gpu.types.GPUTexture((pixels.shape[1], pixels.shape[0]), format='R8',
-                                data=gpu.types.Buffer('FLOAT', pixels.size, pixels.ravel()))
-
-
-def canvas_shader(wire=False):
-    import gpu
-    global _canvas_shader, _wire_shader
-    cached = _wire_shader if wire else _canvas_shader
-    if cached is None:
-        interface = gpu.types.GPUStageInterfaceInfo("sdf_wire_uv" if wire else "sdf_canvas_uv")
-        interface.smooth('VEC2', "uv")
-        info = gpu.types.GPUShaderCreateInfo()
-        info.vertex_in(0, 'VEC3', "pos")
-        info.vertex_in(1, 'VEC2', "texCoord")
-        if wire:
-            interface.no_perspective('VEC3', "edgeUV")
-            info.vertex_in(2, 'VEC3', "edgeCoord")
-            info.push_constant('FLOAT', "opacity")
-            info.push_constant('INT', "wireOnly")
-        info.vertex_out(interface)
-        info.push_constant('MAT4', "mvp")
-        info.sampler(0, 'FLOAT_2D', "inkMap")
-        info.sampler(1, 'FLOAT_2D', "maskMap")
-        info.sampler(2, 'FLOAT_2D', "onionMap")
-        info.push_constant('INT', "compareMode")
-        info.fragment_out(0, 'VEC4', "color")
-        edge_init = "edgeUV = edgeCoord;" if wire else ""
-        info.vertex_source("void main() { " + edge_init + " uv = texCoord; gl_Position = mvp * vec4(pos, 1.0); }")
-        base_color = """
-            vec3 sdfBaseColor(float ink) {
-                if (compareMode != 1) return vec3(ink);
-                float refInk = texture(onionMap, uv).r;
-                vec3 red = mix(vec3(0.42, 0.012, 0.015), vec3(0.98, 0.24, 0.18), refInk);
-                return mix(vec3(ink), red, 0.52);
-            }
-            vec3 highlightConflict(vec3 base) {
-                if (compareMode < 2) return base;
-                ivec2 size = textureSize(inkMap, 0);
-                ivec2 p = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
-                bool ink = texelFetch(inkMap, p, 0).r > 0.5;
-                bool other = texelFetch(onionMap, p, 0).r > 0.5;
-                bool bad = compareMode == 2 ? (ink && !other) : (other && !ink);
-                return bad && texelFetch(maskMap, p, 0).r > 0.5 ? vec3(1.0, 0.0, 0.0) : base;
-            }
-        """
-        fragment = sdf_wire.FRAGMENT if wire else (
-            "void main() { color = vec4(highlightConflict(sdfBaseColor(texture(inkMap, uv).r)), texture(maskMap, uv).r); }")
-        info.fragment_source(base_color + fragment)
-        cached = gpu.shader.create_from_info(info)
-        if wire:
-            _wire_shader = cached
-        else:
-            _canvas_shader = cached
-    return cached
-
-
-def onion_reference(mask, value, mode):
-    if mode == 'PREVIOUS':
-        return max((key for key in mask.keys if value - key.value >= 1e-6),
-                   key=lambda key: key.value, default=None)
-    if mode == 'NEXT':
-        return min((key for key in mask.keys if key.value - value >= 1e-6),
-                   key=lambda key: key.value, default=None)
-    return None
-
-
-@lru_cache(maxsize=1)
-def onion_texture(bitmap, size):
-    return grayscale_texture(field.decode(bitmap, size))
-
-
-def textures(mask, value, onion_mode):
-    global _texture, _texture_token, _coverage_pixels, _coverage_texture
-    painting = _stroke and _stroke.mask == mask and abs(_stroke.key_value - value) < 1e-6
-    if painting:
-        token = id(_stroke.bits)
-    else:
-        keys = key_images(mask)
-        token = (mask.coverage, mask.size, keys, value)
-    start, end = mask.conflict_pair
-    reference = None
-    compare_mode = 0
-    if start >= 0 and (abs(value-start) < 1e-6 or abs(value-end) < 1e-6):
-        if key_at(mask, start) and key_at(mask, end) and not any(start < k.value < end for k in mask.keys):
-            at_start = abs(value-start) < 1e-6
-            reference = key_at(mask, end if at_start else start)
-            compare_mode = 2 if at_start else 3
-    if reference is None:
-        reference = onion_reference(mask, value, onion_mode)
-        compare_mode = int(reference is not None)
-    ghost = onion_texture(reference.bitmap, mask.size) if reference is not None else None
-    if token != _texture_token:
-        bits = (_stroke.bits if painting else
-                field.preview(keys, value, mask.coverage, mask.size))
-        coverage = _stroke.coverage if painting else field.decode(mask.coverage, mask.size)
-        if coverage is not _coverage_pixels:
-            _coverage_texture = grayscale_texture(coverage)
-            _coverage_pixels = coverage
-        _texture = grayscale_texture(bits)
-        _texture_token = token
-    return _texture, _coverage_texture, ghost, compare_mode
-
-
-def wire_strength(context, obj=None):
-    space = context.space_data
-    settings = context.scene.sdf_editor
-    if not space.overlay.show_overlays:
-        return 0.0
-    if obj and (space.overlay.show_wireframes or obj.show_wire or
-                space.shading.type == 'WIREFRAME' or obj.display_type == 'WIRE'):
-        return settings.wire_opacity * space.overlay.wireframe_opacity
-    return settings.wire_opacity if settings.show_wire else 0.0
-
-
-def bind_canvas_shader(ink, coverage, ghost, compare_mode, strength=0.0, wire_only=False):
-    shader = canvas_shader(wire=strength > 0)
-    shader.bind()
-    shader.uniform_sampler("inkMap", ink)
-    shader.uniform_sampler("maskMap", coverage)
-    shader.uniform_sampler("onionMap", ink if ghost is None else ghost)
-    shader.uniform_int("compareMode", compare_mode)
-    if strength > 0:
-        shader.uniform_float("opacity", strength)
-        shader.uniform_int("wireOnly", int(wire_only))
-    return shader
-
-
 def draw_canvas(is_3d):
-    import gpu
-    from gpu_extras.batch import batch_for_shader
-    ctx = bpy.context
-    settings = ctx.scene.sdf_editor
-    if ctx.mode != 'PAINT_SDF' or (not is_3d and ctx.area.ui_type != 'SDF'):
+    context = bpy.context
+    if context.mode != 'PAINT_SDF' or (not is_3d and context.area.ui_type != 'SDF'):
         return
-    picker = active_picker(ctx)
-    if picker and ctx.area == picker.area and not is_3d:
-        picker.draw(ctx.region)
+    picker = active_picker(context)
+    if picker and picker.area == context.area and not is_3d:
+        picker.draw(context.region)
         return
-    mask = settings.mask
-    if not mask:
-        return
-    blend, depth, write = gpu.state.blend_get(), gpu.state.depth_test_get(), gpu.state.depth_mask_get()
-    try:
-        gpu.state.blend_set('ALPHA')
-        gpu.state.depth_test_set('LESS_EQUAL' if is_3d else 'NONE')
-        gpu.state.depth_mask_set(False)
-        ink, coverage, ghost, compare_mode = textures(mask, settings.value, settings.onion_skin)
-        if is_3d:
-            dg = ctx.evaluated_depsgraph_get()
-            for source in mask.sources:
-                obj = source.object
-                if not obj or obj.mode != 'SDF_PAINT' or not obj.visible_get(view_layer=ctx.view_layer, viewport=ctx.space_data):
-                    continue
-                surface = geometry(source, dg)
-                if surface is not None:
-                    strength = wire_strength(ctx, obj)
-                    shader = bind_canvas_shader(ink, coverage, ghost, compare_mode, strength)
-                    if strength > 0:
-                        batch = sdf_wire.batch(source, dg, shader, True, surface, _geometry, mesh_array, face_indices)
-                    else:
-                        token = ('batch', dg.as_pointer(), obj.as_pointer(), source.faces, source.uv_name)
-                        if token not in _geometry:
-                            _geometry[token] = batch_for_shader(shader, 'TRIS', {
-                                "pos": surface[1].reshape(-1, 3), "texCoord": surface[2].reshape(-1, 2)})
-                        batch = _geometry[token]
-                    # Wire-shaded viewports have no solid surface depth to hide rear edges.
-                    gpu.state.depth_mask_set(strength > 0 and (ctx.space_data.shading.type == 'WIREFRAME' or obj.display_type == 'WIRE'))
-                    # Match Blender's overlay polygon offset. Equal depth is
-                    # unstable on angled faces when the viewport jitters its samples.
-                    with gpu.matrix.push_pop_projection(), gpu.matrix.push_pop():
-                        projection = gpu.matrix.get_projection_matrix()
-                        if projection[3][3] > .5:
-                            projection[2][3] -= .00001 * ctx.region_data.view_distance
-                        else:
-                            projection[2][3] *= 1.0025
-                        gpu.matrix.load_projection_matrix(projection)
-                        gpu.matrix.multiply_matrix(obj.evaluated_get(dg).matrix_world)
-                        shader.uniform_float("mvp", projection @ gpu.matrix.get_model_view_matrix())
-                        batch.draw(shader)
-        else:
-            shader = bind_canvas_shader(ink, coverage, ghost, compare_mode)
-            shader.uniform_float("mvp", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix())
-            corners = ((0, 0), (1, 0), (1, 1), (0, 1))
-            view = ctx.region.view2d
-            positions = [(*view.view_to_region(*uv, clip=False), 0) for uv in corners]
-            batch_for_shader(shader, 'TRIS', {"pos": positions, "texCoord": corners},
-                             indices=((0, 1, 2), (0, 2, 3))).draw(shader)
-            strength = wire_strength(ctx)
-            if strength > 0:
-                shader = bind_canvas_shader(ink, coverage, ghost, compare_mode, strength, wire_only=True)
-                dg = ctx.evaluated_depsgraph_get()
-                origin, end = positions[0], positions[2]
-                with gpu.matrix.push_pop():
-                    gpu.matrix.translate(origin)
-                    gpu.matrix.scale((end[0]-origin[0], end[1]-origin[1], 1))
-                    shader.uniform_float("mvp", gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix())
-                    for source in mask.sources:
-                        if source.object and source.object.type == 'MESH':
-                            batch = sdf_wire.batch(source, dg, shader, False, None, _geometry, mesh_array, face_indices)
-                            if batch:
-                                batch.draw(shader)
-    finally:
-        gpu.state.blend_set(blend)
-        gpu.state.depth_test_set(depth)
-        gpu.state.depth_mask_set(write)
+    if context.scene.sdf_editor.mask:
+        sdf_preview.draw_canvas(context, is_3d, _stroke)
 
 
 def draw_sources(layout, context, mask):
@@ -1412,28 +1046,30 @@ def draw_canvas_controls():
         sdf_controls.CanvasControls(context).draw()
 
 
+def clear_surface_caches():
+    sdf_pick.clear_geometry()
+    sdf_preview.clear_batches()
+
+
 @persistent
 def invalidate_geometry(scene, depsgraph):
     global _picker
-    _view_pickers.clear()
+    sdf_pick.clear_views()
     if _picker and _picker.scene == scene:
         changed = {update.id.original for update in depsgraph.updates if update.is_updated_geometry}
         if any(obj not in scene.objects[:] or obj in changed or obj.data in changed for obj in _picker.objects):
             _picker = None
-    if _geometry and any(update.is_updated_geometry for update in depsgraph.updates):
-        _geometry.clear()
+    if any(update.is_updated_geometry for update in depsgraph.updates):
+        clear_surface_caches()
 
 
 @persistent
 def clear_runtime(*args):
-    global _texture_token, _texture, _stroke, _picker, _coverage_pixels, _coverage_texture, _canvas_shader, _wire_shader
-    onion_texture.cache_clear()
-    _coverage_pixels = _coverage_texture = _canvas_shader = _wire_shader = None
-    _picker = None
-    _stroke = _texture_token = _texture = None
-    _geometry.clear()
-    _view_pickers.clear()
-    for fn in (face_indices, field.fields, field.signed, field.decode):
+    global _stroke, _picker
+    _stroke = _picker = None
+    sdf_pick.clear_geometry()
+    sdf_preview.clear_runtime()
+    for fn in (field.fields, field.signed, field.decode):
         fn.cache_clear()
 
 
@@ -1480,32 +1116,27 @@ def remove_cursors(*_args):
     _cursors.clear()
 
 
+# Ordering matters: snapshot interaction state before clearing transient state.
+_HANDLERS = (
+    ('load_pre', reset_canvas_spaces),
+    ('load_pre', remove_cursors),
+    ('load_pre', clear_runtime),
+    ('load_post', bind_legacy_uvs),
+    ('load_post', install_cursors),
+    ('load_post_fail', install_cursors),
+    ('undo_pre', remember_interaction),
+    ('undo_pre', clear_runtime),
+    ('redo_pre', remember_interaction),
+    ('redo_pre', clear_runtime),
+    ('undo_post', restore_interaction),
+    ('redo_post', restore_interaction),
+    ('load_factory_startup_post', add_factory_workspace),
+    ('depsgraph_update_post', invalidate_geometry),
+)
+
+
 def register_runtime():
-    bpy.types.Scene.sdf_editor = PointerProperty(type=SDFSettings)
-    # WM-owned controls avoid property undo pushes from header number fields,
-    # pressure toggles and the native F-key radial controller.
-    bpy.types.WindowManager.sdf_brush_radius = IntProperty(
-        name="Radius (texels)", min=1, max=256, default=10, options={'SKIP_SAVE'},
-        get=lambda wm: bpy.context.scene.sdf_editor.radius,
-        set=lambda wm, value: setattr(bpy.context.scene.sdf_editor, "radius", value))
-    bpy.types.WindowManager.sdf_onion_skin = EnumProperty(
-        name="Onion Skin", items=_ONION_MODES, options={'SKIP_SAVE'},
-        get=lambda wm: next(number for ident, _, _, number in _ONION_MODES
-                            if ident == bpy.context.scene.sdf_editor.onion_skin),
-        set=lambda wm, number: setattr(bpy.context.scene.sdf_editor, "onion_skin", _ONION_MODES[number][0]))
-    bpy.types.WindowManager.sdf_show_wire = BoolProperty(
-        name="SDF Wireframe", default=False, options={'SKIP_SAVE'},
-        description="Show the mask mesh edges over the SDF in both paint views",
-        get=lambda wm: bpy.context.scene.sdf_editor.show_wire,
-        set=lambda wm, value: setattr(bpy.context.scene.sdf_editor, "show_wire", value))
-    bpy.types.WindowManager.sdf_wire_opacity = FloatProperty(
-        name="Wire Opacity", min=0, max=1, default=.65, subtype='FACTOR', options={'SKIP_SAVE'},
-        get=lambda wm: bpy.context.scene.sdf_editor.wire_opacity,
-        set=lambda wm, value: setattr(bpy.context.scene.sdf_editor, "wire_opacity", value))
-    bpy.types.WindowManager.sdf_pressure_enabled = BoolProperty(
-        name="Use Pressure for Radius", default=True, options={'SKIP_SAVE'},
-        get=lambda wm: bpy.context.scene.sdf_editor.use_pressure,
-        set=lambda wm, value: setattr(bpy.context.scene.sdf_editor, "use_pressure", value))
+    sdf_settings.register_properties()
     for space, stage, is_3d in ((bpy.types.SpaceImageEditor, 'POST_PIXEL', False),
                                 (bpy.types.SpaceView3D, 'POST_VIEW', True)):
         _handles.append((space, space.draw_handler_add(draw_canvas, (is_3d,), 'WINDOW', stage)))
@@ -1513,19 +1144,8 @@ def register_runtime():
     image_space = bpy.types.SpaceImageEditor
     _handles.append((image_space, image_space.draw_handler_add(draw_canvas_controls, (), 'WINDOW', 'POST_PIXEL')))
     install_cursors()
-    bpy.app.handlers.load_pre.append(reset_canvas_spaces)
-    bpy.app.handlers.load_pre.append(remove_cursors)
-    bpy.app.handlers.load_post.append(bind_legacy_uvs)
-    for handlers in (bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):
-        handlers.append(remember_interaction)
-    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
-        handlers.append(restore_interaction)
-    bpy.app.handlers.load_post.append(install_cursors)
-    bpy.app.handlers.load_post_fail.append(install_cursors)
-    for handlers in (bpy.app.handlers.load_pre, bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):
-        handlers.append(clear_runtime)
-    bpy.app.handlers.load_factory_startup_post.append(add_factory_workspace)
-    bpy.app.handlers.depsgraph_update_post.append(invalidate_geometry)
+    for event, handler in _HANDLERS:
+        getattr(bpy.app.handlers, event).append(handler)
 
 
 def unregister_runtime():
@@ -1533,29 +1153,18 @@ def unregister_runtime():
         space.draw_handler_remove(handle, 'WINDOW')
     _handles.clear()
     remove_cursors()
-    bpy.app.handlers.load_pre.remove(reset_canvas_spaces)
-    bpy.app.handlers.load_pre.remove(remove_cursors)
-    bpy.app.handlers.load_post.remove(bind_legacy_uvs)
-    for handlers in (bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):
-        handlers.remove(remember_interaction)
-    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
-        handlers.remove(restore_interaction)
-    _undo_interaction.clear()
-    del bpy.types.WindowManager.sdf_brush_radius
-    del bpy.types.WindowManager.sdf_onion_skin
-    del bpy.types.WindowManager.sdf_show_wire
-    del bpy.types.WindowManager.sdf_wire_opacity
-    del bpy.types.WindowManager.sdf_pressure_enabled
-    bpy.app.handlers.load_post.remove(install_cursors)
-    bpy.app.handlers.load_post_fail.remove(install_cursors)
-    for handlers in (bpy.app.handlers.load_pre, bpy.app.handlers.undo_pre, bpy.app.handlers.redo_pre):
-        handlers.remove(clear_runtime)
-    bpy.app.handlers.load_factory_startup_post.remove(add_factory_workspace)
-    bpy.app.handlers.depsgraph_update_post.remove(invalidate_geometry)
+    for event, handler in reversed(_HANDLERS):
+        getattr(bpy.app.handlers, event).remove(handler)
     clear_runtime()
-    del bpy.types.Scene.sdf_editor
+    sdf_settings.unregister_properties()
 
 
-classes = (SDFKey, SDFSource, SDFMask, SDFSettings, SDF_OT_workspace, SDF_OT_add_mask, SDF_OT_edit_islands, SDF_OT_rematch_uv, SDF_OT_remove_mask,
-           SDF_OT_toggle_auto_key, SDF_OT_key, SDF_OT_jump, SDF_OT_check_conflicts, SDF_OT_export, SDF_OT_radius, SDF_OT_select_tool, SDF_OT_brush_setting, SDF_OT_island_action, SDF_OT_stroke, SDF_OT_fill, SDF_MT_fill,
-           sdf_controls.SDF_OT_mask_details, sdf_controls.SDF_OT_canvas_control)
+classes = (
+    *sdf_settings.classes,
+    SDF_OT_workspace,
+    SDF_OT_add_mask, SDF_OT_edit_islands, SDF_OT_island_action, SDF_OT_rematch_uv, SDF_OT_remove_mask,
+    SDF_OT_toggle_auto_key, SDF_OT_key, SDF_OT_jump,
+    SDF_OT_check_conflicts, SDF_OT_export,
+    SDF_OT_radius, SDF_OT_select_tool, SDF_OT_brush_setting, SDF_OT_stroke, SDF_OT_fill, SDF_MT_fill,
+    sdf_controls.SDF_OT_mask_details, sdf_controls.SDF_OT_canvas_control,
+)

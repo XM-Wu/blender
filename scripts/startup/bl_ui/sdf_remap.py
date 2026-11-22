@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Bind SDF key images to base mesh face corners and resample them after UV edits."""
 
-import base64
-import zlib
-
 import bpy
 
 import numpy as np
@@ -26,11 +23,11 @@ def capture(mesh, layer, faces):
 
 
 def pack(records):
-    return base64.b85encode(zlib.compress(records.tobytes())).decode("ascii")
+    return field.pack_bytes(records.tobytes())
 
 
-def unpack(text):
-    return np.frombuffer(zlib.decompress(base64.b85decode(text)), dtype=CORNER)
+def unpack(text, corner_count):
+    return np.frombuffer(field.unpack_bytes(text, corner_count * CORNER.itemsize), dtype=CORNER)
 
 
 def triangles(mesh, records, target):
@@ -90,10 +87,18 @@ def sample_indices(old_uv, old_mask):
     return result
 
 
-def prepare(mask, *, active=False, target_name="", previous_name="", reference_file="", merge=False):
+def needs_original(mask):
+    return any(src.inferred_snapshot or not src.uv_snapshot for src in mask.sources)
+
+
+def prepare(mask, *, active=False, target_name="", previous_name="", reference_file="", merge=False,
+            accept_inferred=False):
     """Build the complete replacement before mutating any RNA data."""
     size = mask.size
     old_mask = field.decode(mask.coverage, size)
+    if not (reference_file or previous_name or accept_inferred) and needs_original(mask):
+        if any((field.decode(key.bitmap, size) & old_mask).any() for key in mask.keys):
+            raise ValueError("Choose the original UV map or blend file, or confirm the inferred original UVs")
     lookup = np.full((size, size), -1, np.int32)
     interior = np.zeros_like(old_mask)
     old_footprint = np.zeros_like(old_mask)
@@ -114,7 +119,7 @@ def prepare(mask, *, active=False, target_name="", previous_name="", reference_f
         if reference is not None:
             old = reference[source_index]
         elif src.uv_snapshot and not previous_name:
-            old = unpack(src.uv_snapshot)
+            old = unpack(src.uv_snapshot, len(new))
         else:
             previous = layers.get(previous_name or src.uv_name)
             if previous is None:
@@ -207,3 +212,4 @@ def bind_legacy(mask):
     if np.array_equal(footprint, field.decode(mask.coverage, mask.size)):
         for src, records in bindings:
             src.uv_snapshot = pack(records)
+            src.inferred_snapshot = True

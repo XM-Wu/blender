@@ -17,7 +17,7 @@ deadline = time.monotonic() + 45
 
 
 def capture(kind):
-    if phase not in ('off','on','dim','native','restored','previous','next','first','last','bad_before','bad_after','fixed') or bpy.context.area != areas[kind]:
+    if phase not in ('off','on','dim','native','restored','previous','next','first','last','bad_before','bad_after','fixed','wire_depth') or bpy.context.area != areas[kind]:
         return
     region = bpy.context.region
     fb = gpu.state.active_framebuffer_get()
@@ -42,8 +42,10 @@ def tick():
             bpy.ops.object.select_all(action='SELECT')
             bpy.ops.object.delete()
             mesh = bpy.data.meshes.new('Two quads')
-            mesh.from_pydata([(-1,-1,0),(0,-1,0),(1,-1,0),(-1,1,0),(0,1,0),(1,1,0)],[],
-                             [(0,1,4,3),(1,2,5,4)])
+            front = [(-1,-1,0),(0,-1,0),(1,-1,0),(-1,1,0),(0,1,0),(1,1,0)]
+            # Coprojected rear polygons with opposite ink are submitted last.
+            mesh.from_pydata(front + [(x,y,-.15) for x,y,_ in front], [],
+                             [(0,1,4,3),(1,2,5,4),(6,7,10,9),(7,8,11,10)])
             obj=bpy.data.objects.new('Canvas',mesh)
             c.scene.collection.objects.link(obj)
             c.view_layer.objects.active=obj
@@ -51,7 +53,9 @@ def tick():
             mesh.uv_layers.new(name='First')
             layer = mesh.uv_layers.new(name='Paint')
             for loop in mesh.loops:
-                x,y,_ = mesh.vertices[loop.vertex_index].co
+                x,y,z = mesh.vertices[loop.vertex_index].co
+                if z < 0:
+                    y = -y
                 layer.uv[loop.index].vector = ((x+1)/2,(y+1)/2)
             sub=obj.modifiers.new('Subdivide','SUBSURF')
             sub.subdivision_type='SIMPLE'
@@ -103,6 +107,16 @@ def tick():
                     assert np.max(abs(samples['restored',k]-base))<.02
                 assert np.max(abs(samples['native','3d']-samples['off','3d']))>.08
                 assert np.all(sdf_field.decode(s.mask.keys[0].bitmap,256)==(np.arange(256)[:,None]>=128))
+                space = areas['3d'].spaces.active
+                space.shading.type = 'WIREFRAME'
+                space.overlay.show_overlays = False
+                phase = 'wire_depth'
+            elif phase == 'wire_depth':
+                assert samples['wire_depth','3d'][2].max() < .03
+                assert samples['wire_depth','3d'][3].min() > .97
+                space = areas['3d'].spaces.active
+                space.shading.type = 'SOLID'
+                space.overlay.show_overlays = True
                 # Insert keys out of chronological order to check temporal neighbor selection.
                 mid = s.mask.keys[0].bitmap
                 s.value = 1
@@ -118,7 +132,7 @@ def tick():
                 c.window_manager.sdf_onion_skin = 'NEXT'
                 phase = 'next'
             elif phase == 'next':
-                from bl_ui.space_sdf import onion_reference
+                from bl_ui.sdf_preview import onion_reference
                 assert abs(onion_reference(s.mask,.6,'PREVIOUS').value-.45)<1e-6
                 assert onion_reference(s.mask,.6,'NEXT').value==1
                 s.value = 0

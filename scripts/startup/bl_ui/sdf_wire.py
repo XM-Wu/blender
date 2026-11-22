@@ -3,8 +3,10 @@
 
 import numpy as np
 
+from .sdf_pick import face_indices, mesh_array
 
-def edge_distances(mesh, faces, selected, loops, mesh_array, cage):
+
+def edge_distances(mesh, faces, selected, loops, cage):
     """Barycentric coordinates for real edges; constant one hides tessellation diagonals."""
     starts = mesh_array(mesh.polygons, "loop_start", 1, np.int32)
     counts = mesh_array(mesh.polygons, "loop_total", 1, np.int32)
@@ -31,7 +33,7 @@ def edge_distances(mesh, faces, selected, loops, mesh_array, cage):
     return np.where(boundary[:, None, :], np.eye(3, dtype=np.float32), np.float32(1)).reshape(-1, 3)
 
 
-def batch(source, dg, shader, is_3d, surface, cache, mesh_array, face_indices):
+def batch(source, dg, shader, is_3d, surface, cache):
     from gpu_extras.batch import batch_for_shader
 
     obj = source.object
@@ -43,20 +45,20 @@ def batch(source, dg, shader, is_3d, surface, cache, mesh_array, face_indices):
     if uv is None or len(uv.uv) != len(mesh.loops):
         return None
     faces = mesh_array(mesh.loop_triangles, "polygon_index", 1, np.int32)
-    face_ids = surface[0] if is_3d else tuple(face_indices(source.faces))
+    face_ids = surface.face_indices if is_3d else tuple(face_indices(source.faces))
     selected = np.isin(faces, face_ids)
     if not selected.any():
         return None
     loops = mesh_array(mesh.loop_triangles, "loops", 3, np.int32)[selected]
     if is_3d:
-        positions = surface[1].reshape(-1, 3)
-        coords = surface[2].reshape(-1, 2)
+        positions = surface.positions.reshape(-1, 3)
+        coords = surface.uvs.reshape(-1, 2)
     else:
         positions = coords = mesh_array(uv.uv, "vector", 2, np.float32)[loops].reshape(-1, 2)
     cache[token] = batch_for_shader(shader, 'TRIS', {
         'pos': positions,
         'texCoord': coords,
-        'edgeCoord': edge_distances(mesh, faces, selected, loops, mesh_array, cage=is_3d),
+        'edgeCoord': edge_distances(mesh, faces, selected, loops, cage=is_3d),
     })
     return cache[token]
 

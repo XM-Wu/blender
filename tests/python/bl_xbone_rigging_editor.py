@@ -85,4 +85,16 @@ with tempfile.TemporaryDirectory() as temp:
         assert bpy.ops.xbone.new_guide() == {'FINISHED'}
         assert bpy.ops.xbone.add_component(kind='LEG') == {'FINISHED'}
         assert bpy.ops.xbone.build_rig() == {'FINISHED'}
+    # The same file can be opened as a project or used as a personal startup.
+    bpy.data.batch_remove([bpy.data.workspaces["Rigging"]])
+    startup = str(Path(temp) / "personal-startup.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=startup)
+    bpy.ops.wm.open_mainfile(filepath=startup)
+    assert not any(w.get("xbone_rigging_workspace") for w in bpy.data.workspaces)
+    previous_tabs = set(bpy.data.workspaces.keys())
+    active_tab = bpy.context.window.workspace.name
+    bpy.ops.wm.read_homefile(filepath=startup)
+    assert set(bpy.data.workspaces.keys()) == previous_tabs | {"Rigging"}
+    assert bpy.context.window.workspace.name == active_tab
+    check_workspace(bpy.data.workspaces["Rigging"])
 print("Rigging editor: guides, rebuild, FK matching, viewport selection and .blend layout passed")

@@ -25,8 +25,9 @@ def ensure_rigging_workspace():
 
 
 @persistent
-def add_factory_workspace(_):
-    if not bpy.context.preferences.app_template:
+def add_startup_workspace(filepath):
+    # Blender sends an empty load_post path for both factory and user home files.
+    if not filepath and not bpy.context.preferences.app_template:
         ensure_rigging_workspace()
 
 
@@ -507,10 +508,10 @@ _register, _unregister = bpy.utils.register_classes_factory(classes)
 def register():
     _register()
     selector.register()
-    bpy.app.handlers.load_factory_startup_post.append(add_factory_workspace)
+    bpy.app.handlers.load_post.append(add_startup_workspace)
 
 
 def unregister():
-    bpy.app.handlers.load_factory_startup_post.remove(add_factory_workspace)
+    bpy.app.handlers.load_post.remove(add_startup_workspace)
     selector.unregister()
     _unregister()

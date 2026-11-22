@@ -17,7 +17,8 @@ class XBONE_OT_biped_guide(Operator):
     bl_idname = "xbone.biped_guide"
     bl_label = "Biped Template"
     bl_options = {'REGISTER', 'UNDO'}
-    template: EnumProperty(items=(('biped', "Biped", ""), ('game_biped', "Game Biped", "")))
+    template: EnumProperty(default='biped', items=(('biped', "Biped", ""), ('game_biped', "Game Biped", ""),
+                                                   ('xbiped', "XBiped", "Biped with a gliding knee joint")))
 
     @classmethod
     def poll(cls, context):
@@ -25,8 +26,12 @@ class XBONE_OT_biped_guide(Operator):
 
     def execute(self, context):
         game = self.template == 'game_biped'
-        points = guides.template_points(Path(__file__).with_name(self.template + ".sgt"), 0.01 if game else 0.1, 'Y')
-        guides.import_template(context, points, "Game Biped Guide" if game else "Biped Guide")
+        source = "game_biped.sgt" if game else "biped.sgt"
+        points = guides.template_points(Path(__file__).with_name(source), 0.01 if game else 0.1, 'Y')
+        names = {'biped': "Biped Guide", 'game_biped': "Game Biped Guide", 'xbiped': "XBiped Guide"}
+        guide = guides.import_template(context, points, names[self.template])
+        if self.template == 'xbiped':
+            guide["xbiped"] = True
         return {'FINISHED'}
 
 
@@ -206,7 +211,11 @@ class XBONE_OT_match_limb(Operator):
                 changed.append(pose[name])
             pole = pose[target["pole_control"]]
             pole_matrix = pole.matrix.copy()
-            pole_matrix.translation = builder.pole_point(*(m.translation for m in matrices))
+            if "knee_glide_pivot" in target:
+                from . import xbiped_knee
+                pole_matrix.translation = xbiped_knee.match_pole(rig, target, matrices)
+            else:
+                pole_matrix.translation = builder.pole_point(*(m.translation for m in matrices))
             desired = matrices[-1]
             if "foot_effector" in target:
                 offset = target.matrix.inverted_safe() @ pose[target["foot_effector"]].matrix
@@ -233,6 +242,13 @@ class XBONE_OT_match_limb(Operator):
                 pose[name].matrix = matrix @ pose[joint].bone.matrix_local.inverted_safe() @ pose[name].bone.matrix_local
                 changed.append(pose[name])
                 context.view_layer.update()
+                if "knee_glide_pivot" in target and name == target["fk_controls"][1]:
+                    # The animator rotates at the femoral end. The solved shin starts at
+                    # the displaced tibial end, so remove this offset exactly once.
+                    frame = pose[name].matrix.copy()
+                    frame.translation -= pose[target["knee_glide_pivot"]].head - pose[name].head
+                    pose[name].matrix = frame
+                    context.view_layer.update()
         rig[target["blend_property"]] = float(self.mode == 'IK')
         if context.scene.tool_settings.use_keyframe_insert_auto:
             rig.keyframe_insert(data_path='["' + bpy.utils.escape_identifier(target["blend_property"]) + '"]')
@@ -315,7 +331,8 @@ class XBONE_PT_rigging(Panel):
         obj = context.active_object
         role = obj.get("rigging_role") if obj else None
         if context.mode == 'OBJECT':
-            layout.operator("xbone.biped_guide")
+            layout.operator("xbone.biped_guide").template = 'biped'
+            layout.operator("xbone.biped_guide", text="XBiped Template").template = 'xbiped'
             layout.operator("xbone.biped_guide", text="Game Biped Template").template = 'game_biped'
             layout.operator("xbone.import_guide", text="Import Shifter Template (.sgt)")
             layout.operator("xbone.new_guide")
@@ -357,6 +374,9 @@ class XBONE_PT_rigging(Panel):
                 if prop:
                     box = layout.box()
                     box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
+                    if "knee_glide" in control:
+                        box.prop(control, '["knee_glide"]', text="Knee Glide", slider=True)
+                        box.prop(control, '["knee_internal_rotation"]', text="Tibial Rotation (°)")
                     active = context.active_pose_bone
                     if active and (active == control or active.get("limb_control") == control.name) and "ikscale" in control:
                         from .limb_parameters import PARAMETERS

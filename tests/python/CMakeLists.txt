@@ -810,6 +810,10 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     bl_xbone_selector
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
   )
+  add_blender_test(
+    bl_xbone_xbiped
+    --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_xbiped.py
+  )
 endif()
 
 if(WITH_IK_SOLVER AND WITH_IK_ITASC)

@@ -15,6 +15,21 @@ Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guid
 - Rotate FK controls to pose their chains. The limb property blends from FK at 0 to IK at 1. **Match IK** and **Match FK** preserve the pose and select the incoming endpoint control. With Auto Key enabled the operator keys the matched channels and the switch at the current frame. The Biped eye targets aim each eye individually, and the shared eye control moves both targets.
 - To export a rest skeleton to FBX, select the generated rig, set the armature to **Rest Position**, and enable **Selected Objects** and **Only Deform Bones** in the FBX exporter. Return to **Pose Position** for animation. Controller and solver bones have deformation disabled.
 
+## XBiped knees
+
+Choose **XBiped Template → Build Rig** for the Biped controls and skin skeleton with sliding knees.
+Each leg has a **Knee Glide** slider in the Rigging sidebar. At zero the two knee pivots coincide.
+At full strength the tibial pivot moves anteriorly relative to the femoral end in the bend plane.
+Travel increases smoothly from 60° to 155° of flexion and peaks at 3.5% of shin length.
+**Tibial Rotation (°)** adds inward rotation to the shin skin joints along their longitudinal
+axes using the same bend profile (6° at full strength by default). The approximation models bone
+movement only. Both default values are rig parameters rather than subject-specific measurements.
+
+FK carries the ankle and foot with the sliding shin. IK solves the two joint centers against the
+reverse-foot effector and pole, keeping reachable ankles planted. Use **Match IK** or **Match FK**
+to retain the current pose when switching. The existing Biped and Game Biped templates keep their
+original solvers and export hierarchies.
+
 ## Selector
 
 Split an area and choose **Animation → Selector** in its editor type menu. Choose the character in the header. Classic Biped opens the mGear Biped picker. Game Biped and custom rigs open a board of their selectable controls. The header also switches pages and imports or exports polygon pickers in mGear's `.pkr` format. Imported layouts and available background images are stored on the character in the blend file.

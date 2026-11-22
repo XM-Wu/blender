@@ -27748,6 +27748,34 @@ msgid "Show Skeleton"
 msgstr "显示骨架"
 
 
+msgid "Mesh Bindings"
+msgstr "网格绑定"
+
+
+msgid "Add Armature to Selected Meshes"
+msgstr "为选中网格添加骨架修改器"
+
+
+msgid "Select Bound Meshes"
+msgstr "全选绑定网格"
+
+
+msgid "Remove XBone Modifiers"
+msgstr "清除当前 XBone 修改器"
+
+
+msgid "Remove modifiers targeting {rig} from {count} scene meshes?"
+msgstr "清除当前场景中 {count} 个网格上指向 {rig} 的骨架修改器？"
+
+
+msgid "Select an XBone to manage mesh bindings"
+msgstr "选择 XBone 以管理绑定网格"
+
+
+msgid "No bound meshes"
+msgstr "没有绑定的网格"
+
+
 msgid "Import Layers"
 msgstr "导入层"
 

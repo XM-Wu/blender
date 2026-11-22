@@ -10,7 +10,7 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
 from . import builder, guides, rebuild
-from . import guide_display, selector
+from . import guide_display, mesh_bindings, selector
 from .guide_symmetry import XBONE_OT_symmetrize_guide
 
 
@@ -501,11 +501,12 @@ classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBON
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
-           RIGGING_PT_guide, RIGGING_PT_rig, RIGGING_PT_pose)
+           RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)
 
 
 def register():
+    mesh_bindings.register()
     _register()
     selector.register()
     bpy.app.handlers.load_post.append(add_startup_workspace)
@@ -515,3 +516,4 @@ def unregister():
     bpy.app.handlers.load_post.remove(add_startup_workspace)
     selector.unregister()
     _unregister()
+    mesh_bindings.unregister()

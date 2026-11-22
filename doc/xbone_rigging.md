@@ -4,6 +4,11 @@ Select the **Rigging** workspace tab or open it from the workspace **+ → Riggi
 
 In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
 
+In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
+The list shows all meshes in the current scene with an Armature modifier targeting that XBone, including hidden meshes.
+Click a name to select one mesh or **Select Bound Meshes** to select all selectable matches in the current view layer.
+**Remove XBone Modifiers** removes every editable matching modifier in the scene while retaining vertex groups and skin layers.
+
 Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
 
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.

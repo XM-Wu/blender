@@ -38,6 +38,7 @@ void operatortypes_object()
   WM_operatortype_append(OBJECT_OT_transform_axis_target);
   WM_operatortype_append(OBJECT_OT_origin_set);
 
+  WM_operatortype_append(OBJECT_OT_sdf_paint_toggle);
   WM_operatortype_append(OBJECT_OT_mode_set);
   WM_operatortype_append(OBJECT_OT_mode_set_with_submode);
   WM_operatortype_append(OBJECT_OT_editmode_toggle);

@@ -5,6 +5,7 @@ import bpy
 import math
 
 from .limb_parameters import drive
+from . import xbiped_limb
 
 
 def build(rig, guide):
@@ -26,6 +27,7 @@ def build(rig, guide):
         return b
 
     limbs = []
+    gliding_limbs = {}
     for tip in guide.data.bones:
         comp = tip.get("ik_limb")
         if not comp or "MCH.Reach." + tip.parent.parent.name not in edit:
@@ -50,19 +52,23 @@ def build(rig, guide):
         plane = helper(comp + ".plane", basis, None)
         roll = helper(comp + ".roll", basis, plane)
         middle = helper(comp + ".mid", basis, roll)
+        lower_pivot = middle
+        if guide.get("xbiped") and comp in {"leg_L0", "leg_R0", "arm_L0", "arm_R0"}:
+            lower_pivot = helper(comp + "." + xbiped_limb.limb(comp).lower, basis, roll)
+            gliding_limbs[comp] = xbiped_limb.create_fk(edit, helper, comp, tip, across)
         terminal = helper(comp + ".tip", basis, roll)
         f = basis.copy()
         f.translation += basis.to_3x3().col[2]
         normal = helper(comp + ".normal", f, roll)
-        lower_normal = helper(comp + ".lowerNormal", f, middle)
+        lower_normal = helper(comp + ".lowerNormal", f, lower_pivot)
         frames = []
-        for source, finish, parent in ((root, mid, plane), (mid, end, middle)):
+        for source, finish, parent in ((root, mid, plane), (mid, end, lower_pivot)):
             y = (finish.head - source.head).normalized()
             z = basis.to_3x3().col[2].normalized()
             frame = Matrix((y.cross(z), y, z)).transposed().to_4x4()
             frame.translation = source.head
             alignment = helper(source.name + ".axis", frame, parent)
-            if parent == middle:
+            if parent == lower_pivot:
                 # The middle marker has its origin at the root in rest space.
                 alignment.translate(root.head - alignment.head)
             result = helper(source.name + ".result", alignment.matrix.copy(), alignment)
@@ -71,7 +77,7 @@ def build(rig, guide):
             mat.translation = alignment.head
             result.matrix = mat
             frames.append((alignment.name, result.name, source.name,
-                           lower_normal.name if parent == middle else normal.name))
+                           lower_normal.name if parent == lower_pivot else normal.name))
         length = (root.head - mid.head).length + (mid.head - end.head).length
         limbs.append((comp, goal, pole, plane.name, roll.name, middle.name, terminal.name, normal.name,
                       frames, root.name, mid.name, end.name, "MCH.Reach." + tip.parent.parent.name, length))
@@ -143,8 +149,11 @@ def build(rig, guide):
         b = calc("scaled_b", "b*g", b=b, g=(origin, "world_factor"))
         d = calc("triangle_d", "distance*scale*g", distance=(origin, "distance"),
                  scale=(target, "ikscale"), g=(origin, "world_factor"))
-        reach = calc("triangle_reach", "d if abs(a-b)+0.000001<d<a+b else a+b", a=a, b=b, d=d)
-        along = calc("triangle_along", "(a*a+d*d-b*b)/(2*d) if abs(a-b)+0.000001<d<a+b else a", a=a, b=b, d=d)
+        if comp in gliding_limbs:
+            reach, along = xbiped_limb.solve(rig, target, comp, gliding_limbs[comp], calc, a, b, d, length)
+        else:
+            reach = calc("triangle_reach", "d if abs(a-b)+0.000001<d<a+b else a+b", a=a, b=b, d=d)
+            along = calc("triangle_along", "(a*a+d*d-b*b)/(2*d) if abs(a-b)+0.000001<d<a+b else a", a=a, b=b, d=d)
         drive(pose[mid], "location", f"along*{length:.12g}", {"along": along}, 1)
         drive(pose[mid], "location", f"sqrt(max(0,a*a-along*along))*{length:.12g}*(-1 if rev>0.5 else 1)",
               {"a": a, "along": along, "rev": (target, "reverse")}, 0)

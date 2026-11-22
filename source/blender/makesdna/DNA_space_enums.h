@@ -794,6 +794,7 @@ enum eSpaceImage_Mode : char {
   SI_MODE_PAINT = 1,
   SI_MODE_MASK = 2,
   SI_MODE_UV = 3,
+  SI_MODE_SDF = 4,
 };
 
 /** #SpaceImage.flag */
@@ -1216,8 +1217,9 @@ enum eSpace_Type : char {
   SPACE_PROJECT = 24,
   SPACE_WEIGHT_LAYERS = 25,
   SPACE_SELECTOR = 26,
+  SPACE_RIGGING = 27,
 
-#define SPACE_TYPE_NUM (SPACE_SELECTOR + 1)
+#define SPACE_TYPE_NUM (SPACE_RIGGING + 1)
 };
 
 /* use for function args */

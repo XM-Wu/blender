@@ -139,6 +139,10 @@ def run():
     twin = obj.copy()
     scene.collection.objects.link(twin)
     bpy.context.view_layer.objects.active = twin
+    twin.skin_layers.index = 0
+    for action in ('DOWN', 'MERGE'):
+        assert bpy.ops.paint.skin_layer_edit(action=action) == {'CANCELLED'}
+        assert twin.skin_layers.prefix == state.prefix
     twin.skin_layers.layers[1].opacity = 0
     assert twin.skin_layers.prefix != state.prefix
     near(posed_x(), 0.3)

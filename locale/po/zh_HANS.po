@@ -27636,6 +27636,270 @@ msgid "Weight Paint"
 msgstr "权重绘制"
 
 
+msgid "Pick UV Islands"
+msgstr "点选 UV 岛"
+
+
+msgid "Click UV islands to toggle selection"
+msgstr "单击 UV 岛可选中或取消选择"
+
+
+msgid "Overlapping UV Islands"
+msgstr "重叠的 UV 岛"
+
+
+msgid "{} selected"
+msgstr "已选 {} 个"
+
+
+msgid "Add a mask to paint"
+msgstr "请先创建遮罩再绘制"
+
+
+msgid "Add or select a paint key"
+msgstr "请先添加或选中绘制关键帧"
+
+
+msgid "Adjust SDF Brush Radius"
+msgstr "调整 SDF 笔刷半径"
+
+
+msgid "Radius (texels)"
+msgstr "半径（纹素）"
+
+
+msgid "Pick a UV island inside the 0–1 tile"
+msgstr "请在 0–1 UV 范围内选择至少一个岛"
+
+
+msgid "SDF Maps"
+msgstr "SDF 列表"
+
+
+msgid "SDF Mask"
+msgstr "SDF 遮罩"
+
+
+msgid "Entire Mask"
+msgstr "整个遮罩"
+
+
+msgid "Local X < 0"
+msgstr "局部 −X 侧"
+
+
+msgid "Local X > 0"
+msgstr "局部 +X 侧"
+
+
+msgid "Bucket Fill"
+msgstr "油漆桶填充"
+
+
+msgid "Fill SDF Key"
+msgstr "填充 SDF 关键帧"
+
+
+msgid "Connected Region"
+msgstr "连通区域"
+
+
+msgid "SDF Canvas Controls"
+msgstr "SDF 画布控件"
+
+
+msgid "SDF Pen"
+msgstr "SDF 钢笔"
+
+
+msgid "Use Pressure for Radius"
+msgstr "使用笔压控制半径"
+
+
+msgid "Click surface points or drag Bezier handles, then press Enter to paint the line"
+msgstr "单击表面放置控制点，拖动调整贝塞尔手柄，按回车绘制线条"
+
+
+msgid "Click: add point   •   Drag: curve handle   •   Backspace: remove point   •   Enter: finish   •   Esc: cancel"
+msgstr "单击添加点　·　拖动调整曲线手柄　·　退格删除上一点　·　回车完成　·　Esc 取消"
+
+
+msgid "Edit UV Islands"
+msgstr "编辑 UV 岛"
+
+
+msgid "Apply Selection"
+msgstr "应用选择"
+
+
+msgid "The mask source mesh is missing"
+msgstr "找不到遮罩使用的网格"
+
+
+msgid "UV Mirror"
+msgstr "UV 镜像"
+
+
+msgid "Mesh Mirror Axis"
+msgstr "模型镜像轴"
+
+
+msgid "Local mesh axis used to pair symmetric faces"
+msgstr "按此模型局部轴配对对称面"
+
+
+msgid "Select both sides, then choose the target"
+msgstr "选中两侧的面，正负号表示写入侧"
+
+
+msgid "Rematch UV"
+msgstr "重新匹配 UV"
+
+
+msgid "Target UV"
+msgstr "目标 UV"
+
+
+msgid "Recorded Map"
+msgstr "已记录的 UV 层"
+
+
+msgid "Active Map"
+msgstr "活动 UV 层"
+
+
+msgid "Named Map"
+msgstr "指定名称的 UV 层"
+
+
+msgid "Original Blend File"
+msgstr "原始 UV 工程"
+
+
+msgid "Original UV Override"
+msgstr "指定原始 UV 层"
+
+
+msgid "Merge White on Overlap"
+msgstr "重叠时合并白色"
+
+
+msgid "Reproject all keys of the selected mask"
+msgstr "将当前遮罩的所有关键帧重投影到目标 UV"
+
+
+msgid "Original UV layout does not match the mask. Choose the original UV map"
+msgstr "原始 UV 与遮罩不匹配，请选择修改前的 UV 层或工程备份"
+
+
+msgid "UV layout changed. Rematch UV before editing the island selection"
+msgstr "UV 布局已改变，请先重新匹配 UV 再编辑选岛"
+
+
+msgid "SDF Wireframe"
+msgstr "SDF 线框"
+
+
+msgid "Wire Opacity"
+msgstr "线框不透明度"
+
+
+msgid "Show the mask mesh edges over the SDF in both paint views"
+msgstr "在 3D 和 2D 绘制视图中叠加当前遮罩的网格边线"
+
+
+msgid "Previous Key"
+msgstr "上一关键帧"
+
+
+msgid "Next Key"
+msgstr "下一关键帧"
+
+
+msgid "Show the current SDF only"
+msgstr "仅显示当前 SDF"
+
+
+msgid "Compare against the nearest earlier SDF key"
+msgstr "将上一个 SDF 关键帧以红色与当前底色混合"
+
+
+msgid "Compare against the nearest later SDF key"
+msgstr "将下一个 SDF 关键帧以红色与当前底色混合"
+
+
+msgid "Check Conflicts"
+msgstr "检查冲突"
+
+
+msgid "Hide Markers"
+msgstr "隐藏标记"
+
+
+msgid "No SDF key conflicts"
+msgstr "没有 SDF 关键帧冲突"
+
+
+msgid "Jump to the first white-to-black transition and highlight its pixels"
+msgstr "跳到第一组白变黑的关键帧并标红冲突像素"
+
+
+msgid "Use inferred original UVs"
+msgstr "使用推断的原始 UV"
+
+
+msgid "I confirm these inferred face UVs match the original painted layout"
+msgstr "确认推断的逐面 UV 与绘制时一致"
+
+
+msgid "Matching the outline cannot verify the original face UVs"
+msgstr "轮廓一致无法验证原始逐面 UV"
+
+
+msgid "Choose the original UV map or blend file, or confirm the inferred original UVs"
+msgstr "请选择原始 UV 层或工程文件，或确认推断的 UV 确为原始布局"
+
+
+msgid "SDF Paint"
+msgstr "SDF 绘制"
+
+
+msgid "SDF Paint Workspace"
+msgstr "SDF 绘制工作区"
+
+
+msgid "SDF Brush"
+msgstr "SDF 画笔"
+
+
+msgid "SDF Editor"
+msgstr "SDF 编辑器"
+
+
+msgid "Select mesh objects and enter SDF Paint"
+msgstr "请选择网格并进入 SDF 绘制模式"
+
+
+msgid "Add SDF Mask"
+msgstr "添加 SDF 遮罩"
+
+
+msgid "Paint Mode Meshes"
+msgstr "绘制模式中的网格"
+
+
+msgid "Selected UV Faces"
+msgstr "选中的 UV 面"
+
+
+msgid "Add a key here to paint"
+msgstr "在此处添加关键帧即可绘制"
+
+
+msgid "Include this mesh when entering SDF Paint"
+msgstr "进入 SDF 绘制模式时请选中此网格"
+
+
 msgid "Texture Paint"
 msgstr "纹理绘制"
 

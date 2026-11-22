@@ -366,35 +366,45 @@ add_blender_test(
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_pyapi_text.py
 )
 
-add_blender_test(
-  script_quick_lattice
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_quick_lattice.py
+foreach(test_name IN ITEMS
+  quick_lattice
+  sdf_editor
+  sdf_fill
+  sdf_ink_undo
+  sdf_remap
+  skin_layers
+  skin_layers_v2
+  uv_fit_align
+  uv_fit_lifetime
+  uv_group_buttons
+  uv_group_lifecycle
+  uv_group_material
+  uv_group_registry
+  uv_heuristic
+  uv_icon_resources
+  uv_loop_select
+  uv_orientation_references
+  uv_pack_to_others
+  uv_stack_detect
+  uv_texel_pack
+  uv_tools
+  uv_transform
+  uv_workspace_defaults
+  workplane
+  xm_keymap_compat
 )
+  add_blender_test(
+    script_${test_name}
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_${test_name}.py
+  )
+  set_tests_properties(script_${test_name} PROPERTIES LABELS "xblender")
+endforeach()
 
 add_blender_test(
-  script_skin_layers_v2
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_skin_layers_v2.py
+  script_mesh_omni_extrude
+  --python ${CMAKE_CURRENT_LIST_DIR}/mesh_omni_extrude.py -- --installed
 )
-
-add_blender_test(
-  script_skin_layers
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_skin_layers.py
-)
-
-add_blender_test(
-  script_uv_tools
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_tools.py
-)
-
-add_blender_test(
-  script_uv_texel_pack
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_texel_pack.py
-)
-
-add_blender_test(
-  script_uv_stack_detect
-  --python ${CMAKE_CURRENT_LIST_DIR}/bl_uv_stack_detect.py
-)
+set_tests_properties(script_mesh_omni_extrude PROPERTIES LABELS "xblender")
 
 add_blender_test(
   script_pyapi_bmesh
@@ -799,6 +809,7 @@ if(WITH_IO_FBX)
     --
     "${TEST_SRC_DIR}/io_tests/fbx"
   )
+  set_tests_properties(bl_io_xbone_fbx PROPERTIES LABELS "xblender")
 endif()
 
 if(WITH_IK_SOLVER AND WITH_IO_FBX)
@@ -810,6 +821,18 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     bl_xbone_selector
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
   )
+  add_blender_test(
+    bl_xbone_rigging_editor
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging_editor.py
+  )
+  add_blender_test(
+    bl_xbone_xbiped
+    --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_xbiped.py
+  )
+  set_tests_properties(
+    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_xbiped
+    PROPERTIES LABELS "xblender"
+  )
 endif()
 
 if(WITH_IK_SOLVER AND WITH_IK_ITASC)
@@ -817,22 +840,26 @@ if(WITH_IK_SOLVER AND WITH_IK_ITASC)
     bl_xbone_ik
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_ik.py
   )
+  set_tests_properties(bl_xbone_ik PROPERTIES LABELS "xblender")
 endif()
 
 add_blender_test(
   bl_armature_batch_rename
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_armature_batch_rename.py
 )
+set_tests_properties(bl_armature_batch_rename PROPERTIES LABELS "xblender")
 
 add_blender_test(
   bl_xbone_orient
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_orient.py
 )
+set_tests_properties(bl_xbone_orient PROPERTIES LABELS "xblender")
 
 add_blender_test(
   bl_animation_xbone
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_animation_xbone.py
 )
+set_tests_properties(bl_animation_xbone PROPERTIES LABELS "xblender")
 
 add_blender_test(
   bl_xbone_dynamics

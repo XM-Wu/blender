@@ -133,6 +133,7 @@ const EnumPropertyItem rna_enum_space_type_items[] = {
      "Edit drivers and keyframe interpolation"},
     {SPACE_NLA, "NLA_EDITOR", ICON_NLA, "Nonlinear Animation", "Combine and layer Actions"},
 
+    {SPACE_RIGGING, "RIGGING", ICON_BONE_DATA, "Rigging", "Build and edit XBone character rigs"},
     {SPACE_SELECTOR, "SELECTOR", ICON_ARMATURE_DATA, "Selector", "Select rig controls on a 2D picker"},
 
     /* Scripting. */
@@ -315,12 +316,14 @@ const EnumPropertyItem rna_enum_space_action_mode_items[] = {
 #define SI_ITEM_VIEW(identifier, name, icon) \
   {SI_MODE_VIEW, identifier, icon, name, "Inspect images or render results"}
 #define SI_ITEM_UV {SI_MODE_UV, "UV", ICON_UV, "UV Editor", "View and edit UVs"}
+#define SI_ITEM_SDF {SI_MODE_SDF, "SDF", ICON_IMAGE_DATA, "SDF Editor", "Paint facial shadow thresholds"}
 #define SI_ITEM_PAINT {SI_MODE_PAINT, "PAINT", ICON_TPAINT_HLT, "Paint", "Paint images in 2D"}
 #define SI_ITEM_MASK {SI_MODE_MASK, "MASK", ICON_MOD_MASK, "Mask", "View and edit masks"}
 
 const EnumPropertyItem rna_enum_space_image_mode_all_items[] = {
     SI_ITEM_VIEW("VIEW", "View", ICON_FILE_IMAGE),
     SI_ITEM_UV,
+    SI_ITEM_SDF,
     SI_ITEM_PAINT,
     SI_ITEM_MASK,
     {0, nullptr, 0, nullptr, nullptr},
@@ -336,11 +339,13 @@ static const EnumPropertyItem rna_enum_space_image_mode_ui_items[] = {
 const EnumPropertyItem rna_enum_space_image_mode_items[] = {
     SI_ITEM_VIEW("IMAGE_EDITOR", "Image Editor", ICON_IMAGE),
     SI_ITEM_UV,
+    SI_ITEM_SDF,
     {0, nullptr, 0, nullptr, nullptr},
 };
 
 #undef SI_ITEM_VIEW
 #undef SI_ITEM_UV
+#undef SI_ITEM_SDF
 #undef SI_ITEM_PAINT
 #undef SI_ITEM_MASK
 
@@ -831,6 +836,8 @@ static StructRNA *rna_Space_refine(PointerRNA *ptr)
       return RNA_SpaceClipEditor;
     case SPACE_SPREADSHEET:
       return RNA_SpaceSpreadsheet;
+    case SPACE_RIGGING:
+      return RNA_SpaceRigging;
     case SPACE_SELECTOR:
       return RNA_SpaceSelector;
     case SPACE_WEIGHT_LAYERS:
@@ -9840,6 +9847,9 @@ void RNA_def_space(BlenderRNA *brna)
   StructRNA *weight_layers = RNA_def_struct(brna, "SpaceWeightLayers", "Space");
   RNA_def_struct_sdna(weight_layers, "SpaceLink");
   RNA_def_struct_ui_text(weight_layers, "Weight Layers", "Layered skin weight editor");
+  StructRNA *rigging = RNA_def_struct(brna, "SpaceRigging", "Space");
+  RNA_def_struct_sdna(rigging, "SpaceLink");
+  RNA_def_struct_ui_text(rigging, "Rigging", "XBone guide and rig editor");
   StructRNA *selector = RNA_def_struct(brna, "SpaceSelector", "Space");
   RNA_def_struct_ui_text(selector, "Selector", "Rig control picker");
   PropertyRNA *prop = RNA_def_property(selector, "page", PROP_INT, PROP_NONE);

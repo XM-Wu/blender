@@ -9,6 +9,7 @@ from mathutils import Matrix, Vector
 from .biped_skeleton import limb_samples, read_frame
 from .limb_parameters import drive
 from .affine import LocalFrames
+from . import xbiped_limb
 
 
 def build(rig, guide, bind_plan):
@@ -35,6 +36,7 @@ def build(rig, guide, bind_plan):
     volume_outputs = []
     mid_reads = []
     root_aims = []
+    glide_offsets = []
     with Path(__file__).with_name("biped_pivots.json").open() as stream:
         references = json.load(stream)
     basis = Matrix.Rotation(math.pi / 2, 3, 'X') if guide["biped_display_up"] == 'Y' else Matrix.Identity(3)
@@ -71,10 +73,19 @@ def build(rig, guide, bind_plan):
             shoulder = next(b for b in guide.data.bones if b.get("biped_locator") == "shoulder_" + comp.split("_")[1])
             upstream = edit["FK." + shoulder.name]
         aim = edit[helper(comp + ".rootAim", upstream, anchors[0].head, axes[0])]
-        root_aims.append((aim.name, root.name, tip.parent.name))
+        leg = comp.startswith("leg")
+        aim_target = tip.parent.name
+        gliding = guide.get("xbiped") and comp in {"arm_L0", "arm_R0", "leg_L0", "leg_R0"}
+        if gliding:
+            joint = edit[aim_target]
+            upper_prefix = comp + "." + xbiped_limb.limb(comp).upper_pivot
+            upper_end = aligned(upper_prefix + "Pivot", joint, joint.matrix.copy())
+            delta = "MCH.Triangle." + comp + ".glideDelta"
+            glide_offsets.append((upper_end.name, delta))
+            aim_target = upper_end.name
+        root_aims.append((aim.name, root.name, aim_target))
         parents = []
         rotations = []
-        leg = comp.startswith("leg")
         # rollSplineKine uses the parent frames for its interpolated up vector,
         # but the child rotations for the Bézier tangents and the local X roll.
         for i, guide_joint in enumerate((root, tip.parent, tip)):
@@ -95,6 +106,11 @@ def build(rig, guide, bind_plan):
         samples = limb_samples(root.get("div0", 2), root.get("div1", 2), root.get("supportJoints", True))
         for half in (0, 1):
             start, end = anchors[half:half + 2]
+            end_rotation = edit[rotations[half + 1]]
+            if half == 0 and gliding:
+                end = aligned(upper_prefix + "End", end, end.matrix.copy())
+                end_rotation = aligned(upper_prefix + "Tangent", end_rotation, end_rotation.matrix.copy())
+                glide_offsets.extend(((end.name, delta), (end_rotation.name, delta)))
             direction_sign = -1 if comp.endswith("R0") else 1
             start_dir, end_dir = (edit[n].matrix.to_3x3().col[0].normalized() *
                                   direction_sign for n in rotations[half:half + 2])
@@ -102,7 +118,7 @@ def build(rig, guide, bind_plan):
             a, b = start.head.copy(), end.head.copy()
             ha, hb = a + start_dir * epsilon, b - end_dir * epsilon
             h0 = helper(comp + str(half) + ".a", edit[rotations[half]], ha, start_dir)
-            h1 = helper(comp + str(half) + ".b", edit[rotations[half + 1]], hb, end_dir)
+            h1 = helper(comp + str(half) + ".b", end_rotation, hb, end_dir)
             probes = []
             for i, u in enumerate(samples):
                 if (u >= .5) != bool(half):
@@ -157,6 +173,8 @@ def build(rig, guide, bind_plan):
         c.target, c.subtarget = rig, target
         c.target_space = c.owner_space = 'POSE'
         return c
+    for owner, delta in glide_offsets:
+        constraint(owner, 'COPY_LOCATION', delta).use_offset = True
     for probe, rot in mid_reads:
         constraint(probe, 'COPY_ROTATION', rot)
     for aim, root, mid in root_aims:
@@ -229,6 +247,21 @@ def build(rig, guide, bind_plan):
             dr.expression = f"2*atan2(sin({a})*magnitude/max(0.000001,objectScale*{unit:.12g}),cos({a}))"
         elif half == 0:
             drive(pb, "rotation_euler", f"radians(a)*{1 - f:.12g}", {"a": (ctl, "aproll")}, 0)
+        if half and guide.get("xbiped"):
+            spec = xbiped_limb.limb(comp)
+            if not comp.startswith("leg"):
+                dr = pb.driver_add("rotation_euler", 0).driver
+                dr.expression = "0"
+            reach = pose["MCH.Reach." + guide.data.bones[tip].parent.parent.name]
+            for alias, source, key in (("flex", reach, spec.joint + "_coupling"), ("inward", ctl, spec.twist)):
+                var = dr.variables.new()
+                var.name = alias
+                var.targets[0].id = rig
+                var.targets[0].data_path = source.path_from_id() + '["' + key + '"]'
+            # Positive inward rotation is mirrored about the character's
+            # center, independently of each exported joint's X convention.
+            sign = (1 if track == 'TRACK_X' else -1) * (1 if comp.endswith("L0") else -1)
+            dr.expression += f"+{sign}*radians(inward)*flex"
     volumes = set()
     for name, skin, root_scale, comp, root, mid, tip in volume_outputs:
         ctl = pose["IK." + tip]

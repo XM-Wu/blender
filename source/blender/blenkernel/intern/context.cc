@@ -1454,6 +1454,9 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
       if (object_mode & OB_MODE_VERTEX_PAINT) {
         return CTX_MODE_PAINT_VERTEX;
       }
+      if (object_mode & OB_MODE_SDF_PAINT) {
+        return CTX_MODE_PAINT_SDF;
+      }
       if (object_mode & OB_MODE_TEXTURE_PAINT) {
         return CTX_MODE_PAINT_TEXTURE;
       }
@@ -1532,6 +1535,7 @@ static const char *data_mode_strings[] = {
     "grease_pencil_sculpt",
     "grease_pencil_weight",
     "grease_pencil_vertex",
+    "sdf_paint",
     nullptr,
 };
 BLI_STATIC_ASSERT(ARRAY_SIZE(data_mode_strings) == CTX_MODE_NUM + 1,

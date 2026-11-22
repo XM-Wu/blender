@@ -84,6 +84,7 @@ void ED_spacetypes_init()
   ED_spacetype_userpref();
   ED_spacetype_clip();
   ED_spacetype_project();
+  ED_spacetype_rigging();
   ED_spacetype_selector();
   ED_spacetype_weight_layers();
   ED_spacetype_statusbar();

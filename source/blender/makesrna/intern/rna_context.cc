@@ -33,6 +33,7 @@ const EnumPropertyItem rna_enum_context_mode_items[] = {
     {CTX_MODE_SCULPT, "SCULPT", 0, "Sculpt", ""},
     {CTX_MODE_PAINT_WEIGHT, "PAINT_WEIGHT", 0, "Weight Paint", ""},
     {CTX_MODE_PAINT_VERTEX, "PAINT_VERTEX", 0, "Vertex Paint", ""},
+    {CTX_MODE_PAINT_SDF, "PAINT_SDF", 0, "SDF Paint", ""},
     {CTX_MODE_PAINT_TEXTURE, "PAINT_TEXTURE", 0, "Texture Paint", ""},
     {CTX_MODE_PARTICLE, "PARTICLE", 0, "Particle", ""},
     {CTX_MODE_OBJECT, "OBJECT", 0, "Object", ""},

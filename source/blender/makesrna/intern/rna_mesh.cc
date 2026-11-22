@@ -530,6 +530,13 @@ static void rna_MeshPolygon_normal_get(PointerRNA *ptr, float *values)
   copy_v3_v3(values, result);
 }
 
+static int rna_MeshPolygon_original_index_get(PointerRNA *ptr)
+{
+  const Mesh *mesh = rna_mesh(ptr);
+  const int *indices = static_cast<const int *>(CustomData_get_layer(&mesh->face_data, CD_ORIGINDEX));
+  return indices ? indices[rna_MeshPolygon_index_get(ptr)] : -1;
+}
+
 static bool rna_MeshPolygon_hide_get(PointerRNA *ptr)
 {
   const Mesh *mesh = rna_mesh(ptr);
@@ -2388,6 +2395,11 @@ static void rna_def_mpolygon(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_int_funcs(prop, "rna_MeshPolygon_index_get", nullptr, nullptr);
   RNA_def_property_ui_text(prop, "Index", "Index of this face");
+
+  prop = RNA_def_property(srna, "original_index", PROP_INT, PROP_NONE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_int_funcs(prop, "rna_MeshPolygon_original_index_get", nullptr, nullptr);
+  RNA_def_property_ui_text(prop, "Original Index", "Source polygon of an evaluated face, or -1 if unavailable");
 
   func = RNA_def_function(srna, "flip", "rna_MeshPolygon_flip");
   RNA_def_function_flag(func, FUNC_USE_SELF_ID);

@@ -45,6 +45,17 @@ class TestUVAreaDistortion(unittest.TestCase):
 
 
 class TestIncrementalCache(unittest.TestCase):
+    def test_empty_selection_has_no_distortion(self):
+        import bpy
+        from bl_operators.uv_tools_cache import EditCache
+        if bpy.context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        cache = EditCache(bpy.context)
+        self.assertEqual(cache.count, 0)
+        self.assertEqual(sum(cache.distortion_bins), 0)
+        self.assertFalse(cache.update())
+
     def test_local_uv_edit_matches_full_rebuild(self):
         import bpy
         import numpy as np

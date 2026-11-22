@@ -1,10 +1,10 @@
 # XBone Rigging
 
-Open **3D Viewport → Sidebar (N) → Rigging** in Object Mode.
+Open an area's editor type menu and choose **Animation → Rigging**. To work beside the character, split the 3D Viewport and set one area to Rigging. The editor follows the active object and bone in the current view layer. In Object Mode, **Create Guide** offers the templates and import tools.
 
 In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
 
-Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
+Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
 
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.
@@ -14,6 +14,36 @@ Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guid
 - The bundled Biped uses rest curves sampled from a Maya 2027 Shifter build, including the world octagon, nested ground squares and sided limb outlines. The pole lines follow the knees and elbows as the rig is posed. Supplemental Shifter outlines follow their XBone joints as display geometry. **Show Additional FK Controls** exposes XBone controls without a matching Shifter outline. Create a new Biped guide and build it to get this layout in an existing scene.
 - Rotate FK controls to pose their chains. The limb property blends from FK at 0 to IK at 1. **Match IK** and **Match FK** preserve the pose and select the incoming endpoint control. With Auto Key enabled the operator keys the matched channels and the switch at the current frame. The Biped eye targets aim each eye individually, and the shared eye control moves both targets.
 - To export a rest skeleton to FBX, select the generated rig, set the armature to **Rest Position**, and enable **Selected Objects** and **Only Deform Bones** in the FBX exporter. Return to **Pose Position** for animation. Controller and solver bones have deformation disabled.
+
+## XBiped elbows and knees
+
+Choose **XBiped Template → Build Rig** for the Biped controls and skin skeleton with sliding knees.
+Each leg has a **Knee Glide** slider in the Rigging editor's Pose Controls panel. At zero the two knee pivots coincide.
+The tibial pivot moves anteriorly relative to the femoral end in the bend plane.
+Travel increases smoothly from 60° to 155° of flexion. Knee Glide defaults to 1
+(3.5% of shin length at peak flexion). Values up to 4 amplify travel proportionally
+(7% at 2 and 14% at 4); above 1 only the sliding distance is amplified.
+**Tibial Rotation (°)** adds inward rotation to the shin skin joints along their longitudinal
+axes using the same bend profile (6° at full strength by default). The approximation models bone
+movement only. Both default values are rig parameters rather than subject-specific measurements.
+
+FK carries the ankle and foot with the sliding shin. IK solves the two joint centers against the
+reverse-foot effector and pole, keeping reachable ankles planted. Use **Match IK** or **Match FK**
+to retain the current pose when switching. The existing Biped and Game Biped templates keep their
+original solvers and export hierarchies.
+
+XBiped legs default to **Max Stretch = 1**. Raise this setting on a foot IK control for a
+stretchable leg. In FK, select the arc outside either knee or its **Knee FK** button in the
+Selector. Rotate local X to bend: a 90° input folds the knee by 90° and swings the thigh
+forward by 9°, moving the knee pivot and carrying the foot. The original shin FK control
+remains available for independent adjustments. Rebuild from **Edit Source Guide** to add
+the handles to an existing XBiped.
+
+Each XBiped arm has a separate **Elbow Glide** (0–4, default 1), **Forearm Rotation (°)**
+(default 6°) and **Elbow FK** handle. Forearm travel uses the same bend profile and is
+scaled to forearm length. Rotate the outer elbow arc around local X in FK, or select
+**Elbow FK** in the Selector. In IK the wrist position, pole and independent wrist rotation
+controls remain available. XBiped arms also start with **Max Stretch = 1**.
 
 ## Selector
 

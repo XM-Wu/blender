@@ -1134,6 +1134,8 @@ static const char *toolsystem_default_tool(const bToolKey *tkey)
         case CTX_MODE_VERTEX_GREASE_PENCIL:
         case CTX_MODE_SCULPT_CURVES:
           return "builtin.brush";
+        case CTX_MODE_PAINT_SDF:
+          return "builtin.sdf_paint";
         case CTX_MODE_PARTICLE:
           return "builtin_brush.Comb";
         case CTX_MODE_EDIT_TEXT:
@@ -1144,6 +1146,8 @@ static const char *toolsystem_default_tool(const bToolKey *tkey)
       switch (tkey->mode) {
         case SI_MODE_PAINT:
           return "builtin.brush";
+        case SI_MODE_SDF:
+          return "builtin.sdf_paint";
         case SI_MODE_VIEW:
           return "builtin.sample";
         case SI_MODE_MASK:

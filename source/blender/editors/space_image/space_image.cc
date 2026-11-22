@@ -274,6 +274,7 @@ static void image_operatortypes()
 
 static void image_keymap(wmKeyConfig *keyconf)
 {
+  WM_keymap_ensure(keyconf, "SDF Paint", SPACE_EMPTY, RGN_TYPE_WINDOW);
   WM_keymap_ensure(keyconf, "Image Generic", SPACE_IMAGE, RGN_TYPE_WINDOW);
   WM_keymap_ensure(keyconf, "Image", SPACE_IMAGE, RGN_TYPE_WINDOW);
 }
@@ -738,6 +739,9 @@ static void image_main_region_init(wmWindowManager *wm, ARegion *region)
    * since the space clip manages own v2d in #image_main_region_set_view2d */
 
   /* mask polls mode */
+  keymap = WM_keymap_ensure(wm->runtime->defaultconf, "SDF Paint", SPACE_EMPTY, RGN_TYPE_WINDOW);
+  WM_event_add_keymap_handler(&region->runtime->handlers, keymap);
+
   keymap = WM_keymap_ensure(
       wm->runtime->defaultconf, "Mask Editing", SPACE_EMPTY, RGN_TYPE_WINDOW);
   WM_event_add_keymap_handler_v2d_mask(&region->runtime->handlers, keymap);
@@ -998,6 +1002,7 @@ std::array<const char *, 4> ED_image_buttons_contexts(const bContext *C)
 
   SpaceImage *sima = CTX_wm_space_image(C);
   switch (sima->mode) {
+    case SI_MODE_SDF:
     case SI_MODE_VIEW:
       break;
     case SI_MODE_PAINT:
@@ -1283,14 +1288,14 @@ static void image_foreach_id(SpaceLink *space_link, LibraryForeachIDData *data)
 static int image_space_subtype_get(ScrArea *area)
 {
   SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
-  return sima->mode == SI_MODE_UV ? SI_MODE_UV : SI_MODE_VIEW;
+  return ELEM(sima->mode, SI_MODE_UV, SI_MODE_SDF) ? sima->mode : SI_MODE_VIEW;
 }
 
 static void image_space_subtype_set(ScrArea *area, int value)
 {
   SpaceImage *sima = area->spacedata.first_as<SpaceImage>();
-  if (value == SI_MODE_UV) {
-    if (sima->mode != SI_MODE_UV) {
+  if (ELEM(value, SI_MODE_UV, SI_MODE_SDF)) {
+    if (!ELEM(sima->mode, SI_MODE_UV, SI_MODE_SDF)) {
       sima->mode_prev = sima->mode;
     }
     sima->mode = eSpaceImage_Mode(value);

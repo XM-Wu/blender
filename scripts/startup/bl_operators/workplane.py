@@ -24,7 +24,11 @@ def _restore():
             scene.use_workplane = False
             scene.cursor.matrix = state["cursor"]
             scene.cursor.rotation_mode = state["cursor_mode"]
-            scene.transform_orientation_slots[0].type = state["orientation"]
+            try:
+                scene.transform_orientation_slots[0].type = state["orientation"]
+            except TypeError:
+                # A custom orientation may have been removed while the workplane was active.
+                scene.transform_orientation_slots[0].type = 'GLOBAL'
             scene.tool_settings.transform_pivot_point = state["pivot"]
             for region, rotation, location, perspective, distance in state.get("views", []):
                 try:
@@ -47,7 +51,7 @@ def _load_pre(_dummy):
 @persistent
 def _undo_post(_dummy):
     if _state:
-        scene = bpy.data.scenes.get(_state["scene_name"])
+        scene = next((scene for scene in bpy.data.scenes if scene.session_uid == _state["scene_uid"]), None)
         if scene is None:
             _restore()
             return
@@ -100,7 +104,7 @@ class VIEW3D_OT_workplane_set(bpy.types.Operator):
             _restore()
         scene = context.scene
         if _state is None:
-            _state = dict(scene=scene, scene_name=scene.name, cursor=scene.cursor.matrix.copy(),
+            _state = dict(scene=scene, scene_uid=scene.session_uid, cursor=scene.cursor.matrix.copy(),
                           cursor_mode=scene.cursor.rotation_mode,
                           orientation=scene.transform_orientation_slots[0].type,
                           pivot=scene.tool_settings.transform_pivot_point)
@@ -147,9 +151,12 @@ class VIEW3D_OT_workplane_align_view(bpy.types.Operator):
     bl_idname = "view3d.workplane_align_view"
     bl_label = "View Workplane from Above"
 
+    @classmethod
+    def poll(cls, context):
+        return bool(_state and _state["scene"] == context.scene and
+                    context.area and context.area.type == 'VIEW_3D')
+
     def execute(self, context):
-        if not _state or context.space_data.type != 'VIEW_3D':
-            return {'CANCELLED'}
         views = _state.setdefault("views", [])
         region = context.space_data.region_3d
         if not any(item[0] == region for item in views):

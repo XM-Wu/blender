@@ -138,6 +138,9 @@ wmKeyMap *WM_keymap_guess_from_context(const bContext *C)
       case CTX_MODE_PAINT_VERTEX:
         km_id = "Vertex Paint";
         break;
+      case CTX_MODE_PAINT_SDF:
+        km_id = "SDF Paint";
+        break;
       case CTX_MODE_PAINT_TEXTURE:
         km_id = "Image Paint";
         break;
@@ -185,6 +188,9 @@ wmKeyMap *WM_keymap_guess_from_context(const bContext *C)
     switch (mode) {
       case SI_MODE_VIEW:
         km_id = "Image";
+        break;
+      case SI_MODE_SDF:
+        km_id = "SDF Paint";
         break;
       case SI_MODE_PAINT:
         km_id = "Image Paint";

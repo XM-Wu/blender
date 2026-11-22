@@ -143,6 +143,45 @@ class XMEditModeToggle(Operator):
         return result
 
 
+class MeshXMSmartDelete(Operator):
+    """Dissolve vertices and edges, or delete faces along a selected border"""
+    bl_idname = "mesh.xm_smart_delete"
+    bl_label = "Smart Delete"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        import bpy
+        import bmesh
+
+        vertex_mode, edge_mode, _ = context.tool_settings.mesh_select_mode
+        if vertex_mode:
+            return bpy.ops.mesh.dissolve_verts()
+        if edge_mode:
+            edges = [edge for obj in context.objects_in_mode_unique_data
+                     for edge in bmesh.from_edit_mesh(obj.data).edges if edge.select]
+            if not edges:
+                return {'CANCELLED'}
+
+            # Match Interactive Tools' border test. Each endpoint must have two
+            # boundary edges, and selected edges must average two neighbors.
+            degrees = {}
+            for edge in edges:
+                for vert in edge.verts:
+                    degrees[vert] = degrees.get(vert, 0) + 1
+            neighbors = sum(degree * (degree - 1) for degree in degrees.values())
+            if neighbors < 2 * len(edges) or not all(
+                    sum(edge.is_boundary for edge in vert.link_edges) >= 2 for vert in degrees):
+                return bpy.ops.mesh.dissolve_edges()
+            for edge in edges:
+                for face in edge.link_faces:
+                    face.select = True
+        return bpy.ops.mesh.delete(type='FACE')
+
+
 class MeshApplyAllTransforms(Operator):
     """Apply object location, rotation and scale, then return to mesh editing"""
     bl_idname = "mesh.apply_all_transforms"
@@ -186,6 +225,7 @@ classes = (
     MeshSelectNext,
     MeshSelectPrev,
     MeshVertEdgeSlide,
+    MeshXMSmartDelete,
     MeshApplyAllTransforms,
     XMEditModeToggle,
     XMEnterPoseMode,

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import bpy
 from bpy.props import EnumProperty, FloatProperty, StringProperty
-from bpy.types import Operator, Panel
+from bpy.types import Header, Operator, Panel
 from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
@@ -330,89 +330,147 @@ class XBONE_OT_toggle_guide_display(Operator):
         return {'FINISHED'}
 
 
-class XBONE_PT_rigging(Panel):
-    bl_label = "XBone Rigging"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Rigging"
+class RIGGING_HT_header(Header):
+    bl_space_type = 'RIGGING'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.template_header()
+        obj = context.active_object
+        layout.label(text=obj.name if obj and obj.type == 'ARMATURE' else "Rigging",
+                     icon='ARMATURE_DATA')
+
+
+class RiggingPanel:
+    bl_space_type = 'RIGGING'
+    bl_region_type = 'WINDOW'
+
+
+class RIGGING_PT_templates(RiggingPanel, Panel):
+    bl_label = "Create Guide"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return context.mode == 'OBJECT' or not (obj and obj.get("rigging_role") in {"RIG", "GUIDE"})
+
+    def draw(self, context):
+        layout = self.layout
+        if context.mode != 'OBJECT':
+            layout.operator("object.mode_set", text="Switch to Object Mode to Create a Guide").mode = 'OBJECT'
+            return
+        templates = layout.grid_flow(row_major=True, even_columns=True)
+        templates.operator("xbone.biped_guide").template = 'biped'
+        templates.operator("xbone.biped_guide", text="XBiped Template").template = 'xbiped'
+        templates.operator("xbone.biped_guide", text="Game Biped Template").template = 'game_biped'
+        layout.operator("xbone.import_guide", text="Import Shifter Template (.sgt)")
+        layout.operator("xbone.new_guide")
+        if XBONE_OT_copy_guide.poll(context):
+            layout.operator("xbone.copy_guide")
+
+
+class RIGGING_PT_guide(RiggingPanel, Panel):
+    bl_label = "Guide"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj and obj.get("rigging_role") == "GUIDE"
 
     def draw(self, context):
         layout = self.layout
         obj = context.active_object
-        role = obj.get("rigging_role") if obj else None
+        layout.operator("xbone.toggle_guide_display", depress=bool(obj.get("show_shifter_guide")))
+        row = layout.row(align=True)
+        row.operator("xbone.symmetrize_guide", text="Left to Right").side = 'L'
+        row.operator("xbone.symmetrize_guide", text="Right to Left").side = 'R'
         if context.mode == 'OBJECT':
-            layout.operator("xbone.biped_guide").template = 'biped'
-            layout.operator("xbone.biped_guide", text="XBiped Template").template = 'xbiped'
-            layout.operator("xbone.biped_guide", text="Game Biped Template").template = 'game_biped'
-            layout.operator("xbone.import_guide", text="Import Shifter Template (.sgt)")
-            layout.operator("xbone.new_guide")
-            if XBONE_OT_copy_guide.poll(context):
-                layout.operator("xbone.copy_guide")
-        if role == "GUIDE":
-            layout.operator("xbone.toggle_guide_display", depress=bool(obj.get("show_shifter_guide")))
-            row = layout.row(align=True)
-            row.operator("xbone.symmetrize_guide", text="Left to Right").side = 'L'
-            row.operator("xbone.symmetrize_guide", text="Right to Left").side = 'R'
-            if context.mode == 'OBJECT':
-                layout.operator("object.mode_set", text="Edit Guide").mode = 'EDIT'
-            if context.mode == 'EDIT_ARMATURE':
-                layout.operator("xbone.add_component")
-                layout.operator("xbone.tag_limb")
-                bone = context.active_bone
-                if bone:
-                    for key, label in (("div0", "Upper Divisions"), ("div1", "Lower Divisions"),
-                                       ("supportJoints", "Support Joints"), ("division", "Divisions")):
-                        if key in bone:
-                            layout.prop(bone, '["' + key + '"]', text=label)
-            label = "Rebuild Rig" if rebuild.target_for(context, obj) else "Build Rig"
-            layout.operator("xbone.build_rig", text=label)
-        if role == "RIG":
-            layout.operator("xbone.edit_source_guide")
-            skeleton = obj.data.collections.get("Skeleton")
-            if skeleton:
-                layout.prop(skeleton, "is_visible", text="Show Skeleton")
-            extra = obj.data.collections.get("Additional FK")
-            if extra and obj.data.collections.get("Biped Display"):
-                layout.prop(extra, "is_visible", text="Show Additional FK Controls")
-            active = context.active_pose_bone
-            if active and "UI_" in active.name:
-                for key in active.keys():
-                    if key.startswith(("mouth_","neck_","spine_","shoulder_","control_")):
-                        layout.prop(active,'["'+bpy.utils.escape_identifier(key)+'"]',text=key)
-            for control in obj.pose.bones:
-                prop = control.get("blend_property")
-                if prop:
-                    box = layout.box()
-                    box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
-                    if "knee_glide" in control:
-                        box.prop(control, '["knee_glide"]', text="Knee Glide", slider=True)
-                        box.prop(control, '["knee_internal_rotation"]', text="Tibial Rotation (°)")
-                    active = context.active_pose_bone
-                    if active and (active == control or active.get("limb_control") == control.name) and "ikscale" in control:
-                        from .limb_parameters import PARAMETERS
-                        for key, label, *_ in PARAMETERS:
-                            box.prop(control, '["' + key + '"]', text=label)
-                        if "volume" in control:
-                            box.prop(control, '["volume"]', text="Volume")
-                        if "roundness" in control:
-                            box.prop(control, '["roundness"]', text="Roundness")
-                        if "aproll" in control:
-                            box.prop(control, '["aproll"]', text="Armpit Roll")
-                        for prop_name, label in (("ik_space", "IK Space"), ("pole_space", "Pole Space"),
-                                                 ("rotation_space", "Wrist Rotation Space"), ("pin_space", "Pin Space")):
-                            if prop_name in control:
-                                refs = control[prop_name.replace("_space", "_references")]
-                                box.prop(control, '["'+prop_name+'"]', text=label + " · " + refs[control[prop_name]])
-                    row = box.row(align=True)
-                    for mode in ('FK', 'IK'):
-                        op = row.operator("xbone.match_limb", text="Match " + mode)
-                        op.control, op.mode = control.name, mode
+            layout.operator("object.mode_set", text="Edit Guide").mode = 'EDIT'
+        if context.mode == 'EDIT_ARMATURE':
+            layout.operator("xbone.add_component")
+            layout.operator("xbone.tag_limb")
+            bone = obj.data.edit_bones.active
+            if bone:
+                for key, label in (("div0", "Upper Divisions"), ("div1", "Lower Divisions"),
+                                   ("supportJoints", "Support Joints"), ("division", "Divisions")):
+                    if key in bone:
+                        layout.prop(bone, '["' + key + '"]', text=label)
+        label = "Rebuild Rig" if rebuild.target_for(context, obj) else "Build Rig"
+        layout.operator("xbone.build_rig", text=label)
+
+
+class RIGGING_PT_rig(RiggingPanel, Panel):
+    bl_label = "Rig"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj and obj.get("rigging_role") == "RIG"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.active_object
+        if context.mode == 'OBJECT':
+            layout.operator("object.mode_set", text="Pose Rig", icon='POSE_HLT').mode = 'POSE'
+        layout.operator("xbone.edit_source_guide")
+        skeleton = obj.data.collections.get("Skeleton")
+        if skeleton:
+            layout.prop(skeleton, "is_visible", text="Show Skeleton")
+        extra = obj.data.collections.get("Additional FK")
+        if extra and obj.data.collections.get("Biped Display"):
+            layout.prop(extra, "is_visible", text="Show Additional FK Controls")
+
+
+class RIGGING_PT_pose(RiggingPanel, Panel):
+    bl_label = "Pose Controls"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode in {'OBJECT', 'POSE'} and RIGGING_PT_rig.poll(context)
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.active_object
+        active = context.active_pose_bone
+        if active and "UI_" in active.name:
+            for key in active.keys():
+                if key.startswith(("mouth_","neck_","spine_","shoulder_","control_")):
+                    layout.prop(active,'["'+bpy.utils.escape_identifier(key)+'"]',text=key)
+        limbs = layout.grid_flow(row_major=True, columns=-2, even_columns=True)
+        for control in obj.pose.bones:
+            prop = control.get("blend_property")
+            if prop:
+                box = limbs.box()
+                box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
+                if "knee_glide" in control:
+                    box.prop(control, '["knee_glide"]', text="Knee Glide", slider=True)
+                    box.prop(control, '["knee_internal_rotation"]', text="Tibial Rotation (°)")
+                if active and (active == control or active.get("limb_control") == control.name) and "ikscale" in control:
+                    from .limb_parameters import PARAMETERS
+                    for key, label, *_ in PARAMETERS:
+                        box.prop(control, '["' + key + '"]', text=label)
+                    if "volume" in control:
+                        box.prop(control, '["volume"]', text="Volume")
+                    if "roundness" in control:
+                        box.prop(control, '["roundness"]', text="Roundness")
+                    if "aproll" in control:
+                        box.prop(control, '["aproll"]', text="Armpit Roll")
+                    for prop_name, label in (("ik_space", "IK Space"), ("pole_space", "Pole Space"),
+                                             ("rotation_space", "Wrist Rotation Space"), ("pin_space", "Pin Space")):
+                        if prop_name in control:
+                            refs = control[prop_name.replace("_space", "_references")]
+                            box.prop(control, '["'+prop_name+'"]', text=label + " · " + refs[control[prop_name]])
+                row = box.row(align=True)
+                for mode in ('FK', 'IK'):
+                    op = row.operator("xbone.match_limb", text="Match " + mode)
+                    op.control, op.mode = control.name, mode
 
 
 classes = (XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
-           XBONE_OT_toggle_guide_display, XBONE_PT_rigging)
+           XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
+           RIGGING_PT_guide, RIGGING_PT_rig, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)
 
 

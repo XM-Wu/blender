@@ -27,7 +27,7 @@ def character(context):
 def refresh(context):
     for window in context.window_manager.windows:
         for area in window.screen.areas:
-            if area.type in {'SELECTOR', 'VIEW_3D', 'PROPERTIES', 'OUTLINER', 'DOPESHEET_EDITOR', 'GRAPH_EDITOR'}:
+            if area.type in {'SELECTOR', 'RIGGING', 'VIEW_3D', 'PROPERTIES', 'OUTLINER', 'DOPESHEET_EDITOR', 'GRAPH_EDITOR'}:
                 area.tag_redraw()
 
 

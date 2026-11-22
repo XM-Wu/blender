@@ -811,6 +811,10 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
   )
   add_blender_test(
+    bl_xbone_rigging_editor
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging_editor.py
+  )
+  add_blender_test(
     bl_xbone_xbiped
     --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_xbiped.py
   )

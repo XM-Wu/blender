@@ -133,6 +133,7 @@ const EnumPropertyItem rna_enum_space_type_items[] = {
      "Edit drivers and keyframe interpolation"},
     {SPACE_NLA, "NLA_EDITOR", ICON_NLA, "Nonlinear Animation", "Combine and layer Actions"},
 
+    {SPACE_RIGGING, "RIGGING", ICON_BONE_DATA, "Rigging", "Build and edit XBone character rigs"},
     {SPACE_SELECTOR, "SELECTOR", ICON_ARMATURE_DATA, "Selector", "Select rig controls on a 2D picker"},
 
     /* Scripting. */
@@ -831,6 +832,8 @@ static StructRNA *rna_Space_refine(PointerRNA *ptr)
       return RNA_SpaceClipEditor;
     case SPACE_SPREADSHEET:
       return RNA_SpaceSpreadsheet;
+    case SPACE_RIGGING:
+      return RNA_SpaceRigging;
     case SPACE_SELECTOR:
       return RNA_SpaceSelector;
     case SPACE_WEIGHT_LAYERS:
@@ -9840,6 +9843,9 @@ void RNA_def_space(BlenderRNA *brna)
   StructRNA *weight_layers = RNA_def_struct(brna, "SpaceWeightLayers", "Space");
   RNA_def_struct_sdna(weight_layers, "SpaceLink");
   RNA_def_struct_ui_text(weight_layers, "Weight Layers", "Layered skin weight editor");
+  StructRNA *rigging = RNA_def_struct(brna, "SpaceRigging", "Space");
+  RNA_def_struct_sdna(rigging, "SpaceLink");
+  RNA_def_struct_ui_text(rigging, "Rigging", "XBone guide and rig editor");
   StructRNA *selector = RNA_def_struct(brna, "SpaceSelector", "Space");
   RNA_def_struct_ui_text(selector, "Selector", "Rig control picker");
   PropertyRNA *prop = RNA_def_property(selector, "page", PROP_INT, PROP_NONE);

@@ -1,10 +1,10 @@
 # XBone Rigging
 
-Open **3D Viewport → Sidebar (N) → Rigging** in Object Mode.
+Open an area's editor type menu and choose **Animation → Rigging**. To work beside the character, split the 3D Viewport and set one area to Rigging. The editor follows the active object and bone in the current view layer. In Object Mode, **Create Guide** offers the templates and import tools.
 
 In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
 
-Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
+Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
 
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.
@@ -18,7 +18,7 @@ Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guid
 ## XBiped knees
 
 Choose **XBiped Template → Build Rig** for the Biped controls and skin skeleton with sliding knees.
-Each leg has a **Knee Glide** slider in the Rigging sidebar. At zero the two knee pivots coincide.
+Each leg has a **Knee Glide** slider in the Rigging editor's Pose Controls panel. At zero the two knee pivots coincide.
 The tibial pivot moves anteriorly relative to the femoral end in the bend plane.
 Travel increases smoothly from 60° to 155° of flexion. Knee Glide defaults to 1
 (3.5% of shin length at peak flexion). Values up to 4 amplify travel proportionally

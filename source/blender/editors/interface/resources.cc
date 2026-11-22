@@ -163,6 +163,7 @@ const uchar *get_color_ptr(const bTheme *btheme, int spacetype, int colorid)
           ts = &btheme->space_info;
           break;
         case SPACE_USERPREF:
+        case SPACE_RIGGING:
         case SPACE_WEIGHT_LAYERS:
         case SPACE_PROJECT:
           ts = &btheme->space_preferences;

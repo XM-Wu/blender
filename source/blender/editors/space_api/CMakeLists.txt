@@ -14,7 +14,7 @@ set(INC_SYS
 set(SRC
   spacetypes.cc
   space_selector.cc
-  space_weight_layers.cc
+  space_panels.cc
 )
 
 set(LIB

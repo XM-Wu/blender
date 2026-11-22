@@ -130,6 +130,8 @@ class WEIGHT_LAYERS_PT_layers(Panel):
         draw_source(layout, obj)
         tools = layout.column()
         tools.enabled = "_skin_source" in obj
+        if context.mode == 'OBJECT':
+            tools.operator("object.mode_set", text="Enter Weight Paint", icon='WPAINT_HLT').mode = 'WEIGHT_PAINT'
         row = tools.row()
         row.template_list("WEIGHT_LAYERS_UL_layers", "", state, "layers", state, "index", rows=5)
         ops = row.column(align=True)

@@ -71,6 +71,9 @@ def unique_storage(obj):
                 write_values(mesh, state.prefix + key[len(old):], read_values(mesh, key))
     if "_skin_source" in obj:
         obj["_skin_source"] = state.prefix
+        preview = obj.get("_skin_preview", "")
+        if preview.startswith(old + "_"):
+            obj["_skin_preview"] = state.prefix + preview[len(old):]
 
 
 def copy_marker(mesh, source, destination):

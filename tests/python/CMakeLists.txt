@@ -374,6 +374,7 @@ foreach(test_name IN ITEMS
   sdf_remap
   skin_layers
   skin_layers_v2
+  skin_layer_brush
   uv_fit_align
   uv_fit_lifetime
   uv_group_buttons

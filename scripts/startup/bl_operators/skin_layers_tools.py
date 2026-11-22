@@ -4,6 +4,8 @@
 
 """Rest-space assignment, symmetry and view tools for the skin layer editor."""
 
+import re
+
 import bpy
 import numpy as np
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, PointerProperty, StringProperty
@@ -50,12 +52,20 @@ def mirror_geometry(mesh):
     return positions[:, 0], pairs
 
 
-def mirror_name(obj, group):
+def mirrored_bone(obj, group):
     name = bpy.utils.flip_name(group.name)
+    if name == group.name:
+        # Shifter components keep the side before an index, e.g. arm_L0_4_jnt.
+        name = re.sub(r"_([LR])(?=\d+(?:_|$))", lambda m: "_R" if m[1] == "L" else "_L", name, count=1)
     target = skin.rig_modifier(obj).object.data.bones.get(name)
-    if not target or not target.use_deform:
-        raise ValueError("Missing mirrored deform bone: " + name)
-    return name
+    return target if target and target.use_deform else None
+
+
+def mirror_name(obj, group):
+    target = mirrored_bone(obj, group)
+    if target is None:
+        raise ValueError("Missing mirrored deform bone for " + group.name)
+    return target.name
 
 
 class LayerTool:

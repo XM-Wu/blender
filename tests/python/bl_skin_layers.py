@@ -145,6 +145,7 @@ def run():
         assert twin.skin_layers.prefix == state.prefix
     twin.skin_layers.layers[1].opacity = 0
     assert twin.skin_layers.prefix != state.prefix
+    assert twin["_skin_preview"].startswith(twin.skin_layers.prefix + "_")
     near(posed_x(), 0.3)
     bpy.data.objects.remove(twin, do_unlink=True)
     bpy.context.view_layer.objects.active = obj

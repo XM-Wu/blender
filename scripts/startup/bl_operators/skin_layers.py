@@ -167,6 +167,19 @@ def select_influence(obj, bone):
     obj.skin_layers["bone_index"] = rig_modifier(obj).object.data.bones.find(bone.name)
 
 
+def ensure_paint_influence(obj, groups):
+    if any(g.skin_channel == obj.skin_layers.influence for g in groups):
+        return groups
+    bones = rig_modifier(obj).object.data.bones
+    bone = bones.active
+    if not bone or not bone.use_deform:
+        bone = next((b for b in bones if b.use_deform), None)
+    if bone:
+        select_influence(obj, bone)
+        return channels(obj)
+    return []
+
+
 class SkinWeightSettings(PropertyGroup):
     prefix: StringProperty()
     vertex_count: IntProperty()
@@ -286,6 +299,7 @@ class PAINT_OT_skin_source(Operator):
                 return {'CANCELLED'}
             unique_storage(obj)
             obj["_skin_source"] = obj.skin_layers.prefix
+            ensure_paint_influence(obj, channels(obj))
             composite(obj)
         activate_paint_tool(context, obj, self.layered)
         obj.data.update()
@@ -494,6 +508,23 @@ def paintable_vertices(mesh):
     return allowed
 
 
+def brush_surface_matches(obj, depsgraph):
+    surface = obj.evaluated_get(depsgraph).data
+    marker = surface.attributes.get(obj.skin_layers.prefix)
+    count = len(obj.data.vertices)
+    if len(surface.vertices) == count:
+        return original_vertex_order(marker, count)
+    # Subsurf retains the coarse vertices first. Only use that prefix when
+    # every source ID verifies; interpolated subdivision samples are never written.
+    mods = [m for m in obj.modifiers if m.show_viewport]
+    if (len(mods) < 2 or mods[0] != rig_modifier(obj) or any(m.type != 'SUBSURF' for m in mods[1:])
+            or marker is None or marker.domain != 'POINT' or marker.data_type != 'INT' or len(marker.data) < count):
+        return False
+    ids = np.empty(len(marker.data), dtype=np.int32)
+    marker.data.foreach_get("value", ids)
+    return np.array_equal(ids[:count], np.arange(1, count + 1, dtype=np.int32))
+
+
 class SkinBrush:
     def __init__(self, obj, *, stroke=False):
         self.obj = obj
@@ -502,23 +533,28 @@ class SkinBrush:
         self.layer = current_layer(state)
         self.prefix = layer_key(state, self.layer) + "_"
         self.mask = state.target == 'MASK' or self.layer.is_group
-        self.active = "mask" if self.mask else str(state.influence)
         self.weights = {}
         self.original = {}
         self.allowed = paintable_vertices(mesh)
         groups = channels(obj)
-        if not self.mask and not any(g.skin_channel == state.influence for g in groups):
-            raise ValueError("Choose a deform bone to paint")
+        if not self.mask:
+            groups = ensure_paint_influence(obj, groups)
+            if not groups:
+                raise ValueError("Choose a deform bone to paint")
+        self.active = "mask" if self.mask else str(state.influence)
         self.mirror_pair = None
         if stroke and obj.use_mesh_mirror_x:
-            from .skin_layers_tools import mirror_geometry, mirror_name, group_for_bone
-            self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
-            self.mirror_active = self.active
-            if not self.mask:
+            from .skin_layers_tools import mirror_geometry, mirrored_bone, group_for_bone
+            if self.mask:
+                self.mirror_active = self.active
+                self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
+            else:
                 group = next(g for g in groups if g.skin_channel == state.influence)
-                other = group_for_bone(obj, mirror_name(obj, group))
-                self.mirror_active = str(other.skin_channel)
-                groups = channels(obj)
+                other = mirrored_bone(obj, group)
+                if other:
+                    self.mirror_active = str(group_for_bone(obj, other.name).skin_channel)
+                    groups = channels(obj)
+                    self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
         for channel in (["mask"] if self.mask else [str(g.skin_channel) for g in groups]):
             key = self.prefix + channel
             if key in mesh.attributes or channel == self.active or (self.mirror_pair is not None and channel == self.mirror_active):
@@ -681,9 +717,12 @@ class SkinBrush:
         evaluated = self.obj.evaluated_get(context.evaluated_depsgraph_get())
         matrix = evaluated.matrix_world
         inv = matrix.inverted_safe()
-        hit, location, _, face = evaluated.ray_cast(inv @ origin, inv.to_3x3() @ direction)
-        if not hit or face < 0:
+        ray = inv @ origin, inv.to_3x3() @ direction
+        # Object.ray_cast reports the source face index, including on a subdivided surface.
+        hit, location, _, face = evaluated.ray_cast(*ray)
+        if not hit or not 0 <= face < len(self.mesh.polygons):
             return False
+        queue = list(self.mesh.polygons[face].vertices)
         world = matrix @ location
         state = self.obj.skin_layers
         edge_world = region_2d_to_location_3d(region, view, (mouse[0] + state.radius, mouse[1]), world)
@@ -691,7 +730,6 @@ class SkinBrush:
         vertices = evaluated.data.vertices
         # Walk along the hit surface. Disconnected or overlapping shells stay independent.
         self.build_adjacency()
-        queue = list(evaluated.data.polygons[face].vertices)
         visited = set()
         picked, falloff = [], []
         while queue:
@@ -780,9 +818,7 @@ class PAINT_OT_skin_layer_stroke(Operator):
         if (error := brush_error(obj)):
             self.report({'WARNING'}, error)
             return {'CANCELLED'}
-        evaluated = obj.evaluated_get(context.evaluated_depsgraph_get())
-        marker = evaluated.data.attributes.get(obj.skin_layers.prefix)
-        if not original_vertex_order(marker, len(obj.data.vertices)):
+        if not brush_surface_matches(obj, context.evaluated_depsgraph_get()):
             self.report({'WARNING'}, "Painting requires a viewport mesh with original vertex correspondence")
             return {'CANCELLED'}
         unique_storage(obj)
@@ -801,10 +837,14 @@ class PAINT_OT_skin_layer_stroke(Operator):
             self.cancel(context)
             return {'CANCELLED'}
         if event.type == self.button and event.value == 'RELEASE':
-            return {'FINISHED'} if self.changed else {'CANCELLED'}
-        if event.type == 'MOUSEMOVE':
+            if not self.changed:
+                self.report({'INFO'}, "No paintable vertices under the brush; check the radius and selection mask")
+                return {'CANCELLED'}
+            return {'FINISHED'}
+        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             self.changed |= self.stroke.dab(context, event)
-            context.area.tag_redraw()
+            if event.type == 'MOUSEMOVE':
+                context.area.tag_redraw()
         return {'RUNNING_MODAL'}
 
     def cancel(self, context):

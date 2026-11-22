@@ -865,6 +865,7 @@ add_blender_test(
   bl_xbone_dynamics
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_dynamics.py
 )
+set_tests_properties(bl_xbone_dynamics PROPERTIES LABELS "xblender")
 
 add_blender_test(
   bl_animation_bake

@@ -1,6 +1,7 @@
 @echo off
 setlocal
-set "XBONE_EXE=%~dp0..\build_xbone_guide\bin\blender.exe"
+set "XBONE_EXE=%~dp0..\artifacts\releases\Rigging-64683397cb21\blender.exe"
+if not exist "%XBONE_EXE%" set "XBONE_EXE=%~dp0..\build_xbone_guide\bin\Release\blender.exe"
 if not exist "%XBONE_EXE%" (
   echo XBone-enabled Blender build missing: "%XBONE_EXE%"
   pause

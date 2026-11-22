@@ -18,7 +18,7 @@ class XBONE_OT_biped_guide(Operator):
     bl_label = "Biped Template"
     bl_options = {'REGISTER', 'UNDO'}
     template: EnumProperty(default='biped', items=(('biped', "Biped", ""), ('game_biped', "Game Biped", ""),
-                                                   ('xbiped', "XBiped", "Biped with a gliding knee joint")))
+                                                   ('xbiped', "XBiped", "Biped with gliding elbow and knee joints")))
 
     @classmethod
     def poll(cls, context):
@@ -31,9 +31,9 @@ class XBONE_OT_biped_guide(Operator):
         names = {'biped': "Biped Guide", 'game_biped': "Game Biped Guide", 'xbiped': "XBiped Guide"}
         guide = guides.import_template(context, points, names[self.template])
         if self.template == 'xbiped':
-            from . import xbiped_knee
+            from . import xbiped_limb
             guide["xbiped"] = True
-            xbiped_knee.set_leg_defaults(guide)
+            xbiped_limb.set_limb_defaults(guide)
         return {'FINISHED'}
 
 
@@ -202,6 +202,8 @@ class XBONE_OT_match_limb(Operator):
         target = pose.get(self.control)
         if target is None or "blend_property" not in target:
             return {'CANCELLED'}
+        bend_control = target.get("elbow_fk_control") or target.get("knee_fk_control")
+        glide_pivot = target.get("elbow_glide_pivot") or target.get("knee_glide_pivot")
         matrices = [pose[n].matrix.copy() for n in target["joints"]]
         changed = []
         if self.mode == 'IK':
@@ -213,9 +215,9 @@ class XBONE_OT_match_limb(Operator):
                 changed.append(pose[name])
             pole = pose[target["pole_control"]]
             pole_matrix = pole.matrix.copy()
-            if "knee_glide_pivot" in target:
-                from . import xbiped_knee
-                pole_matrix.translation = xbiped_knee.match_pole(rig, target, matrices)
+            if glide_pivot:
+                from . import xbiped_limb
+                pole_matrix.translation = xbiped_limb.match_pole(rig, target, matrices)
             else:
                 pole_matrix.translation = builder.pole_point(*(m.translation for m in matrices))
             desired = matrices[-1]
@@ -240,23 +242,21 @@ class XBONE_OT_match_limb(Operator):
                 changed.append(rotation)
             changed.extend((pole, target))
         else:
-            if "knee_fk_control" in target:
-                changed.append(pose[target["knee_fk_control"]])
+            if bend_control:
+                changed.append(pose[bend_control])
             for name, joint, matrix in zip(target["fk_controls"], target["joints"], matrices):
-                if "knee_fk_control" in target and name == target["fk_controls"][0]:
-                    # Retain the animator's knee bend channel while matching the
-                    # thigh upstream of its counter-rotation.
+                if bend_control and name == target["fk_controls"][0]:
+                    # Retain the animator's bend channel above the upper segment's counter-rotation.
                     output = pose["MCH.FKOutput." + joint]
                     pose[name].matrix = matrix @ output.matrix.inverted_safe() @ pose[name].matrix
                 else:
                     pose[name].matrix = matrix @ pose[joint].bone.matrix_local.inverted_safe() @ pose[name].bone.matrix_local
                 changed.append(pose[name])
                 context.view_layer.update()
-                if "knee_glide_pivot" in target and name == target["fk_controls"][1]:
-                    # The animator rotates at the femoral end. The solved shin starts at
-                    # the displaced tibial end, so remove this offset exactly once.
+                if glide_pivot and name == target["fk_controls"][1]:
+                    # The lower segment begins at the displaced pivot. Remove its offset once.
                     frame = pose[name].matrix.copy()
-                    frame.translation -= pose[target["knee_glide_pivot"]].head - pose[name].head
+                    frame.translation -= pose[glide_pivot].head - pose[name].head
                     pose[name].matrix = frame
                     context.view_layer.update()
         rig[target["blend_property"]] = float(self.mode == 'IK')
@@ -442,6 +442,9 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
             if prop:
                 box = limbs.box()
                 box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
+                if "elbow_glide" in control:
+                    box.prop(control, '["elbow_glide"]', text="Elbow Glide", slider=True)
+                    box.prop(control, '["forearm_rotation"]', text="Forearm Rotation (°)")
                 if "knee_glide" in control:
                     box.prop(control, '["knee_glide"]', text="Knee Glide", slider=True)
                     box.prop(control, '["knee_internal_rotation"]', text="Tibial Rotation (°)")

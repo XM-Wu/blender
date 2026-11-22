@@ -9,6 +9,7 @@ from mathutils import Matrix, Vector
 from .biped_skeleton import limb_samples, read_frame
 from .limb_parameters import drive
 from .affine import LocalFrames
+from . import xbiped_limb
 
 
 def build(rig, guide, bind_plan):
@@ -74,13 +75,14 @@ def build(rig, guide, bind_plan):
         aim = edit[helper(comp + ".rootAim", upstream, anchors[0].head, axes[0])]
         leg = comp.startswith("leg")
         aim_target = tip.parent.name
-        gliding = leg and guide.get("xbiped")
+        gliding = guide.get("xbiped") and comp in {"arm_L0", "arm_R0", "leg_L0", "leg_R0"}
         if gliding:
             joint = edit[aim_target]
-            femur = aligned(comp + ".femoralPivot", joint, joint.matrix.copy())
+            upper_prefix = comp + "." + xbiped_limb.limb(comp).upper_pivot
+            upper_end = aligned(upper_prefix + "Pivot", joint, joint.matrix.copy())
             delta = "MCH.Triangle." + comp + ".glideDelta"
-            glide_offsets.append((femur.name, delta))
-            aim_target = femur.name
+            glide_offsets.append((upper_end.name, delta))
+            aim_target = upper_end.name
         root_aims.append((aim.name, root.name, aim_target))
         parents = []
         rotations = []
@@ -106,8 +108,8 @@ def build(rig, guide, bind_plan):
             start, end = anchors[half:half + 2]
             end_rotation = edit[rotations[half + 1]]
             if half == 0 and gliding:
-                end = aligned(comp + ".femoralEnd", end, end.matrix.copy())
-                end_rotation = aligned(comp + ".femoralTangent", end_rotation, end_rotation.matrix.copy())
+                end = aligned(upper_prefix + "End", end, end.matrix.copy())
+                end_rotation = aligned(upper_prefix + "Tangent", end_rotation, end_rotation.matrix.copy())
                 glide_offsets.extend(((end.name, delta), (end_rotation.name, delta)))
             direction_sign = -1 if comp.endswith("R0") else 1
             start_dir, end_dir = (edit[n].matrix.to_3x3().col[0].normalized() *
@@ -243,19 +245,23 @@ def build(rig, guide, bind_plan):
             t.transform_type = 'SCALE_X'
             a = "(" + ("+".join(terms) or "0") + ")*0.5"
             dr.expression = f"2*atan2(sin({a})*magnitude/max(0.000001,objectScale*{unit:.12g}),cos({a}))"
-            if half and guide.get("xbiped"):
-                reach = pose["MCH.Reach." + guide.data.bones[tip].parent.parent.name]
-                for alias, source, key in (("flex", reach, "knee_coupling"), ("inward", ctl, "knee_internal_rotation")):
-                    var = dr.variables.new()
-                    var.name = alias
-                    var.targets[0].id = rig
-                    var.targets[0].data_path = source.path_from_id() + '["' + key + '"]'
-                # Positive inward rotation is mirrored about the character's
-                # center, independently of each exported joint's X convention.
-                sign = (1 if track == 'TRACK_X' else -1) * (1 if comp.endswith("L0") else -1)
-                dr.expression += f"+{sign}*radians(inward)*flex"
         elif half == 0:
             drive(pb, "rotation_euler", f"radians(a)*{1 - f:.12g}", {"a": (ctl, "aproll")}, 0)
+        if half and guide.get("xbiped"):
+            spec = xbiped_limb.limb(comp)
+            if not comp.startswith("leg"):
+                dr = pb.driver_add("rotation_euler", 0).driver
+                dr.expression = "0"
+            reach = pose["MCH.Reach." + guide.data.bones[tip].parent.parent.name]
+            for alias, source, key in (("flex", reach, spec.joint + "_coupling"), ("inward", ctl, spec.twist)):
+                var = dr.variables.new()
+                var.name = alias
+                var.targets[0].id = rig
+                var.targets[0].data_path = source.path_from_id() + '["' + key + '"]'
+            # Positive inward rotation is mirrored about the character's
+            # center, independently of each exported joint's X convention.
+            sign = (1 if track == 'TRACK_X' else -1) * (1 if comp.endswith("L0") else -1)
+            dr.expression += f"+{sign}*radians(inward)*flex"
     volumes = set()
     for name, skin, root_scale, comp, root, mid, tip in volume_outputs:
         ctl = pose["IK." + tip]

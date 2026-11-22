@@ -15,7 +15,7 @@ Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide po
 - Rotate FK controls to pose their chains. The limb property blends from FK at 0 to IK at 1. **Match IK** and **Match FK** preserve the pose and select the incoming endpoint control. With Auto Key enabled the operator keys the matched channels and the switch at the current frame. The Biped eye targets aim each eye individually, and the shared eye control moves both targets.
 - To export a rest skeleton to FBX, select the generated rig, set the armature to **Rest Position**, and enable **Selected Objects** and **Only Deform Bones** in the FBX exporter. Return to **Pose Position** for animation. Controller and solver bones have deformation disabled.
 
-## XBiped knees
+## XBiped elbows and knees
 
 Choose **XBiped Template → Build Rig** for the Biped controls and skin skeleton with sliding knees.
 Each leg has a **Knee Glide** slider in the Rigging editor's Pose Controls panel. At zero the two knee pivots coincide.
@@ -38,6 +38,12 @@ Selector. Rotate local X to bend: a 90° input folds the knee by 90° and swings
 forward by 9°, moving the knee pivot and carrying the foot. The original shin FK control
 remains available for independent adjustments. Rebuild from **Edit Source Guide** to add
 the handles to an existing XBiped.
+
+Each XBiped arm has a separate **Elbow Glide** (0–4, default 1), **Forearm Rotation (°)**
+(default 6°) and **Elbow FK** handle. Forearm travel uses the same bend profile and is
+scaled to forearm length. Rotate the outer elbow arc around local X in FK, or select
+**Elbow FK** in the Selector. In IK the wrist position, pole and independent wrist rotation
+controls remain available. XBiped arms also start with **Max Stretch = 1**.
 
 ## Selector
 

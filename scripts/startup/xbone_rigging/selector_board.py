@@ -17,14 +17,19 @@ def stock():
     return Path(__file__).with_name("biped.pkr").read_text(encoding="utf8")
 
 
-@lru_cache(maxsize=1)
-def xbiped_layout():
+@lru_cache(maxsize=2)
+def xbiped_layout(with_elbows=False):
     layout = json.loads(stock())
     items = layout["tabs"][0]["data"]["items"]
     for side, x, color in (("L0", 115, [60, 173, 224, 255]), ("R0", -115, [70, 164, 80, 255])):
         items.append(dict(position=[x, -120], handles=[[-28, -9], [28, -9], [28, 9], [-28, 9]],
                           controls=["FK.leg_" + side + "_knee_bend"], text="Knee FK",
                           text_size=11, color=color))
+        if with_elbows:
+            items.append(dict(position=[205 if side == "L0" else -205, 110],
+                              handles=[[-28, -9], [28, -9], [28, 9], [-28, 9]],
+                              controls=["FK.arm_" + side + "_elbow_bend"], text="Elbow FK",
+                              text_size=11, color=color))
     return json.dumps(layout, separators=(",", ":"))
 
 
@@ -80,7 +85,7 @@ def layout_source(rig):
     if BOARD_KEY in rig:
         return rig[BOARD_KEY]
     if "FK.leg_L0_knee_bend" in rig.pose.bones and "FK.leg_R0_knee_bend" in rig.pose.bones:
-        return xbiped_layout()
+        return xbiped_layout("FK.arm_L0_elbow_bend" in rig.pose.bones)
     if "Display.spineUI_C0_ctl" in rig.pose.bones:
         return stock()
     return custom_layout(control_names(rig))

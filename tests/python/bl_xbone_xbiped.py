@@ -160,8 +160,9 @@ def check_leg(rig, comp):
 
 def check_bend_control(rig, comp):
     p = rig.pose.bones
-    ctl = p["IK." + comp + "_ankle"]
-    bend = p[ctl["knee_fk_control"]]
+    arm = comp.startswith("arm")
+    ctl = p["IK." + comp + ("_wrist" if arm else "_ankle")]
+    bend = p[ctl["elbow_fk_control" if arm else "knee_fk_control"]]
     assert bend.custom_shape and not bend.bone.use_deform and not bend.bone.hide_select
     assert bend.bone.collections.get("FK")
     assert bend.name in selector_board.pages(selector_board.layout_source(rig))[0].names
@@ -180,12 +181,12 @@ def check_bend_control(rig, comp):
     for degrees in (25, 120):
         bend.rotation_euler.x = math.radians(degrees)
         update(rig)
-        femur = p["MCH.Curve." + comp + ".femoralPivot"].head
+        femur = p["MCH.Curve." + comp + (".humeralPivot" if arm else ".femoralPivot")].head
         close(hip.head, hip_rest, "hip fixed")
         close(femur, bend.head, "handle follows moving knee")
         assert abs((femur-hip.head).length-upper_length) < .00015
         assert abs((ankle.head-knee.head).length-lower_length) < .00015
-        assert (skin.head-skin_rest).length > .01 and (ankle.head-ankle_rest).length > .05
+        assert (skin.head-skin_rest).length > .02*upper_length and (ankle.head-ankle_rest).length > .05
         angle = (femur-hip.head).angle(ankle.head-knee.head)
         assert abs(math.degrees(angle-rest_angle)-degrees) < .05, (comp, degrees, angle)
     saved = [(joint, joint.matrix.copy()) for joint in (hip, knee, ankle, skin)]
@@ -197,6 +198,66 @@ def check_bend_control(rig, comp):
             close(joint.head, matrix.translation, (comp, mode, joint.name), .0005)
             assert abs(joint.matrix.to_quaternion().dot(matrix.to_quaternion())) > .999
     assert abs(bend.rotation_euler.x-math.radians(120)) < .0001
+
+
+def check_elbow(rig, comp):
+    p = rig.pose.bones
+    ctl = p["IK." + comp + "_wrist"]
+    elbow = p[comp + "_elbow"]
+    wrist = p[comp + "_wrist"]
+    bend = p[ctl["elbow_fk_control"]]
+    proximal = p["MCH.Curve." + comp + ".humeralPivot"]
+    length = (wrist.bone.head_local - elbow.bone.head_local).length
+    assert ctl["maxstretch"] == 1
+    assert ctl.id_properties_ui("elbow_glide").as_dict()["max"] == 4
+    bend.rotation_euler.x = math.radians(151)
+    for gain in (0, 1, 2, 4):
+        ctl["elbow_glide"] = gain
+        update(rig)
+        assert abs((elbow.head - proximal.head).length - gain*.035*length) < .00025
+        original = wrist.matrix.copy()
+        assert bpy.ops.xbone.match_limb(control=ctl.name, mode='IK') == {'FINISHED'}
+        update(rig)
+        close(wrist.head, ctl.head, "elbow match / wrist pinned")
+        close(wrist.head, original.translation, "FK to wrist IK")
+        assert abs(wrist.matrix.to_quaternion().dot(original.to_quaternion())) > .999
+        assert bpy.ops.xbone.match_limb(control=ctl.name, mode='FK') == {'FINISHED'}
+    bpy.ops.xbone.match_limb(control=ctl.name, mode='IK')
+    ctl["rotation_space"] = 1
+    update(rig)
+    fixed = wrist.matrix.copy()
+    ctl["elbow_glide"] = 0
+    update(rig)
+    close(wrist.head, fixed.translation, "wrist lock changing elbow glide")
+    assert abs(wrist.matrix.to_quaternion().dot(fixed.to_quaternion())) > .999
+    orientation = p[ctl["wrist_rotation"]]
+    orientation.matrix = orientation.matrix @ Matrix.Rotation(.4, 4, 'X')
+    update(rig)
+    close(wrist.head, fixed.translation, "independent wrist rotation")
+    assert abs(wrist.matrix.to_quaternion().dot(fixed.to_quaternion())) < .99
+    ctl["elbow_glide"] = 2.
+    update(rig)
+    shaft = p[comp + "_6_jnt"]
+    twisted = shaft.matrix.to_quaternion()
+    wrist_frame = wrist.matrix.copy()
+    ctl["forearm_rotation"] = 0.
+    update(rig)
+    twist = twisted.rotation_difference(shaft.matrix.to_quaternion()).angle
+    assert abs(min(twist, math.tau-twist) - math.radians(6)) < .003, (comp, twist)
+    close(wrist.head, wrist_frame.translation, "forearm rotation / wrist position")
+    assert abs(wrist_frame.to_quaternion().dot(wrist.matrix.to_quaternion())) > .99999
+    ctl["forearm_rotation"] = 6.
+    pole = p[ctl["pole_control"]]
+    original_pole = pole.matrix.copy()
+    shifted = original_pole.copy()
+    shifted.translation += Vector((.05, .03, .1))
+    before = elbow.head.copy()
+    pole.matrix = shifted
+    update(rig)
+    assert (elbow.head-before).length > .001
+    close(wrist.head, wrist_frame.translation, "moving elbow pole / pinned wrist")
+    pole.matrix = original_pole
+    update(rig)
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -214,12 +275,16 @@ assert skin == {name: entry[0] for name, entry in reference.items()}
 for comp in ("leg_L0", "leg_R0"):
     check_leg(rig, comp)
     check_bend_control(rig, comp)
+for comp in ("arm_L0", "arm_R0"):
+    check_bend_control(rig, comp)
+    check_elbow(rig, comp)
 assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
 rig_name = rig.name
 rig.pose.bones["IK.leg_R0_ankle"]["knee_glide"] = 2.5
 update(rig)
 saved = {n: rig.pose.bones[n].head.copy() for n in
-         ("leg_L0_knee", "leg_L0_4_jnt", "leg_R0_knee", "leg_R0_end_jnt")}
+         ("leg_L0_knee", "leg_L0_4_jnt", "leg_R0_knee", "leg_R0_end_jnt",
+          "arm_L0_elbow", "arm_L0_4_jnt", "arm_R0_wrist")}
 assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
 # Simulate a previous-version guide and one explicitly authored rig override.
 bpy.ops.object.mode_set(mode='OBJECT')
@@ -242,4 +307,4 @@ with tempfile.TemporaryDirectory() as directory:
     for name, location in saved.items():
         close(rig.pose.bones[name].head, location, ("rebuilt and reopened", name), .0005)
     assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
-print("XBiped bilateral knee glide, skin joints, IK/FK matching, planted feet, rebuild and reload passed")
+print("XBiped elbow and knee glide, skin joints, IK/FK, wrist rotation, rebuild and reload passed")

@@ -64,8 +64,8 @@ def build(context, guide):
     if bind_plan and any(name in guide.data.bones for name in bind_plan):
         raise ValueError("A guide bone already uses a Shifter output joint name")
     if guide.get("xbiped"):
-        from . import xbiped_knee
-        xbiped_knee.set_leg_defaults(guide)
+        from . import xbiped_limb
+        xbiped_limb.set_limb_defaults(guide)
     # Copy rest data only. Preserve the guide for variations and keep bound rigs independent.
     arm = guide.data.copy()
     rig = bpy.data.objects.new(guide.name + ".Rig", arm)

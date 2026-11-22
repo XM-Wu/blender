@@ -220,6 +220,16 @@ class IMAGE_PT_texel_pack_transform(TexelPackSidebarPanel, Panel):
         flips = orientation.row(align=True)
         for mode, label in (('FLIP_U', 'Flip U'), ('FLIP_V', 'Flip V')):
             flips.operator('uv_tools.transform', text=label).mode = mode
+        mirror = layout.box()
+        mirror.label(text="UV Mirror")
+        mirror.prop(settings, 'mirror_axis', expand=True)
+        mirror.label(text="Select both sides, then choose the target")
+        row = mirror.row(align=True)
+        for uv_axis, label_axis in (('X', 'U'), ('Y', 'V')):
+            for sign, label in (('POS', '+'), ('NEG', '−')):
+                op = row.operator('uv.copy_mirrored_faces', text=label + label_axis, translate=False)
+                op.mesh_axis = sign + '_' + settings.mirror_axis
+                op.uv_axis = uv_axis
         box = layout.box()
         box.label(text='Straighten')
         buttons(box, (('STRAIGHT', 'IPO_LINEAR'), ('STRAIGHT_H', 'ALIGN_JUSTIFY'), ('STRAIGHT_V', 'ALIGN_FLUSH')))

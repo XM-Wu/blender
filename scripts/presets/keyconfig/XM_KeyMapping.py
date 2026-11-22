@@ -154,6 +154,13 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
         0, ("object.mode_set", {"type": 'TWO', "value": 'PRESS'},
             {"properties": [("mode", 'EDIT')]}))
 
+    curve_items = _keymap_items(keyconfig_data, "Curve")
+    curve_items[:] = [
+        ("curve.delete", event, {"properties": [("type", 'VERT')]})
+        if event == {"type": 'DEL', "value": 'PRESS'} else (operator, event, options)
+        for operator, event, options in curve_items
+    ]
+
     # Shift+V is the only keyboard shortcut for vertex/edge slide.
     mesh_items = _keymap_items(keyconfig_data, "Mesh")
     # Mesh-only overrides; global framing and transform modal keys stay intact.
@@ -162,7 +169,7 @@ def _add_xm_items(keyconfig_data, *, remember_last_tool=True):
         and not any(item[1].get(mod, False) for mod in ("ctrl", "shift", "alt", "oskey", "hyper"))
     )]
     mesh_items.extend([
-        ("mesh.dissolve_mode", {"type": 'DEL', "value": 'PRESS'}, None),
+        ("mesh.xm_smart_delete", {"type": 'DEL', "value": 'PRESS'}, None),
         ("wm.tool_set_by_id", {"type": 'Y', "value": 'PRESS'},
          {"properties": [("name", "builtin.target_weld")]}),
         ("mesh.apply_all_transforms", {"type": 'A', "value": 'PRESS'}, None),

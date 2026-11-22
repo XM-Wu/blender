@@ -37,7 +37,10 @@ def check_leg(rig, comp):
     update(rig)
     rest = fk.matrix.copy()
 
-    for angle in (30, 90, 150, 160):
+    ui = ctl.id_properties_ui(strength).as_dict()
+    assert ui["default"] == 1 and ui["max"] == 4
+    for angle, gain in ((30, 1), (90, 1), (150, 1), (160, 1), (160, 2), (105, 4), (160, 4)):
+        ctl[strength] = gain
         frame = Matrix.Rotation(math.radians(angle) - u.angle(v), 4, axis) @ rest
         frame.translation = rest.translation
         fk.matrix = frame
@@ -50,6 +53,11 @@ def check_leg(rig, comp):
         assert abs((t - end).length - b) < 0.00015 and abs((f - p[comp].head).length - a) < 0.00015
         assert abs(math.degrees((f - p[comp].head).angle(end - t)) - angle) < .03
         glide = (t - f).length
+        if angle == 160:
+            assert abs(glide - .035*b*gain) < .00015
+        if gain > 1:
+            coupling = p["MCH.Reach." + comp]["knee_coupling"]
+            assert abs(coupling - glide/(.035*b*gain)) < .001
         if angle <= 60:
             assert glide < 0.00015
         else:
@@ -68,6 +76,7 @@ def check_leg(rig, comp):
                 close(p[prefix + "tibia"].head, t, "IK tibia")
                 close(p[tip].head, p[ctl["foot_effector"]].head, "IK effector")
 
+    ctl[strength] = 1.
     rig[blend] = 1.
     update(rig)
     planted = p[tip].head.copy()
@@ -207,6 +216,8 @@ for comp in ("leg_L0", "leg_R0"):
     check_bend_control(rig, comp)
 assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
 rig_name = rig.name
+rig.pose.bones["IK.leg_R0_ankle"]["knee_glide"] = 2.5
+update(rig)
 saved = {n: rig.pose.bones[n].head.copy() for n in
          ("leg_L0_knee", "leg_L0_4_jnt", "leg_R0_knee", "leg_R0_end_jnt")}
 assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
@@ -224,6 +235,7 @@ with tempfile.TemporaryDirectory() as directory:
     rig = bpy.data.objects[rig_name]
     assert rig["rigging_guide"]["xbiped"]
     assert "knee_glide" in rig.pose.bones["IK.leg_R0_ankle"]
+    assert rig.pose.bones["IK.leg_R0_ankle"]["knee_glide"] == 2.5
     assert rig.pose.bones["IK.leg_L0_ankle"]["maxstretch"] == 1.
     assert rig.pose.bones["IK.leg_R0_ankle"]["maxstretch"] == 1.25
     assert abs(rig.pose.bones["FK.leg_L0_knee_bend"].rotation_euler.x-math.radians(120)) < .0001

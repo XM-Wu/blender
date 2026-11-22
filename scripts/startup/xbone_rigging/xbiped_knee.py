@@ -11,7 +11,8 @@ from . import biped_display
 
 # An artistic profile in character proportions. The slider scales the peak
 # anterior displacement of the proximal tibia relative to the distal femur.
-MAX_TRAVEL = 0.035  # fraction of shin length
+BASE_TRAVEL = 0.035  # fraction of shin length at unit gain
+MAX_GAIN = 4
 PROFILE = "smoothstep(-0.5,0.906307787,-c)"  # cosine of flexion, 60 to 155 degrees
 
 
@@ -145,8 +146,8 @@ def solve(rig, target, comp, fk, calc, a, b, d, length):
     knee, center, up, end, axes, slider, pivot, rest_shin = fk
     configure_bend(rig, comp, target, rest_shin)
     target["knee_glide"] = 1.0
-    target.id_properties_ui("knee_glide").update(min=0, max=1, default=1.0,
-                                                 description="Tibial glide in deep flexion")
+    target.id_properties_ui("knee_glide").update(min=0, max=MAX_GAIN, default=1.0,
+                                                 description="Deep-flexion travel multiplier (1 = 3.5% of shin length)")
     target["knee_internal_rotation"] = 6.0
     target.id_properties_ui("knee_internal_rotation").update(
         min=0.0, max=30.0, default=6.0, description="Peak inward rotation of the shin in degrees")
@@ -163,19 +164,19 @@ def solve(rig, target, comp, fk, calc, a, b, d, length):
     lower = distance(owner, "lower_ray", knee, end)
     chord = distance(owner, "ray_chord", up, end)
     cos_fk = calc("fk_knee_cos", "clamp((u*u+v*v-w*w)/max(1e-12,2*u*v),-1,1)", u=upper, v=lower, w=chord)
-    gain = target, "knee_glide"
-    fk_weight = calc("glide_fk_weight", "clamp(g,0,1)*" + PROFILE, g=gain, c=cos_fk)
-    drive(pose[slider], "location", f"{rest_shin * MAX_TRAVEL:.12g}*w", {"w": fk_weight}, 0)
+    gain = calc("glide_gain", f"clamp(g,0,{MAX_GAIN})", g=(target, "knee_glide"))
+    fk_weight = calc("glide_fk_weight", "g*" + PROFILE, g=gain, c=cos_fk)
+    drive(pose[slider], "location", f"{rest_shin * BASE_TRAVEL:.12g}*w", {"w": fk_weight}, 0)
     copy_pose(pose[pivot], rig, slider, 'COPY_LOCATION')
 
     # H=hip, F=femoral end, T=tibial start, A=ankle. FT is perpendicular
     # to TA. Thus FA^2=b^2+s^2. Solve HFA, then recover T analytically.
     # The slide depends on the true angle between HF and TA. Fixed-point
-    # refinement is fast for a travel bounded to 3.5 percent of the shin.
-    peak = calc("glide_peak", f"{MAX_TRAVEL}*b*clamp(g,0,1)", b=b, g=gain)
+    # refinement covers travel up to 14 percent of the shin.
+    peak = calc("glide_peak", f"{BASE_TRAVEL}*b*g", b=b, g=gain)
     reach = calc("triangle_reach", "clamp(d,max(1e-7,sqrt((a-b)*(a-b)+p*p)),a+b)", d=d, a=a, b=b, p=peak)
     s = calc("glide_seed", "0.0")
-    for i in range(4):
+    for i in range(7):
         effective = calc(f"glide_length_{i}", "sqrt(b*b+s*s)", b=b, s=s)
         projected = calc(f"glide_cos_{i}", "clamp((d*d-a*a-e*e)/max(1e-12,2*a*e),-1,1)",
                          d=reach, a=a, e=effective)
@@ -183,10 +184,11 @@ def solve(rig, target, comp, fk, calc, a, b, d, length):
         s = calc(f"glide_{i}", "p*" + PROFILE, p=peak, c=cosine)
     # The secondary tibial rotation uses this same solved fraction. It acts
     # about the shin axis so the ankle target and foot orientation stay pinned.
-    ik_weight = calc("glide_ik_weight", f"s/max(1e-9,b*{MAX_TRAVEL})", s=s, b=b)
+    ik_weight = calc("glide_ik_weight", f"s/max(1e-9,b*{BASE_TRAVEL})", s=s, b=b)
     weight_bone, _ = fk_weight
     weight_bone["knee_coupling"] = 0.0
-    driver = drive(weight_bone, '["knee_coupling"]', "f+(i-f)*blend", {"f": fk_weight, "i": ik_weight})
+    driver = drive(weight_bone, '["knee_coupling"]', "(f+(i-f)*blend)/max(1,g)",
+                   {"f": fk_weight, "i": ik_weight, "g": gain})
     var = driver.variables.new()
     var.name = "blend"
     var.targets[0].id = rig

@@ -19,8 +19,10 @@ Use **Left to Right** or **Right to Left** in the Rigging sidebar to mirror guid
 
 Choose **XBiped Template → Build Rig** for the Biped controls and skin skeleton with sliding knees.
 Each leg has a **Knee Glide** slider in the Rigging sidebar. At zero the two knee pivots coincide.
-At full strength the tibial pivot moves anteriorly relative to the femoral end in the bend plane.
-Travel increases smoothly from 60° to 155° of flexion and peaks at 3.5% of shin length.
+The tibial pivot moves anteriorly relative to the femoral end in the bend plane.
+Travel increases smoothly from 60° to 155° of flexion. Knee Glide defaults to 1
+(3.5% of shin length at peak flexion). Values up to 4 amplify travel proportionally
+(7% at 2 and 14% at 4); above 1 only the sliding distance is amplified.
 **Tibial Rotation (°)** adds inward rotation to the shin skin joints along their longitudinal
 axes using the same bend profile (6° at full strength by default). The approximation models bone
 movement only. Both default values are rig parameters rather than subject-specific measurements.

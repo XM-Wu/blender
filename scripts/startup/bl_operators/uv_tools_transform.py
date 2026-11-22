@@ -33,6 +33,12 @@ TARGET_ANGLES = {'POS_U':0.0, 'NEG_U':math.pi, 'POS_V':math.pi/2, 'NEG_V':-math.
 
 
 class UVToolsOrientationSettings(bpy.types.PropertyGroup):
+    mirror_axis: EnumProperty(
+        name="Mesh Mirror Axis",
+        description="Local mesh axis used to pair symmetric faces",
+        items=[(axis, axis, "") for axis in "XYZ"],
+        default='X',
+    )
     reference: EnumProperty(name='Reference', default='BOUNDS', items=(
         ('BOUNDS','UV Shape','Orient the UV bounding rectangle'),
         ('EDGES','Selected Edges','Use selected UV edges to orient the whole island without deforming it'),

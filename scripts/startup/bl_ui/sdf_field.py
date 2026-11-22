@@ -183,11 +183,12 @@ def signed(data, coverage, size):
 
 @lru_cache(maxsize=3)
 def fields(a, b, coverage, size):
-    da = signed(a, coverage, size)
-    db = signed(b, coverage, size)
     mask = decode(coverage, size)
     white_a = decode(a, size)[mask]
     white_b = decode(b, size)[mask]
+    if not white_a.size:
+        return np.float32(-1), np.float32(-1)
+
     # A uniform key has no boundary. Offset the adjoining contour until
     # its last white (or black) pixel disappears at the uniform key.
     def endpoint(white, other, own):
@@ -209,6 +210,8 @@ def fields(a, b, coverage, size):
         if white_a[0]:
             return 1 - crossing, -crossing
         return -crossing, 1 - crossing
+    da = signed(a, coverage, size)
+    db = signed(b, coverage, size)
     return endpoint(white_a, db, da), endpoint(white_b, da, db)
 
 

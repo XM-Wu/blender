@@ -39,7 +39,9 @@ assert base.all_uvs(ob)==before
 
 original_pack=base.pack
 def searched_pack(**kw):
-    kw.update(heuristic_search=True,search_time=.03,no_improvement_time=0)
+    # The baseline determinism test explicitly requests a fixed search path.
+    kw.setdefault("heuristic_search", True)
+    kw.update(search_time=.03, no_improvement_time=0)
     return original_pack(**kw)
 base.pack=searched_pack
 result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(base.TexelPackTest))

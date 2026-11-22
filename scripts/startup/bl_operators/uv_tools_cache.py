@@ -40,6 +40,8 @@ def shape_statistics(ratios, areas):
 
 def island_area_values(areas, uv_areas, triangle_faces, face_islands):
     """Per-polygon relative linear scale, matching the tested RizomUV formula."""
+    if not len(triangle_faces):
+        return areas.copy(), np.zeros(len(np.unique(face_islands)), dtype=np.float64), areas.copy()
     face_area = np.bincount(triangle_faces, weights=areas, minlength=len(face_islands))
     face_uv = np.bincount(triangle_faces, weights=uv_areas, minlength=len(face_islands))
     valid = face_area > 1e-20

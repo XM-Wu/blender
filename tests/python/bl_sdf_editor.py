@@ -11,6 +11,11 @@ from bl_ui import space_sdf as sdf
 from bl_ui import sdf_field as field
 
 
+# Island selection may leave an existing keyed mask without covered texels.
+empty = field.encode(np.zeros((4, 4), dtype=bool))
+full = field.encode(np.ones((4, 4), dtype=bool))
+assert not field.preview(((0, empty), (1, full)), 0.5, empty, 4).any()
+
 # A truncated packed image must not be padded into a different valid drawing.
 for damaged in (field.pack_bytes(b""), field.pack_bytes(bytes(3)), "invalid data"):
     try:

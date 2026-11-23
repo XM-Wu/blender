@@ -191,7 +191,9 @@ def _template_items_editmode_mesh_select_mode(params):
 # Window, Screen, Areas, Regions
 
 def km_window(params):
-    items = []
+    items = [
+        ("xbone.cancel_landmarks", {"type": 'ESC', "value": 'PRESS'}, None),
+    ]
     keymap = (
         "Window",
         {"space_type": 'EMPTY', "region_type": 'WINDOW'},

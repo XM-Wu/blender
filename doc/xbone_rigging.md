@@ -26,7 +26,10 @@ to define the IK plane.
 Select an XBiped Guide or its built Rig and choose **Edit XBiped Landmarks** to adjust it again.
 Existing XBiped templates can also start from their guide joints. **Update XBiped Guide**
 applies the changes to the same guide, including its custom branches. Use **Rig** in the Rigging editor header to return with the edits pending, or **Apply Guide and Rebuild**
-to apply them to the existing rig. **Discard Markers** cancels this edit.
+to apply them to the existing rig. **Cancel** or **Esc** discards the marker session and returns to the object and mode where it started.
+Markers reopen at the current guide pivots. A manually asymmetric guide opens with independent left and right
+markers, even if originally created symmetrically. Toggle **Mirror Left to Right** while editing to preview or
+disable symmetry. **Update XBiped Guide** applies marker positions to the guide only.
 
 In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
 The list shows all meshes in the current scene with an Armature modifier targeting that XBone, including hidden meshes.

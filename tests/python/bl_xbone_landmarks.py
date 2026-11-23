@@ -254,7 +254,10 @@ for symmetric in (True, False):
     for key, offset in changes.items():
         m[key].location += offset
         expected[key] = root.matrix_world @ m[key].location
+    rig_data_uid = rig.data.session_uid
+    rest_before = rig.data.bones["FK.finger_L0_0_loc"].matrix_local.copy()
     assert ops.fit_landmarks() == {'FINISHED'} and c.object == guide
+    assert rig.data.session_uid == rig_data_uid and rig.data.bones["FK.finger_L0_0_loc"].matrix_local == rest_before
     assert guide.data.bones["arm_L0"]["div0"] == 4 and "Accessory" in guide.data.bones
     for key, name in (("index_1.L", "finger_L0_0_loc"), ("eye.L", "eye_L0")):
         near(guide.matrix_world @ guide.data.bones[name].head_local, expected[key])
@@ -291,5 +294,71 @@ with tempfile.TemporaryDirectory() as tmp:
     root = c.scene.xbone_marker_session
     assert root["isolate_marker"] and len(smart.markers(root)) == 67
     assert ops.cancel_landmarks() == {'FINISHED'}
+
+# A once-symmetric guide can have independent manual edits. Even legacy marker
+# offsets must not move the entry points away from the actual rest joints.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+assert ops.biped_guide(template='xbiped') == {'FINISHED'}
+guide = c.object
+support = bpy.data.objects.new("Scaled parent", None)
+c.collection.objects.link(support)
+support.scale = (1.4, 0.8, 1.2)
+support.rotation_euler.z = 0.31
+guide.parent = support
+guide.location = (2, -1, 0.5)
+guide.rotation_euler.z = -0.24
+guide["landmark_symmetric"] = True
+guide["landmark_offsets"] = {"wrist.R": [0.12, 0.2, -0.16]}
+bpy.ops.object.mode_set(mode='EDIT')
+guide.data.edit_bones["arm_R0_wrist"].translate(Vector((0.07, 0.06, 0.03)))
+pick = guide.data.edit_bones["arm_R0_wrist"]
+guide.data.edit_bones.active = pick
+assert ops.edit_landmarks() == {'FINISHED'}
+root = c.scene.xbone_marker_session
+assert not root["symmetric"]
+c.view_layer.update()
+initial = {}
+def check_pivots(guide, points):
+    for key, position in points.items():
+        part, loc = smart.landmark_keys()[key]
+        label = part if loc == "root" else f"{part}_{loc}"
+        bone = next(b for b in guide.data.bones if b.get("biped_locator", b.name) == label)
+        near(guide.matrix_world @ bone.head_local, position)
+
+for key, marker in smart.markers(root).items():
+    initial[key] = marker.matrix_world.translation.copy()
+check_pivots(guide, initial)
+assert ops.landmark_details(detail='FINGERS') == {'FINISHED'}
+assert set(smart.markers(root)) == {key for key, _ in smart.steps(root)}
+check_pivots(guide, {k: m.matrix_world.translation.copy() for k, m in smart.markers(root).items()})
+m = smart.markers(root)
+m["wrist.R"].location.z -= 0.05
+independent = m["wrist.R"].location.copy()
+assert ops.landmark_symmetry() == {'FINISHED'} and root["symmetric"]
+assert "wrist.R" not in smart.markers(root)
+assert ops.landmark_symmetry() == {'FINISHED'} and not root["symmetric"]
+near(smart.markers(root)["wrist.R"].location, independent)
+assert ops.cancel_landmarks() == {'FINISHED'}
+assert c.active_object == guide and c.mode == 'EDIT_ARMATURE'
+assert guide.data.edit_bones.active.name == "arm_R0_wrist" and "landmark_offsets" in guide
+check_pivots(guide, initial)
+
+assert ops.edit_landmarks() == {'FINISHED'}
+root = c.scene.xbone_marker_session
+m = smart.markers(root)
+m["wrist.R"].location += Vector((0.01, 0.06, -0.05))
+m["elbow.R"].location += Vector((-0.02, 0.03, 0.01))
+guide.data.use_mirror_x = True
+c.view_layer.update()
+expected = {k: ob.matrix_world.translation.copy() for k, ob in m.items()}
+assert ops.fit_landmarks() == {'FINISHED'}
+assert c.active_object == guide and guide.data.use_mirror_x and "landmark_offsets" not in guide
+check_pivots(guide, expected)
+near(expected["wrist.L"], initial["wrist.L"])
+assert ops.edit_landmarks() == {'FINISHED'}
+c.view_layer.update()
+for key, marker in smart.markers(c.scene.xbone_marker_session).items():
+    near(marker.matrix_world.translation, expected[key])
+assert ops.cancel_landmarks() == {'FINISHED'}
 
 print("PASS: XBiped body, fingers, face, marker isolation, cancel, guide refit and in-place rebuild")

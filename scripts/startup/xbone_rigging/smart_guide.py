@@ -120,28 +120,30 @@ def set_isolation(root, current, enabled):
     root["isolate_marker"] = enabled
 
 
+def suggested_position(root, key, defaults, placed):
+    component = landmark_keys()[key][0]
+    if component.startswith(("finger_", "thumb_")) and not key.startswith("hand."):
+        a, b = "wrist." + key[-1], "hand." + key[-1]
+    elif component.startswith(("eye_", "mouth_")):
+        a, b = "head", "crown"
+    elif root.get("editing_guide"):
+        return defaults[key]
+    else:
+        return defaults[key] * (root["height"] / defaults["crown"].z)
+    frame = Segment(defaults[a], defaults[b], placed[a].location, placed[b].location)
+    return frame.point(defaults[key])
+
+
 def place_default(root, index, position=None):
     order = steps(root)
     key, label = order[index]
-    marker = markers(root).get(key)
+    placed = markers(root)
+    marker = placed.get(key)
     if marker is None:
-        defaults = default_positions()
         if position is None:
-            position = defaults[key] * (root["height"] / defaults["crown"].z)
-            component = landmark_keys()[key][0]
-            if component.startswith(("finger_", "thumb_")) and not key.startswith("hand."):
-                anchors = ("wrist." + key[-1], "hand." + key[-1])
-            elif component.startswith(("eye_", "mouth_")):
-                anchors = ("head", "crown")
-            else:
-                anchors = None
-            if anchors:
-                placed = markers(root)
-                a, b = anchors
-                if root.get("editing_guide"):
-                    defaults = guide_positions(root["editing_guide"])
-                frame = Segment(defaults[a], defaults[b], placed[a].location, placed[b].location)
-                position = frame.point(defaults[key])
+            guide = root.get("editing_guide")
+            defaults = guide_positions(guide) if guide else default_positions()
+            position = suggested_position(root, key, defaults, placed)
         marker = bpy.data.objects.new(label, None)
         root.users_collection[0].objects.link(marker)
         marker.parent = root
@@ -159,29 +161,34 @@ def place_default(root, index, position=None):
                     if curve:
                         curve.driver.variables["center"].targets[0].id = marker
         if root["symmetric"] and key.endswith(".L"):
-            for old in list(root.children):
-                if old.get("xbone_mirrored_landmark") == key:
-                    bpy.data.objects.remove(old, do_unlink=True)
-            twin = bpy.data.objects.new(label[:-2] + ".R", None)
-            root.users_collection[0].objects.link(twin)
-            twin.parent = root
-            twin["xbone_mirrored_landmark"] = key
-            twin.empty_display_type, twin.empty_display_size = 'SPHERE', marker.empty_display_size
-            twin.show_in_front, twin.hide_select, twin.hide_render = True, True, True
-            for axis in range(3):
-                driver = twin.driver_add("location", axis).driver
-                var = driver.variables.new()
-                var.name = "p"
-                var.targets[0].id, var.targets[0].data_path = marker, f"location[{axis}]"
-                if axis == 0:
-                    mid = driver.variables.new()
-                    mid.name = "center"
-                    mid.targets[0].id, mid.targets[0].data_path = markers(root)["pelvis"], "location[0]"
-                    driver.expression = "2*center-p"
-                else:
-                    driver.expression = "p"
+            make_mirror_preview(root, marker, label)
     root["step"] = index + 1
     return marker
+
+
+def make_mirror_preview(root, marker, label):
+    key = marker["xbone_landmark"]
+    for old in list(root.children):
+        if old.get("xbone_mirrored_landmark") == key:
+            bpy.data.objects.remove(old, do_unlink=True)
+    twin = bpy.data.objects.new(label[:-2] + ".R", None)
+    root.users_collection[0].objects.link(twin)
+    twin.parent = root
+    twin["xbone_mirrored_landmark"] = key
+    twin.empty_display_type, twin.empty_display_size = 'SPHERE', marker.empty_display_size
+    twin.show_in_front, twin.hide_select, twin.hide_render = True, True, True
+    for axis in range(3):
+        driver = twin.driver_add("location", axis).driver
+        var = driver.variables.new()
+        var.name = "p"
+        var.targets[0].id, var.targets[0].data_path = marker, f"location[{axis}]"
+        if axis == 0:
+            mid = driver.variables.new()
+            mid.name = "center"
+            mid.targets[0].id, mid.targets[0].data_path = markers(root)["pelvis"], "location[0]"
+            driver.expression = "2*center-p"
+        else:
+            driver.expression = "p"
 
 
 class Segment:
@@ -202,17 +209,27 @@ class Segment:
         return frame
 
 
-def fitted_template(root, positions=None, world=None):
-    order = steps(root)
+def landmark_points(root, positions=None, symmetric=None):
+    if symmetric is None:
+        symmetric = root["symmetric"]
+    order = steps({"symmetric": symmetric, "detail_order": root.get("detail_order", "")})
     pts = positions if positions is not None else {k: obj.location.copy() for k, obj in markers(root).items()}
     if any(k not in pts for k, _ in order):
         raise ValueError("Place all required markers first")
     pts = {k: pts[k] for k, _ in order}
-    if root["symmetric"]:
+    if symmetric:
         for key, _ in order:
             if key.endswith(".L"):
-                p = pts[key]
-                pts[key[:-1] + "R"] = Vector((2 * pts["pelvis"].x - p.x, p.y, p.z))
+                pts[key[:-1] + "R"] = reflect_point(pts[key], pts["pelvis"])
+    return pts
+
+
+def reflect_point(point, pelvis):
+    return Vector((2 * pelvis.x - point.x, point.y, point.z))
+
+
+def fitted_template(root, positions=None, world=None, *, symmetric=None):
+    pts = landmark_points(root, positions, symmetric)
     bottom = min(pts["toe.L"].z, pts["toe.R"].z)
     height = pts["crown"].z - bottom
     if not bottom < pts["pelvis"].z < pts["neck"].z < pts["head"].z < pts["crown"].z:
@@ -375,12 +392,11 @@ def new_session(context, symmetric, height, rig=None):
 
 def guide_positions(guide):
     bones = {b.get("biped_locator", b.name): b for b in guide.data.bones}
-    offsets = guide.get("landmark_offsets", {})
     points = {}
     for key, (component, loc) in landmark_keys().items():
         label = component if loc == "root" else f"{component}_{loc}"
         if label in bones:
-            points[key] = bones[label].head_local + Vector(offsets.get(key, (0, 0, 0)))
+            points[key] = bones[label].head_local.copy()
     return points
 
 
@@ -388,20 +404,11 @@ def remember_landmarks(root, guide):
     guide["landmark_symmetric"] = root["symmetric"]
     guide["landmark_details"] = root.get("detail_order", "")
     guide["landmark_isolate"] = root.get("isolate_marker", False)
-    # A straight IK limb can get a small bend during fitting. Retain the authored
-    # marker offset while allowing later guide edits to move the landmark with its bone.
-    guide["landmark_offsets"] = {}
-    neutral = guide_positions(guide)
-    local = guide.matrix_world.inverted_safe() @ root.matrix_world
-    offsets = {}
-    for key, marker in markers(root).items():
-        delta = local @ marker.location - neutral[key]
-        if delta.length > 1e-6:
-            offsets[key] = list(delta)
-    guide["landmark_offsets"] = offsets
+    if "landmark_offsets" in guide:
+        del guide["landmark_offsets"]
 
 
-def refit_guide(context, guide, before, after):
+def refit_guide(context, guide, before, after, anchors):
     # Both fits start from the same canonical component axes. Applying only their
     # difference preserves manual refinements, custom branches and guide settings.
     def frames_in_guide(fit):
@@ -418,11 +425,16 @@ def refit_guide(context, guide, before, after):
     original, updated = frames_in_guide(before), frames_in_guide(after)
     delta = {label: updated[label] @ matrix.inverted_safe() for label, matrix in original.items()
              if updated[label] != matrix}
-    if not delta:
+    existing = {b.get("biped_locator", b.name): b for b in guide.data.bones}
+    if not delta and all((existing[k].head_local - v).length < 1e-6 for k, v in anchors.items()):
         return
     guide.hide_set(False)
     select_object(context, guide)
     bpy.ops.object.mode_set(mode='EDIT')
+    # Both sides already have explicit positions. RNA transform callbacks must not
+    # mirror one side over the other during the write, even if Edit Mode uses X Mirror.
+    mirror = guide.data.use_mirror_x
+    guide.data.use_mirror_x = False
     try:
         edit = guide.data.edit_bones
         targets = {}
@@ -437,6 +449,12 @@ def refit_guide(context, guide, before, after):
             if transform is not None:
                 targets[bone.name] = (transform @ bone.head, transform @ bone.tail,
                                       transform.to_3x3() @ bone.matrix.to_3x3().col[2])
+            label = bone.get("biped_locator", bone.name)
+            if label in anchors:
+                head, tail, up = targets.get(bone.name, (bone.head, bone.tail, bone.matrix.to_3x3().col[2]))
+                shift = anchors[label] - head
+                if shift.length > 1e-6:
+                    targets[bone.name] = (anchors[label], tail + shift, up.copy())
             joins[bone.name] = next((child.name for child in bone.children
                                      if (child.head - bone.tail).length < 1e-6), None)
         for name, child in joins.items():
@@ -453,6 +471,7 @@ def refit_guide(context, guide, before, after):
                 bone.tail = targets[child][0]
             bone.align_roll(up)
     finally:
+        guide.data.use_mirror_x = mirror
         bpy.ops.object.mode_set(mode='OBJECT')
 
 
@@ -494,9 +513,11 @@ class XBONE_OT_edit_landmarks(Operator):
 
     def execute(self, context):
         obj, mode = context.object, context.object.mode
+        selection = list(context.selected_objects)
         guide = obj.get("rigging_guide") or obj
         if mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
+        context.view_layer.update()
         pts = guide_positions(guide)
         details = guide.get("landmark_details", "")
         missing = {key for key, _ in steps({"symmetric": False, "detail_order": details})} - pts.keys()
@@ -505,16 +526,21 @@ class XBONE_OT_edit_landmarks(Operator):
             if mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
-        pelvis = pts["pelvis"]
-        symmetric = guide.get("landmark_symmetric")
-        if symmetric is None:
-            symmetric = all(key[:-1] + "R" in pts and
-                            (Vector((2 * pelvis.x - p.x, p.y, p.z)) - pts[key[:-1] + "R"]).length < 1e-5
-                            for key, p in pts.items() if key.endswith(".L"))
+        # The guide may have been edited since placement, including on its right side only.
+        # Respect an explicit independent session; only mirror a guide that still matches.
+        tolerance = max(1e-6, (pts["crown"] - pts["pelvis"]).length * 1e-5)
+        symmetric = guide.get("landmark_symmetric", True) and all(
+            key[:-1] + "R" in pts and (reflect_point(p, pts["pelvis"]) - pts[key[:-1] + "R"]).length <= tolerance
+            for key, p in pts.items() if key.endswith(".L"))
         rig = obj if obj != guide else rebuild.target_for(context, guide)
         root = new_session(context, symmetric, max(.001, pts["crown"].z - pts["toe.L"].z), rig)
-        root.matrix_world = guide.matrix_world
+        # Markers live in guide space even when its parents introduce scale or shear.
+        root.parent = guide
+        root.matrix_parent_inverse = Matrix.Identity(4)
+        root.matrix_basis = Matrix.Identity(4)
+        context.view_layer.update()
         root["editing_guide"], root["return_object"], root["return_mode"] = guide, obj, mode
+        root["return_selection"] = {str(i): ob for i, ob in enumerate(selection)}
         if rig:
             root["editing_rig"] = rig
         root["detail_order"] = details
@@ -529,6 +555,52 @@ class SessionOperator:
     @classmethod
     def poll(cls, context):
         return context.mode == 'OBJECT' and context.scene.xbone_marker_session is not None
+
+
+class XBONE_OT_landmark_symmetry(SessionOperator, Operator):
+    bl_idname = "xbone.landmark_symmetry"
+    bl_label = "Mirror Left to Right"
+    bl_description = "Switch between left-driven mirrored markers and independent left/right markers"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        root = context.scene.xbone_marker_session
+        placed = markers(root)
+        if "pelvis" not in placed:
+            return {'CANCELLED'}
+        current = current_step(root, context.active_object)
+        active_key = steps(root)[max(current, 0)][0]
+        root["symmetric"] = not root["symmetric"]
+        if root["symmetric"]:
+            # Keep the independent edits if the artist previews symmetry and switches back.
+            root["independent_right"] = {key: list(ob.location) for key, ob in placed.items() if key.endswith(".R")}
+            for key, ob in placed.items():
+                if key.endswith(".R"):
+                    bpy.data.objects.remove(ob, do_unlink=True)
+            for key, label in steps(root):
+                if key.endswith(".L") and key in placed:
+                    make_mirror_preview(root, placed[key], label)
+            if active_key.endswith(".R"):
+                active_key = active_key[:-1] + "L"
+        else:
+            for ob in list(root.children):
+                if "xbone_mirrored_landmark" in ob:
+                    bpy.data.objects.remove(ob, do_unlink=True)
+            saved = root.get("independent_right", {})
+            for i, (key, _) in enumerate(steps(root)):
+                if key.endswith(".R") and key[:-1] + "L" in placed:
+                    point = saved.get(key)
+                    if point is None:
+                        point = reflect_point(placed[key[:-1] + "L"].location, placed["pelvis"].location)
+                    place_default(root, i, point)
+            if "independent_right" in root:
+                del root["independent_right"]
+        placed = markers(root)
+        if active_key not in placed:
+            active_key = "pelvis"
+        root["step"] = next(i + 1 for i, (key, _) in enumerate(steps(root)) if key == active_key)
+        select_marker(context, placed[active_key])
+        return {'FINISHED'}
 
 
 class XBONE_OT_landmark_details(SessionOperator, Operator):
@@ -546,11 +618,19 @@ class XBONE_OT_landmark_details(SessionOperator, Operator):
             return {'CANCELLED'}
         root["detail_order"] = (previous + " " + self.detail).strip()
         try:
-            if root.get("editing_guide"):
+            guide = root.get("editing_guide")
+            if guide:
+                defaults = guide_positions(guide)
                 required = {key for key, _ in steps({"symmetric": False, "detail_order": self.detail})}
-                missing = required - guide_positions(root["editing_guide"]).keys()
+                missing = required - defaults.keys()
                 if missing:
                     raise ValueError("Guide is missing landmarks: " + ", ".join(sorted(missing)))
+                # A refit already has a guide. Initialize the entire section so Update is
+                # available immediately. Validate both sides before creating any objects.
+                additions = [suggested_position(root, key, defaults, placed)
+                             for key, _ in steps(root)[len(order):]]
+                for i, point in enumerate(additions, len(order)):
+                    place_default(root, i, point)
             marker = place_default(root, len(order))
         except ValueError as exc:
             root["detail_order"] = previous
@@ -612,15 +692,34 @@ class XBONE_OT_marker_back(SessionOperator, Operator):
 
 class XBONE_OT_cancel_landmarks(SessionOperator, Operator):
     bl_idname = "xbone.cancel_landmarks"
-    bl_label = "Discard Markers"
+    bl_label = "Cancel Landmark Editing"
+    bl_description = "Discard the temporary markers and return to the original object and mode"
     bl_options = {'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene is not None and context.scene.xbone_marker_session is not None
+
+    def invoke(self, context, event):
+        # Keep Escape available to other editors, playback and mode-specific controls.
+        if event.type == 'ESC' and (context.mode != 'OBJECT' or not context.area or
+                                    context.area.type not in {'VIEW_3D', 'RIGGING'} or
+                                    context.screen.is_animation_playing):
+            return {'PASS_THROUGH'}
+        return self.execute(context)
 
     def execute(self, context):
         root = context.scene.xbone_marker_session
         obj, mode = root.get("return_object"), root.get("return_mode")
+        selected = list(root.get("return_selection", {}).values())
+        if context.mode != 'OBJECT' and bpy.ops.object.mode_set.poll():
+            bpy.ops.object.mode_set(mode='OBJECT')
         clear(context, root)
         if obj and context.view_layer.objects.get(obj.name) and obj.visible_get():
             select_object(context, obj)
+            for other in selected:
+                if other and context.view_layer.objects.get(other.name) == other and other.visible_get():
+                    other.select_set(True)
             if mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode=mode)
         return {'FINISHED'}
@@ -637,29 +736,39 @@ class XBONE_OT_fit_landmarks(SessionOperator, Operator):
         if "editing_guide" in root and guide is None:
             self.report({'ERROR'}, "The source guide was removed")
             return {'CANCELLED'}
+        context.view_layer.update()
         try:
-            after = fitted_template(root)
+            points = landmark_points(root)
+            after = fitted_template(root, points)
             if guide:
-                before = fitted_template(root, guide_positions(guide), guide.matrix_world)
+                before = fitted_template(root, guide_positions(guide), guide.matrix_world, symmetric=False)
         except ValueError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
         if guide:
-            refit_guide(context, guide, before, after)
+            local = guide.matrix_world.inverted_safe() @ root.matrix_world
+            anchors = {}
+            for key, point in points.items():
+                component, locator = landmark_keys()[key]
+                label = component if locator == "root" else component + "_" + locator
+                anchors[label] = local @ point
+            refit_guide(context, guide, before, after, anchors)
         else:
             template, frames, world = after
             guide = guides.import_template(context, template, "XBiped Guide", at_origin=True, fit_frames=frames)
             guide.matrix_world = world
             guide["xbiped"] = True
             xbiped_limb.set_limb_defaults(guide)
+        was_editing = "editing_guide" in root
         remember_landmarks(root, guide)
         clear(context, root)
         guide.hide_set(False)
         if rig and context.view_layer.objects.get(rig.name):
             rig.hide_set(True)
             guide["rigging_target"] = rig
-        context.view_layer.objects.active = guide
-        guide.select_set(True)
+        select_object(context, guide)
+        if was_editing:
+            self.report({'INFO'}, "Guide updated. Use Apply Guide and Rebuild to update the rig.")
         return {'FINISHED'}
 
 
@@ -677,6 +786,11 @@ class RIGGING_PT_landmarks(Panel):
         root = context.scene.xbone_marker_session
         order = steps(root)
         i = current_step(root, context.active_object)
+        edit_session = "editing_guide" in root
+        if edit_session:
+            row = layout.row(align=True)
+            row.operator("xbone.landmark_symmetry", depress=bool(root["symmetric"]))
+            row.operator("xbone.cancel_landmarks", text="Cancel", icon='CANCEL')
         if i >= 0:
             layout.label(text=f"{i + 1}/{len(order)}  {order[i][1]}", icon='EMPTY_AXIS')
             layout.operator("xbone.isolate_landmark", depress=bool(root.get("isolate_marker")))
@@ -695,10 +809,11 @@ class RIGGING_PT_landmarks(Panel):
         back = row.row(align=True)
         back.enabled = i > 0
         back.operator("xbone.marker_back")
-        row.operator("xbone.cancel_landmarks")
+        if not edit_session:
+            row.operator("xbone.cancel_landmarks", text="Cancel", icon='CANCEL')
 
 
-classes = (XBONE_OT_start_landmarks, XBONE_OT_edit_landmarks, XBONE_OT_landmark_details,
+classes = (XBONE_OT_start_landmarks, XBONE_OT_edit_landmarks, XBONE_OT_landmark_symmetry, XBONE_OT_landmark_details,
            XBONE_OT_isolate_landmark, XBONE_OT_place_landmarks,
            XBONE_OT_marker_back, XBONE_OT_cancel_landmarks, XBONE_OT_fit_landmarks, RIGGING_PT_landmarks)
 

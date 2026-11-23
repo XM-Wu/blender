@@ -273,6 +273,8 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 
 标题栏的 **Guide** 打开当前 Rig 对应的源 Guide，**Rig** 保留 Guide 编辑并返回原 Rig 的 Pose Mode。往返沿用同一个骨架数据块、蒙皮修改器、Skin Tools 层栈、Action、NLA 和当前姿势；保存重开后仍可继续。新 Guide 第一次用 **Build Rig** 生成骨架。已经配对的 Guide 只有在明确执行 **Apply Guide and Rebuild（应用 Guide 并重建）** 时才把编辑应用到 Rig。[切换回归](tests/python/bl_xbone_guide_rig_switch.py)
 
+Rigging 面板的普通滚轮上下滚动内容。重新编辑 XBiped 标记时，以 Guide 当前的关节位置为准；手工改成不对称的 Guide 会分别显示左右标记。**Mirror Left to Right** 可切换单侧驱动预览和双侧独立编辑。**Cancel** 或 **Esc** 放弃标记并返回原对象与模式；**Update XBiped Guide** 更新 Guide，已有 Rig 继续使用上一次重建的结果。
+
 ## Object Mode 的 Clear 菜单
 
 3D 视图在 Object Mode 提供 **Clear** 菜单；相同操作也在 **Object → Clear** 原有变换命令下方。前三项分别清理当前文件内零用户且无引用的 Mesh、图片与纹理、材质。同一次图片／纹理清理会处理删除纹理后释放的图片。资产、Fake User、库链接及覆盖、仍待保存的图片和渲染结果会被保留。命令处理 Blender 数据块，磁盘上的外部图片文件不会被删除。

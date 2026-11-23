@@ -681,7 +681,9 @@ def _template_items_legacy_tools_from_numbers():
 # Window, Screen, Areas, Regions
 
 def km_window(params):
-    items = []
+    items = [
+        ("xbone.cancel_landmarks", {"type": 'ESC', "value": 'PRESS'}, None),
+    ]
     keymap = (
         "Window",
         {"space_type": 'EMPTY', "region_type": 'WINDOW'},

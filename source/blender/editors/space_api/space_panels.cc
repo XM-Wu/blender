@@ -44,7 +44,9 @@ template<eSpace_Type Type> static void register_panel_space(const char *name)
 
   ARegionType *window = MEM_new_zeroed<ARegionType>(__func__);
   window->regionid = RGN_TYPE_WINDOW;
-  window->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_VIEW2D;
+  /* ED_region_panels_init installs View2D Buttons List, where the wheel scrolls panels.
+   * The generic View2D map handles the same event as zoom before that map gets it. */
+  window->keymapflag = (Type == SPACE_RIGGING) ? ED_KEYMAP_UI : ED_KEYMAP_UI | ED_KEYMAP_VIEW2D;
   window->init = ED_region_panels_init;
   window->layout = ED_region_panels_layout;
   window->draw = ED_region_panels_draw;

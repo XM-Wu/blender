@@ -168470,3 +168470,15 @@ msgstr "恢复默认"
 msgctxt "Operator"
 msgid "Apply Guide and Rebuild"
 msgstr "应用 Guide 并重建"
+
+
+msgid "Mirror Left to Right"
+msgstr "从左侧镜像到右侧"
+
+
+msgid "Cancel Landmark Editing"
+msgstr "取消编辑标记"
+
+
+msgid "Guide updated. Use Apply Guide and Rebuild to update the rig."
+msgstr "Guide 已更新。要更新 Rig，请点击“应用 Guide 并重建”。"

@@ -27740,8 +27740,8 @@ msgid "UV Mirror"
 msgstr "UV 镜像"
 
 
-msgid "Fit XBiped to Mesh"
-msgstr "从人物网格拟合 XBiped"
+msgid "Place XBiped Landmarks"
+msgstr "放置 XBiped 标记"
 
 
 msgid "XBiped Landmarks"
@@ -27756,12 +27756,8 @@ msgid "Character Faces"
 msgstr "角色朝向"
 
 
-msgid "Place Markers in 3D View"
-msgstr "在 3D 视图逐个放置标记"
-
-
-msgid "Use 3D Cursor"
-msgstr "使用 3D 游标位置"
+msgid "Start at the world origin and fit an XBiped guide using movable landmarks"
+msgstr "从世界原点开始，通过移动标记拟合 XBiped Guide"
 
 
 msgid "Previous Marker"
@@ -27780,8 +27776,8 @@ msgid "Review markers in the viewport"
 msgstr "在视图中检查标记，可用 G 调整"
 
 
-msgid "Click to place, Backspace to go back, Esc to pause"
-msgstr "左键放置，退格键返回，Esc 暂停"
+msgid "Select the next landmark, creating it at the XBiped template position on its first visit"
+msgstr "选中下一个标记，首次放置时在 XBiped 模板的对应关节位置生成"
 
 
 msgid "Pelvis"

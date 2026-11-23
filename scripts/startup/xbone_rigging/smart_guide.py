@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Fit a Shifter XBiped guide to mesh landmarks in the character's reference pose."""
+"""Fit a Shifter XBiped guide to freely positioned landmarks in the character's reference pose."""
 import json
 import math
+from functools import lru_cache
 from pathlib import Path
 
 import bpy
 from bpy.app.translations import pgettext_iface as iface_
 from bpy.props import BoolProperty, EnumProperty, PointerProperty
 from bpy.types import Operator, Panel
-from bpy_extras.view3d_utils import region_2d_to_origin_3d, region_2d_to_vector_3d
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Matrix, Vector
 
 from . import guides, xbiped_limb
 
@@ -37,12 +37,29 @@ def current_step(root):
     return min(root["step"], missing)
 
 
-def sources(context, root):
-    return [obj for obj in root["source_meshes"].values() if obj and obj.type == 'MESH'
-            and context.view_layer.objects.get(obj.name) == obj]
+@lru_cache(maxsize=1)
+def default_positions():
+    specs, *_ = guides.template_points(Path(__file__).with_name("biped.sgt"), 0.1, 'Y')
+    keys = {"pelvis": ("spine_C0", "root"), "neck": ("neck_C0", "root"),
+            "head": ("neck_C0", "head"), "crown": ("neck_C0", "eff")}
+    for side in ("L", "R"):
+        arm, leg = f"arm_{side}0", f"leg_{side}0"
+        for name, component, locator in (
+                ("shoulder", arm, "root"), ("elbow", arm, "elbow"), ("wrist", arm, "wrist"),
+                ("hand", f"finger_{side}1", "2_loc"), ("hip", leg, "root"), ("knee", leg, "knee"),
+                ("ankle", leg, "ankle"), ("toe", f"foot_{side}0", "2_loc")):
+            keys[f"{name}.{side}"] = (component, locator)
+    return {name: specs[key][1].copy() for name, key in keys.items()}
 
 
-def place(root, world_point):
+def select_marker(context, marker):
+    for obj in context.selected_objects:
+        obj.select_set(False)
+    marker.select_set(True)
+    context.view_layer.objects.active = marker
+
+
+def place_default(root):
     order = steps(root)
     index = current_step(root)
     key, label = order[index]
@@ -51,6 +68,8 @@ def place(root, world_point):
         marker = bpy.data.objects.new(label, None)
         root.users_collection[0].objects.link(marker)
         marker.parent = root
+        defaults = default_positions()
+        marker.location = defaults[key] * (root["height"] / defaults["crown"].z)
         marker["xbone_landmark"] = key
         marker.empty_display_type = 'SPHERE'
         marker.empty_display_size = root["height"] * .009
@@ -84,36 +103,8 @@ def place(root, world_point):
                     driver.expression = "2*center-p"
                 else:
                     driver.expression = "p"
-    marker.location = root.matrix_world.inverted() @ world_point
     root["step"] = index + 1
     return marker
-
-
-def surface_center(context, root, origin, direction):
-    """Use the first hit and its exit on the same mesh to estimate joint depth."""
-    best, nearest = None, float('inf')
-    dg = context.evaluated_depsgraph_get()
-    epsilon = max(1e-8, root["height"] * 1e-5)
-    for source in sources(context, root):
-        if not source.visible_get(view_layer=context.view_layer):
-            continue
-        obj = source.evaluated_get(dg)
-        matrix = obj.matrix_world
-        inv = matrix.inverted_safe()
-        ray = (inv.to_3x3() @ direction).normalized()
-        hit, entry, normal, _ = obj.ray_cast(inv @ origin, ray)
-        if not hit:
-            continue
-        front = matrix @ entry
-        depth = (front - origin).dot(direction)
-        if depth >= nearest:
-            continue
-        nearest, best = depth, front
-        if normal.dot(ray) < 0:
-            hit, end, back_normal, _ = obj.ray_cast(inv @ (front + direction * epsilon), ray)
-            if hit and back_normal.dot(ray) > 0:
-                best = (front + matrix @ end) * .5
-    return best
 
 
 class Segment:
@@ -224,8 +215,8 @@ def clear(context, root):
 
 class XBONE_OT_start_landmarks(Operator):
     bl_idname = "xbone.start_landmarks"
-    bl_label = "Fit XBiped to Mesh"
-    bl_description = "Place body landmarks on the selected meshes, then fit the XBiped guide"
+    bl_label = "Place XBiped Landmarks"
+    bl_description = "Start at the world origin and fit an XBiped guide using movable landmarks"
     bl_options = {'REGISTER', 'UNDO'}
     symmetric: BoolProperty(name="Symmetrical Character", default=True)
     facing: EnumProperty(name="Character Faces", items=[(k, v, "") for k, v in
@@ -233,42 +224,22 @@ class XBONE_OT_start_landmarks(Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.mode == 'OBJECT' and not context.scene.xbone_marker_session and any(
-            o.type == 'MESH' for o in context.selected_objects)
+        return context.mode == 'OBJECT' and not context.scene.xbone_marker_session
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        meshes = [o for o in context.selected_objects if o.type == 'MESH' and len(o.data.vertices)]
-        dg = context.evaluated_depsgraph_get()
-        corners = [ev.matrix_world @ Vector(co)
-                   for obj in meshes for ev in (obj.evaluated_get(dg),) for co in ev.bound_box]
-        if not corners or max(p.z for p in corners) - min(p.z for p in corners) < 1e-5:
-            self.report({'ERROR'}, "Select an upright character mesh")
-            return {'CANCELLED'}
-        lo, hi = (Vector([f(p[i] for p in corners) for i in range(3)]) for f in (min, max))
         coll = bpy.data.collections.new("XBiped Landmarks")
         coll["xbone_marker_collection"] = True
         context.scene.collection.children.link(coll)
         root = bpy.data.objects.new("XBiped Landmarks", None)
         coll.objects.link(root)
-        root.location = ((hi.x + lo.x) / 2, (hi.y + lo.y) / 2, lo.z)
         root.rotation_euler.z = math.radians(FACING[self.facing])
-        root["source_meshes"] = {str(i): o for i, o in enumerate(meshes)}
-        root["height"], root["symmetric"], root["step"] = hi.z - lo.z, self.symmetric, 0
+        root["height"], root["symmetric"], root["step"] = default_positions()["crown"].z, self.symmetric, 0
         root.hide_render = True
         root.empty_display_size = root["height"] * .02
         context.scene.xbone_marker_session = root
-        view = (context.area if context.area and context.area.type == 'VIEW_3D' else
-                next((a for a in context.screen.areas if a.type == 'VIEW_3D'), None))
-        if view and not bpy.app.background:
-            space = view.spaces.active
-            space.region_3d.view_rotation = root.rotation_euler.to_quaternion() @ Quaternion((1, 0, 0), math.pi / 2)
-            space.region_3d.view_perspective = 'ORTHO'
-            region = next(r for r in view.regions if r.type == 'WINDOW')
-            with context.temp_override(area=view, region=region):
-                bpy.ops.view3d.view_selected(use_all_regions=False)
         return {'FINISHED'}
 
 
@@ -280,77 +251,15 @@ class SessionOperator:
 
 class XBONE_OT_place_landmarks(SessionOperator, Operator):
     bl_idname = "xbone.place_landmarks"
-    bl_label = "Place Markers in 3D View"
-    bl_description = "Click the selected character meshes in order; Backspace goes back and Esc pauses"
-    bl_options = {'UNDO', 'BLOCKING'}
-
-    def prompt(self, context, root):
-        i = current_step(root)
-        order = steps(root)
-        context.workspace.status_text_set(
-            f"{i + 1}/{len(order)}  {order[i][1]}   ·   " + iface_("Click to place, Backspace to go back, Esc to pause"))
-
-    def invoke(self, context, event):
-        root = context.scene.xbone_marker_session
-        if current_step(root) >= len(steps(root)) or not sources(context, root):
-            return {'CANCELLED'}
-        if not any(a.type == 'VIEW_3D' for a in context.screen.areas):
-            self.report({'WARNING'}, "Open a 3D Viewport beside Rigging to place markers")
-            return {'CANCELLED'}
-        self.session = root.session_uid
-        self.prompt(context, root)
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-    def cancel(self, context):
-        context.workspace.status_text_set(None)
-
-    def modal(self, context, event):
-        root = context.scene.xbone_marker_session
-        if (not root or root.session_uid != self.session or event.type == 'ESC' or
-                (event.type == 'RIGHTMOUSE' and not event.alt)):
-            self.cancel(context)
-            return {'FINISHED'}
-        if event.type == 'BACK_SPACE' and event.value == 'PRESS':
-            root["step"] = max(0, current_step(root) - 1)
-            self.prompt(context, root)
-        elif event.type == 'LEFTMOUSE' and event.value == 'PRESS' and not event.alt:
-            for area in context.screen.areas:
-                if area.type != 'VIEW_3D':
-                    continue
-                for region in area.regions:
-                    xy = event.mouse_x - region.x, event.mouse_y - region.y
-                    if region.type != 'WINDOW' or not (0 <= xy[0] < region.width and 0 <= xy[1] < region.height):
-                        continue
-                    with context.temp_override(area=area, region=region):
-                        view = context.region_data
-                        origin = region_2d_to_origin_3d(region, view, xy)
-                        direction = region_2d_to_vector_3d(region, view, xy)
-                        point = surface_center(context, root, origin, direction)
-                    if point is None:
-                        self.report({'INFO'}, "Click on a source mesh")
-                        return {'RUNNING_MODAL'}
-                    place(root, point)
-                    if current_step(root) == len(steps(root)):
-                        self.cancel(context)
-                        return {'FINISHED'}
-                    self.prompt(context, root)
-                    return {'RUNNING_MODAL'}
-        else:
-            return {'PASS_THROUGH'}
-        return {'RUNNING_MODAL'}
-
-
-class XBONE_OT_marker_cursor(SessionOperator, Operator):
-    bl_idname = "xbone.marker_cursor"
-    bl_label = "Use 3D Cursor"
+    bl_label = "Next Marker"
+    bl_description = "Select the next landmark, creating it at the XBiped template position on its first visit"
     bl_options = {'UNDO'}
 
     def execute(self, context):
         root = context.scene.xbone_marker_session
         if current_step(root) >= len(steps(root)):
             return {'CANCELLED'}
-        place(root, context.scene.cursor.location)
+        select_marker(context, place_default(root))
         return {'FINISHED'}
 
 
@@ -361,7 +270,11 @@ class XBONE_OT_marker_back(SessionOperator, Operator):
 
     def execute(self, context):
         root = context.scene.xbone_marker_session
-        root["step"] = max(0, current_step(root) - 1)
+        step = current_step(root)
+        if step < 2:
+            return {'CANCELLED'}
+        root["step"] = step - 1
+        select_marker(context, markers(root)[steps(root)[step - 2][0]])
         return {'FINISHED'}
 
 
@@ -414,7 +327,6 @@ class RIGGING_PT_landmarks(Panel):
         if i < len(order):
             layout.label(text=f"{i + 1}/{len(order)}  {order[i][1]}", icon='EMPTY_AXIS')
             layout.operator("xbone.place_landmarks")
-            layout.operator("xbone.marker_cursor")
         else:
             layout.label(text="Review markers in the viewport")
         placed = markers(root)
@@ -422,12 +334,12 @@ class RIGGING_PT_landmarks(Panel):
             layout.operator("xbone.fit_landmarks", icon='ARMATURE_DATA')
         row = layout.row(align=True)
         back = row.row(align=True)
-        back.enabled = i > 0
+        back.enabled = i > 1
         back.operator("xbone.marker_back")
         row.operator("xbone.cancel_landmarks")
 
 
-classes = (XBONE_OT_start_landmarks, XBONE_OT_place_landmarks, XBONE_OT_marker_cursor,
+classes = (XBONE_OT_start_landmarks, XBONE_OT_place_landmarks,
            XBONE_OT_marker_back, XBONE_OT_cancel_landmarks, XBONE_OT_fit_landmarks, RIGGING_PT_landmarks)
 
 

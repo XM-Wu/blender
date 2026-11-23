@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Fit XBiped to an offset, rotated mesh and build the ordinary editable rig."""
+"""Place XBiped landmarks freely and build the ordinary editable rig."""
 import tempfile
 from pathlib import Path
 
@@ -12,9 +12,32 @@ def near(a, b):
     assert (a - b).length < .0001, (a[:], b[:])
 
 
+names = {"pelvis": "spine_C0", "neck": "neck_C0", "head": "neck_C0_head", "crown": "neck_C0_eff"}
+for side in 'LR':
+    for key, name in (("shoulder", "arm_@0"), ("elbow", "arm_@0_elbow"), ("wrist", "arm_@0_wrist"),
+                      ("hand", "finger_@1_2_loc"), ("hip", "leg_@0"), ("knee", "leg_@0_knee"),
+                      ("ankle", "leg_@0_ankle"), ("toe", "foot_@0_2_loc")):
+        names[key + '.' + side] = name.replace('@', side)
+
 c = bpy.context
 ops = bpy.ops.xbone
 bpy.ops.wm.read_factory_settings(use_empty=True)
+# Every untouched marker must match the ordinary XBiped template, even in an empty scene.
+cursor = Vector((14, 5, -9))
+c.scene.cursor.location = cursor
+assert not c.selected_objects and ops.start_landmarks(symmetric=False) == {'FINISHED'}
+root = c.scene.xbone_marker_session
+ref, *_ = smart.guides.template_points(Path(smart.__file__).with_name("biped.sgt"), 0.1, 'Y')
+neutral = {label: pos for label, pos, *_ in ref.values()}
+for key, _ in smart.steps(root):
+    assert ops.place_landmarks() == {'FINISHED'}
+    assert c.selected_objects == [c.object] and c.object["xbone_landmark"] == key
+    near(c.object.matrix_world.translation, neutral[names[key]])
+assert ops.fit_landmarks() == {'FINISHED'}
+for name in names.values():
+    near(c.object.matrix_world @ c.object.data.bones[name].head_local, neutral[name])
+near(c.scene.cursor.location, cursor)
+
 bpy.ops.mesh.primitive_cube_add(size=2, location=(3, -4, 5))
 body = c.object
 body.scale = (.25, .9, 1.1)
@@ -23,9 +46,10 @@ original = body.matrix_world.copy()
 assert ops.start_landmarks(facing='POS_X') == {'FINISHED'}
 c.view_layer.update()
 root = c.scene.xbone_marker_session
-assert len(smart.steps(root)) == 12 and smart.sources(c, root) == [body]
-near(smart.surface_center(c, root, Vector((10, -4, 5)), Vector((-1, 0, 0))), Vector((3, -4, 5)))
-assert smart.surface_center(c, root, Vector((10, 10, 5)), Vector((-1, 0, 0))) is None
+assert len(smart.steps(root)) == 12
+near(root.location, Vector((0, 0, 0)))
+root.location = (3, -4, 3.9)
+c.view_layer.update()
 points = dict(pelvis=(.04, .03, 1.05), neck=(.04, .01, 1.65), head=(.04, -.005, 1.82), crown=(.04, 0, 2.12),
               shoulder=(.26, 0, 1.60), elbow=(.52, .04, 1.53), wrist=(.79, 0, 1.49), hand=(.98, -.015, 1.46),
               hip=(.14, 0, 1.01), knee=(.16, -.05, .54), ankle=(.16, 0, .12), toe=(.18, -.21, 0))
@@ -33,11 +57,15 @@ expected = {}
 for i, (key, _) in enumerate(smart.steps(root)):
     xyz = Vector(points[key.split('.')[0]])
     expected[key] = root.matrix_world @ xyz
-    c.scene.cursor.location = expected[key]
-    assert ops.marker_cursor() == {'FINISHED'}
+    assert ops.place_landmarks() == {'FINISHED'}
+    assert c.object["xbone_landmark"] == key
+    near(c.object.location, neutral[names[key]])
+    c.object.location = xyz
     if i == 2:
         assert ops.marker_back() == {'FINISHED'}
-        assert ops.marker_cursor() == {'FINISHED'}
+        assert c.object["xbone_landmark"] == "neck"
+        assert ops.place_landmarks() == {'FINISHED'}
+        near(c.object.location, xyz)
     if key.endswith('.L'):
         right = xyz.copy()
         right.x = 2 * points['pelvis'][0] - right.x
@@ -47,7 +75,7 @@ with tempfile.TemporaryDirectory() as tmp:
     bpy.ops.wm.save_as_mainfile(filepath=path)
     bpy.ops.wm.open_mainfile(filepath=path)
     root = c.scene.xbone_marker_session
-    body = smart.sources(c, root)[0]
+    body = bpy.data.objects["Cube"]
     assert smart.current_step(root) == 12 and len(smart.markers(root)) == 12
     assert len([o for o in root.children if o.get("xbone_mirrored_landmark")]) == 8
     # Invalid joint centers leave the placement session available to correct.
@@ -65,12 +93,6 @@ guide = c.object
 c.view_layer.update()
 assert guide.get("xbiped") and not c.scene.xbone_marker_session and not body.modifiers
 assert body.matrix_world == original
-names = {"pelvis": "spine_C0", "neck": "neck_C0", "head": "neck_C0_head", "crown": "neck_C0_eff"}
-for side in 'LR':
-    for key, name in (("shoulder", "arm_@0"), ("elbow", "arm_@0_elbow"), ("wrist", "arm_@0_wrist"),
-                      ("hand", "finger_@1_2_loc"), ("hip", "leg_@0"), ("knee", "leg_@0_knee"),
-                      ("ankle", "leg_@0_ankle"), ("toe", "foot_@0_2_loc")):
-        names[key + '.' + side] = name.replace('@', side)
 for key, name in names.items():
     near(guide.matrix_world @ guide.data.bones[name].head_local, expected[key])
 assert ops.build_rig() == {'FINISHED'}
@@ -106,8 +128,8 @@ for key, _ in smart.steps(root):
     if key.endswith('.R'):
         v.x = -v.x
         v.y += .1
-    c.scene.cursor.location = root.matrix_world @ v
-    assert ops.marker_cursor() == {'FINISHED'}
+    assert ops.place_landmarks() == {'FINISHED'}
+    c.object.location = v
 right_wrist = root.matrix_world @ smart.markers(root)["wrist.R"].location
 assert ops.fit_landmarks() == {'FINISHED'}
 c.view_layer.update()
@@ -118,4 +140,4 @@ body.select_set(True)
 c.view_layer.objects.active = body
 assert ops.start_landmarks() == {'FINISHED'}
 assert ops.cancel_landmarks() == {'FINISHED'} and not c.scene.xbone_marker_session
-print("PASS: mesh depth, resumable landmarks, symmetry, fitted guide, XBiped and in-place rebuild")
+print("PASS: template defaults, selection-independent placement, free movement, resumable landmarks, symmetry, fitted guide, XBiped and in-place rebuild")

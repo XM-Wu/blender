@@ -860,11 +860,15 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_hand_grip.py
   )
   add_blender_test(
+    bl_xbone_guide_chains
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_guide_chains.py
+  )
+  add_blender_test(
     bl_xbone_custom_attachment
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_custom_attachment.py
   )
   set_tests_properties(
-    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_guide_rig_switch bl_xbone_mesh_bindings bl_xbone_landmarks bl_xbone_xbiped bl_xbone_hand_grip bl_xbone_custom_attachment
+    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_guide_rig_switch bl_xbone_mesh_bindings bl_xbone_landmarks bl_xbone_xbiped bl_xbone_hand_grip bl_xbone_guide_chains bl_xbone_custom_attachment
     PROPERTIES LABELS "xblender"
   )
 endif()

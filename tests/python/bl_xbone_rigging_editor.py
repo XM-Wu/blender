@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 import xbone_rigging as ui
 
 
@@ -13,17 +14,24 @@ def window_region(area):
 
 def check_workspace(workspace):
     screen, = workspace.screens
-    areas = {area.type: area for area in screen.areas}
-    assert len(screen.areas) == len(areas) == 4
-    view, rig, tree, props = (areas[k] for k in ('VIEW_3D', 'RIGGING', 'OUTLINER', 'PROPERTIES'))
-    assert view.x < rig.x < tree.x == props.x
-    assert view.y == rig.y == props.y < tree.y
-    assert view.height == rig.height
-    assert tree.width == props.width
-    width = view.width + rig.width + tree.width
-    for size, ratio in zip((view.width, rig.width, tree.width), (.634, .188, .178)):
+    assert len(screen.areas) == 5
+    front, right = sorted((a for a in screen.areas if a.type == 'VIEW_3D'), key=lambda a: -a.y)
+    areas = {a.type: a for a in screen.areas}
+    rig, tree, props = (areas[k] for k in ('RIGGING', 'OUTLINER', 'PROPERTIES'))
+    assert front.x == right.x < rig.x < tree.x == props.x
+    assert front.width == right.width and tree.width == props.width
+    assert right.y == rig.y == props.y < front.y
+    assert abs(front.y + front.height - rig.y - rig.height) <= 2
+    width = front.width + rig.width + tree.width
+    for size, ratio in zip((front.width, rig.width, tree.width), (.634, .188, .178)):
         assert abs(size / width - ratio) < .015
-    assert abs(tree.height / (tree.height + props.height) - .185) < .015
+    assert abs(front.height / (front.height + right.height) - .5) < .015
+    assert abs(tree.height / (tree.height + props.height) - .37) < .015
+    for view, axis in ((front, (0, -1, 0)), (right, (1, 0, 0))):
+        space = view.spaces.active
+        region = space.region_3d
+        assert region.view_perspective == 'ORTHO' and space.show_region_ui
+        assert (region.view_rotation @ Vector((0, 0, 1)) - Vector(axis)).length < .0001
     assert tree.spaces.active.display_mode == 'VIEW_LAYER'
 
 

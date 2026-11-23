@@ -11,6 +11,7 @@ from mathutils import Vector
 
 from . import builder, guides, rebuild
 from . import guide_display, mesh_bindings, selector, smart_guide
+from .resample_chain import ARMATURE_OT_resample_chain
 from .guide_symmetry import XBONE_OT_symmetrize_guide
 
 
@@ -153,8 +154,8 @@ class XBONE_OT_add_component(Operator):
     bl_idname = "xbone.add_component"
     bl_label = "Add Guide Component"
     bl_options = {'REGISTER', 'UNDO'}
-    kind: EnumProperty(items=(('FK', "FK Joint", ""), ('ARM', "Arm", ""), ('LEG', "Leg", "")))
-    side: EnumProperty(items=(('L', "Left", ""), ('R', "Right", ""), ('C', "Center", "")))
+    kind: EnumProperty(name="Component Type", items=(('FK', "FK Joint", ""), ('ARM', "Arm", ""), ('LEG', "Leg", "")))
+    side: EnumProperty(name="Component Side", items=(('L', "Left", ""), ('R', "Right", ""), ('C', "Center", "")))
     length: FloatProperty(name="Segment Length", default=0.3, min=0.001, subtype='DISTANCE')
 
     @classmethod
@@ -184,6 +185,8 @@ class XBONE_OT_add_component(Operator):
         if len(names) == 3:
             bone["ik_limb"] = bone.name
             bone["ik_default"] = float(self.kind == 'LEG')
+        bpy.ops.armature.select_all(action='DESELECT')
+        bone.select = bone.select_head = bone.select_tail = True
         edit.active = bone
         return {'FINISHED'}
 
@@ -487,12 +490,15 @@ class RIGGING_PT_guide(RiggingPanel, Panel):
         layout.operator("xbone.toggle_guide_display", depress=bool(obj.get("show_shifter_guide")))
         if smart_guide.XBONE_OT_edit_landmarks.poll(context):
             layout.operator("xbone.edit_landmarks")
+        scoped = context.mode == 'EDIT_ARMATURE' and any(b.select for b in obj.data.edit_bones)
+        layout.label(text="Mirror Selected Branches" if scoped else "Mirror Entire Guide", icon='MOD_MIRROR')
         row = layout.row(align=True)
         row.operator("xbone.symmetrize_guide", text="Left to Right").side = 'L'
         row.operator("xbone.symmetrize_guide", text="Right to Left").side = 'R'
         if context.mode == 'OBJECT':
             layout.operator("object.mode_set", text="Edit Guide").mode = 'EDIT'
         if context.mode == 'EDIT_ARMATURE':
+            layout.label(text="Guide Components")
             layout.operator("xbone.add_component")
             layout.operator("xbone.tag_limb")
             bone = obj.data.edit_bones.active
@@ -570,7 +576,11 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
             prop = control.get("blend_property")
             if prop:
                 box = limbs.box()
-                box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', slider=True)
+                limb = prop.removeprefix("IK ")
+                title = {"arm_L0": "Left Arm", "arm_R0": "Right Arm",
+                         "leg_L0": "Left Leg", "leg_R0": "Right Leg"}.get(limb)
+                box.label(text=title or control.name.removeprefix("IK."))
+                box.prop(obj, '["' + bpy.utils.escape_identifier(prop) + '"]', text="FK / IK Blend", slider=True)
                 if "elbow_glide" in control:
                     box.prop(control, '["elbow_glide"]', text="Elbow Glide", slider=True)
                     box.prop(control, '["forearm_rotation"]', text="Forearm Rotation (°)")
@@ -598,7 +608,7 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
                     op.control, op.mode = control.name, mode
 
 
-classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
+classes = (ARMATURE_OT_resample_chain, XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_return_to_rig, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,

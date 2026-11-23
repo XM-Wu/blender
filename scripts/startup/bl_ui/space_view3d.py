@@ -5873,6 +5873,7 @@ class VIEW3D_MT_edit_armature(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.resample_chain")
             layout.operator("armature.symmetrize")
             layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
@@ -5903,6 +5904,7 @@ class VIEW3D_MT_edit_armature(Menu):
         layout.separator()
 
         layout.operator("armature.subdivide", text="Subdivide")
+        layout.operator("armature.resample_chain")
         layout.operator("armature.switch_direction", text="Switch Direction")
 
         layout.separator()
@@ -5943,6 +5945,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.resample_chain")
             layout.operator("armature.symmetrize")
             layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
@@ -5950,6 +5953,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
 
         # Add
         layout.operator("armature.subdivide", text="Subdivide")
+        layout.operator("armature.resample_chain")
         layout.operator("armature.duplicate_move", text="Duplicate", icon='DUPLICATE')
         layout.operator("armature.extrude_move")
         if arm.use_mirror_x:

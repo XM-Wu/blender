@@ -789,7 +789,7 @@ class RIGGING_PT_landmarks(Panel):
         edit_session = "editing_guide" in root
         if edit_session:
             row = layout.row(align=True)
-            row.operator("xbone.landmark_symmetry", depress=bool(root["symmetric"]))
+            row.operator("xbone.landmark_symmetry", text="Mirror Left Markers to Right", depress=bool(root["symmetric"]))
             row.operator("xbone.cancel_landmarks", text="Cancel", icon='CANCEL')
         if i >= 0:
             layout.label(text=f"{i + 1}/{len(order)}  {order[i][1]}", icon='EMPTY_AXIS')

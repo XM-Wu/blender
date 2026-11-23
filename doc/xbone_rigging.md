@@ -1,6 +1,6 @@
 # XBone Rigging
 
-Select the **Rigging** workspace tab or open it from the workspace **+ → Rigging** menu in an existing file. It places the 3D Viewport on the left, the Rigging editor in the middle, and the Outliner above Scene Properties on the right. You can also switch any single area to **Animation → Rigging**. The editor follows the active object and bone in the current view layer. In Object Mode, **Create Guide** offers the templates and import tools.
+Select the **Rigging** workspace tab or open it from the workspace **+ → Rigging** menu in an existing file. It places two orthographic 3D Viewports on the left (Front above Right), the full-height Rigging editor in the middle, and the Outliner above Properties on the right. You can also switch any single area to **Animation → Rigging**. The editor follows the active object and bone in the current view layer. In Object Mode, **Create Guide** offers the templates and import tools.
 
 In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
 
@@ -28,7 +28,7 @@ Existing XBiped templates can also start from their guide joints. **Update XBipe
 applies the changes to the same guide, including its custom branches. Use **Rig** in the Rigging editor header to return with the edits pending, or **Apply Guide and Rebuild**
 to apply them to the existing rig. **Cancel** or **Esc** discards the marker session and returns to the object and mode where it started.
 Markers reopen at the current guide pivots. A manually asymmetric guide opens with independent left and right
-markers, even if originally created symmetrically. Toggle **Mirror Left to Right** while editing to preview or
+markers, even if originally created symmetrically. Toggle **Mirror Left Markers to Right** while editing to preview or
 disable symmetry. **Update XBiped Guide** applies marker positions to the guide only.
 
 In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
@@ -36,7 +36,9 @@ The list shows all meshes in the current scene with an Armature modifier targeti
 Click a name to select one mesh or **Select Bound Meshes** to select all selectable matches in the current view layer.
 **Remove XBone Modifiers** removes every editable matching modifier in the scene while retaining vertex groups and skin layers.
 
-Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide positions, orientations and limb settings across the armature's local X plane. The operation updates the entire opposite side and creates missing counterparts. Enable **Selected Source Joints Only** in Adjust Last Operation to limit the source. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
+In armature Edit Mode, select a continuous chain and choose **Resample Chain** from the 3D View right-click menu. Set **Joint Count** for XBone or **Bone Count** for ordinary armatures. Resampling rounds the inside of each bend and spaces the joints evenly by distance along the resulting curve. Both endpoints stay fixed and straight sections stay straight. Reducing the count removes intermediate bones and can affect weights or animation targeting those bones.
+
+Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide positions, orientations and limb settings across the armature's local X plane. In Edit Mode, select a source joint to mirror its branch, including all descendants. With multiple selections, each selected branch is mirrored. Deselect all joints or switch to Object Mode to mirror the whole Guide. The label above the direction buttons shows the scope. Extruded joints inherit their component’s side for mirroring, including joints still named Joint or Joint.001. **Shifter Guide Display** switches between guide curves and the ordinary XBone display. Biped and Game Biped use root, locator, blade and pole shapes sampled from Maya 2027.
 
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.

@@ -962,6 +962,9 @@ class VIEW3D_HT_header(Header):
                 if skeleton:
                     layout.prop(skeleton, "is_visible", text="Show Skeleton", toggle=True)
         elif mode_string == 'POSE':
+            bone = context.active_pose_bone
+            if bone and bone.name in (obj.get("xbiped_hand_L"), obj.get("xbiped_hand_R")) and "grip" in bone:
+                layout.prop(bone, '["grip"]', text="Grip", slider=True)
             session = context.view_layer.skin_pose_session
             if session.rig == obj and session.source:
                 layout.operator("paint.skin_switch_pose", text="Back to Weight Paint", icon='WPAINT_HLT')

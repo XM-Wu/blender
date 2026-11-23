@@ -78,6 +78,18 @@ scaled to forearm length. Rotate the outer elbow arc around local X in FK, or se
 **Elbow FK** in the Selector. In IK the wrist position, pole and independent wrist rotation
 controls remain available. XBiped arms also start with **Max Stretch = 1**.
 
+### Hand controls
+
+Build an XBiped and open **Rigging → Hand Controls**. On an existing XBiped, choose
+**Guide → Apply Guide and Rebuild** once to generate the palm handles. In Pose Mode,
+select the hand outline above either palm to access **Grip** in the 3D View header.
+
+Each hand has its own **Grip**. At 0 the fingers follow their FK pose. At 1 all four
+fingers curl and the thumb folds across the palm. Expand **Left Grip** or **Right Grip**
+to offset the curl of each digit, fan the fingers with **Spread**, or arch the palm
+with **Cup**. For a pointing pose, set Grip to 1 and Index Curl to −1. Rotate individual
+FK joints to fit a prop. Hover a slider and press **I** to key that channel.
+
 ## Selector
 
 Split an area and choose **Animation → Selector** in its editor type menu. Choose the character in the header. Classic Biped opens the mGear Biped picker. Game Biped and custom rigs open a board of their selectable controls. The header also switches pages and imports or exports polygon pickers in mGear's `.pkr` format. Imported layouts and available background images are stored on the character in the blend file.

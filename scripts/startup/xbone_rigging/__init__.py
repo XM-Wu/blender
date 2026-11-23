@@ -528,6 +528,28 @@ class RIGGING_PT_rig(RiggingPanel, Panel):
             layout.prop(extra, "is_visible", text="Show Additional FK Controls")
 
 
+class RIGGING_PT_hands(RiggingPanel, Panel):
+    bl_label = "Hand Controls"
+
+    @classmethod
+    def poll(cls, context):
+        rig = context.active_object
+        return (context.mode in {'POSE', 'OBJECT'} and rig is not None and rig.get("rigging_role") == "RIG"
+                and "xbiped_hand_L" in rig)
+
+    def draw(self, context):
+        rig = context.active_object
+        for side, label in (('L', "Left Grip"), ('R', "Right Grip")):
+            host = rig.pose.bones.get(rig.get("xbiped_hand_" + side, ""))
+            if not host:
+                continue
+            header, body = self.layout.panel("xbiped_hand_" + side, default_closed=True)
+            header.prop(host, '["grip"]', text=label, slider=True)
+            if body:
+                for key in ("thumb_curl", "index_curl", "middle_curl", "ring_curl", "pinky_curl", "spread", "cup"):
+                    body.prop(host, '["' + key + '"]', text=key.replace("_", " ").title(), slider=True)
+
+
 class RIGGING_PT_pose(RiggingPanel, Panel):
     bl_label = "Pose Controls"
 
@@ -580,7 +602,7 @@ classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBON
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_return_to_rig, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
-           *smart_guide.classes, RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_pose)
+           *smart_guide.classes, RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_hands, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)
 
 

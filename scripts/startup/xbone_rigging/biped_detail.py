@@ -3,6 +3,7 @@
 import bpy
 from mathutils import Matrix, Vector
 
+from . import hand_grip
 from .limb_parameters import rotation_input
 
 
@@ -99,7 +100,10 @@ def connect(rig, guide):
         edit["FK." + names["mouth_C0_lip" + suffix]].parent = parent
         edit["Display.mouth_C0_teeth" + suffix + "_ctl"].parent = parent
     edit["Display.faceUI_C0_ctl"].hide_select = False
+    hands = [hand_grip.create(rig, names, side, helper) for side in 'LR'] if guide.get("xbiped") else []
     bpy.ops.object.mode_set(mode='POSE')
+    for hand in hands:
+        hand_grip.configure(rig, hand)
     pose = rig.pose.bones
     for eye, over, base, mark, world, orient, holder, out, local_target, local_up in eyes:
         c = pose[base].constraints.new('COPY_LOCATION')

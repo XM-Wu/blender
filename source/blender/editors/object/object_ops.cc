@@ -87,6 +87,7 @@ void operatortypes_object()
   WM_operatortype_append(COLLECTION_OT_objects_remove_active);
 
   WM_operatortype_append(OBJECT_OT_delete);
+  WM_operatortype_append(OBJECT_OT_clear_unused);
   WM_operatortype_append(OBJECT_OT_text_add);
   WM_operatortype_append(OBJECT_OT_armature_add);
   WM_operatortype_append(OBJECT_OT_xbone_add);

@@ -269,6 +269,12 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## Object Mode 的 Clear 菜单
+
+3D 视图在 Object Mode 提供 **Clear** 菜单；相同操作也在 **Object → Clear** 原有变换命令下方。前三项分别清理当前文件内零用户且无引用的 Mesh、图片与纹理、材质。同一次图片／纹理清理会处理删除纹理后释放的图片。资产、Fake User、库链接及覆盖、仍待保存的图片和渲染结果会被保留。命令处理 Blender 数据块，磁盘上的外部图片文件不会被删除。
+
+**Unused Empties** 只清理当前场景中的普通空物体，从没有子物体的节点向上处理整条空链。有保留子物体的父级、其他场景共用的物体、约束／修改器／驱动／自定义属性引用的目标、参与实例化的集合内容，以及图片空物体、力场和带动画或元数据的节点会被保留。四项操作都支持撤销。[回归用例](tests/python/bl_object_clear_unused.py)
+
 ## Windows 主窗口记住上次使用的显示器
 
 正常退出时，xBlender 将主窗口所在显示器的设备标识写入用户配置目录的 `recents.toml`。下次启动或双击打开工程时，第一个主窗口优先在该显示器创建；大小和最大化状态沿用启动设置。显示器已断开时回到主屏，显式 `--window-geometry` 优先。临时编辑器、后台渲染和同一进程中新建的窗口沿用各自的窗口逻辑。多屏回归见 [Windows 窗口测试](tests/python/bl_window_monitor_win32.py)。

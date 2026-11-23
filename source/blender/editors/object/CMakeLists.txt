@@ -26,6 +26,7 @@ set(SRC
   object_bake_api.cc
   object_bake_simulation.cc
   object_camera.cc
+  object_clear_unused.cc
   object_collection.cc
   object_constraint.cc
   object_data_transfer.cc

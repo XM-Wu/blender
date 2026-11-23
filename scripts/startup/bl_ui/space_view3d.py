@@ -1375,6 +1375,9 @@ class VIEW3D_MT_editor_menus(Menu):
             layout.menu("VIEW3D_MT_object")
             layout.template_node_operator_asset_root_items()
 
+        if mode_string == 'OBJECT':
+            layout.menu("VIEW3D_MT_clear_unused")
+
 
 # ********** Menu **********
 
@@ -3156,6 +3159,17 @@ class VIEW3D_MT_object_rigid_body(Menu):
         layout.operator("rigidbody.connect", text="Connect")
 
 
+class VIEW3D_MT_clear_unused(Menu):
+    bl_label = "Clear"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT'
+
+    def draw(self, context):
+        self.layout.operator_enum("object.clear_unused", "type")
+
+
 class VIEW3D_MT_object_clear(Menu):
     bl_label = "Clear"
 
@@ -3169,6 +3183,8 @@ class VIEW3D_MT_object_clear(Menu):
         layout.separator()
 
         layout.operator("object.origin_clear", text="Origin")
+        layout.separator()
+        layout.operator_enum("object.clear_unused", "type")
 
 
 class VIEW3D_MT_object_context_menu(Menu):
@@ -9616,6 +9632,7 @@ classes = (
     VIEW3D_MT_object_animation,
     VIEW3D_MT_object_asset,
     VIEW3D_MT_object_rigid_body,
+    VIEW3D_MT_clear_unused,
     VIEW3D_MT_object_clear,
     VIEW3D_MT_object_context_menu,
     VIEW3D_MT_object_convert,

@@ -805,6 +805,12 @@ add_blender_test(
 )
 
 add_blender_test(
+  bl_object_clear_unused
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_object_clear_unused.py
+)
+set_tests_properties(bl_object_clear_unused PROPERTIES LABELS "xblender")
+
+add_blender_test(
   bl_io_xbone_gltf
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_io_xbone_gltf.py
 )

@@ -10,7 +10,7 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
 from . import builder, guides, rebuild
-from . import guide_display, mesh_bindings, selector
+from . import guide_display, mesh_bindings, selector, smart_guide
 from .guide_symmetry import XBONE_OT_symmetrize_guide
 
 
@@ -379,6 +379,8 @@ class RIGGING_PT_templates(RiggingPanel, Panel):
 
     @classmethod
     def poll(cls, context):
+        if context.scene.xbone_marker_session:
+            return False
         obj = context.active_object
         return context.mode == 'OBJECT' or not (obj and obj.get("rigging_role") in {"RIG", "GUIDE"})
 
@@ -391,6 +393,7 @@ class RIGGING_PT_templates(RiggingPanel, Panel):
         templates.operator("xbone.biped_guide").template = 'biped'
         templates.operator("xbone.biped_guide", text="XBiped Template").template = 'xbiped'
         templates.operator("xbone.biped_guide", text="Game Biped Template").template = 'game_biped'
+        layout.operator("xbone.start_landmarks", icon='EMPTY_AXIS')
         layout.operator("xbone.import_guide", text="Import Shifter Template (.sgt)")
         layout.operator("xbone.new_guide")
         if XBONE_OT_copy_guide.poll(context):
@@ -501,11 +504,12 @@ classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBON
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
-           RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_pose)
+           *smart_guide.classes, RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)
 
 
 def register():
+    smart_guide.register()
     mesh_bindings.register()
     _register()
     selector.register()
@@ -517,3 +521,4 @@ def unregister():
     selector.unregister()
     _unregister()
     mesh_bindings.unregister()
+    smart_guide.unregister()

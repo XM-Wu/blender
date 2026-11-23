@@ -27740,6 +27740,122 @@ msgid "UV Mirror"
 msgstr "UV 镜像"
 
 
+msgid "Fit XBiped to Mesh"
+msgstr "从人物网格拟合 XBiped"
+
+
+msgid "XBiped Landmarks"
+msgstr "XBiped 标记向导"
+
+
+msgid "Symmetrical Character"
+msgstr "对称角色"
+
+
+msgid "Character Faces"
+msgstr "角色朝向"
+
+
+msgid "Place Markers in 3D View"
+msgstr "在 3D 视图逐个放置标记"
+
+
+msgid "Use 3D Cursor"
+msgstr "使用 3D 游标位置"
+
+
+msgid "Previous Marker"
+msgstr "上一个标记"
+
+
+msgid "Discard Markers"
+msgstr "丢弃标记"
+
+
+msgid "Generate Fitted XBiped Guide"
+msgstr "生成拟合的 XBiped Guide"
+
+
+msgid "Review markers in the viewport"
+msgstr "在视图中检查标记，可用 G 调整"
+
+
+msgid "Click to place, Backspace to go back, Esc to pause"
+msgstr "左键放置，退格键返回，Esc 暂停"
+
+
+msgid "Pelvis"
+msgstr "骨盆"
+
+
+msgid "Base of Neck"
+msgstr "颈根"
+
+
+msgid "Base of Head"
+msgstr "头部根关节（耳下）"
+
+
+msgid "Top of Head"
+msgstr "头顶"
+
+
+msgid "Shoulder"
+msgstr "肩关节"
+
+
+msgid "Elbow"
+msgstr "肘关节"
+
+
+msgid "Wrist"
+msgstr "手腕"
+
+
+msgid "Middle Fingertip"
+msgstr "中指尖"
+
+
+msgid "Hip Joint"
+msgstr "髋关节"
+
+
+msgid "Knee"
+msgstr "膝关节"
+
+
+msgid "Toe Tip"
+msgstr "前脚趾尖"
+
+
+msgid "Open a 3D Viewport beside Rigging to place markers"
+msgstr "请在 Rigging 旁打开 3D 视图以放置标记"
+
+
+msgid "Click on a source mesh"
+msgstr "请点击用于拟合的人物网格"
+
+
+msgid "Place the left shoulder and hip on the character's left (right in the front view)"
+msgstr "请将左肩和左髋放在角色左侧（正视图画面右侧）"
+
+
+msgid "Select an upright character mesh"
+msgstr "请选择直立的人物网格"
+
+
+msgid "Place all required markers first"
+msgstr "请先放置全部标记"
+
+
+msgid "Check the vertical order of the toe, pelvis, neck and head markers"
+msgstr "请检查脚趾、骨盆、颈根和头部标记的上下顺序"
+
+
+msgid "Adjacent joint markers must be separated"
+msgstr "相邻关节标记不能重叠"
+
+
 msgid "Mesh Mirror Axis"
 msgstr "模型镜像轴"
 

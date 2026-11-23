@@ -4,6 +4,19 @@ Select the **Rigging** workspace tab or open it from the workspace **+ → Riggi
 
 In XBone Edit Mode, **Transform Children** in the viewport header controls whether moving, rotating or scaling a parent also transforms its descendants. Turn it off to place the parent independently.
 
+For a mesh-only biped, select the upright body meshes in their reference pose, then use
+**Create Guide → Fit XBiped to Mesh**. Set the character's forward direction and symmetry.
+Click **Place Markers in 3D View** and follow the prompts for the torso and limbs. Clicks on a
+closed surface estimate joint depth halfway to its exit. Orbit for the foot or hand, or use
+**Use 3D Cursor** to specify an exact point. Backspace revisits the previous point and Esc pauses.
+Markers can be moved with G and saved with the scene. A symmetric setup uses 12 markers and
+reflects the left limbs across the pelvis; an asymmetric setup uses 20.
+
+After reviewing the markers, click **Generate Fitted XBiped Guide**. The hands, feet and face
+follow their fitted template segments. Check individual digits, eyes and foot pivots in **Edit Guide**
+and then **Build Rig**. Straight limbs get a small bend to define the IK plane. The wizard
+does not attach modifiers or author weights on the source meshes.
+
 In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
 The list shows all meshes in the current scene with an Armature modifier targeting that XBone, including hidden meshes.
 Click a name to select one mesh or **Select Bound Meshes** to select all selectable matches in the current view layer.

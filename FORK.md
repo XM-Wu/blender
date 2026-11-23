@@ -269,6 +269,10 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## GLB / glTF 导入为 XBone
+
+从 **File → Import → glTF 2.0 (XBone) (.glb/.gltf)** 选择文件，或在普通 glTF 导入器的 **Bones & Skin** 中勾选 **Import as XBone**。导入器把 skin 的关节建成原生 XBone，保留绑定位置、关节轴和父子层级。骨骼挂件以关节原点为父级，蒙皮与动画继续使用 glTF 导入流程。纯静态模型照常导入网格。脚本入口为 `bpy.ops.import_scene.gltf(filepath=path, use_xbone=True)`。后台回归见 [GLB 导入测试](tests/python/bl_io_xbone_gltf.py)。
+
 ## 骨骼批量命名
 
 Edit Mode 的 **Armature → Names → Batch Rename Bones** 和 Pose Mode 的 **Pose → Names** 可为选中骨骼按深度优先顺序编号。XBone 的编辑菜单与右键菜单直接提供该命令。输入基础名 `Arm`，可生成 `Arm_001`、`Arm_002`，或选用侧别得到 `Arm_001_L`、`Arm_002_L`；`_L` 与 `_R` 可用于骨架对称化和 Skin Tools 权重镜像。父骨先于子骨，同级依骨架已有顺序；遍历经过未选骨骼时只给选中项编号。多骨架选择从活动骨架开始连续编号。目标名被未选骨骼或其他变形组占用时可换一个基础名重试。

@@ -75,10 +75,10 @@ class BlenderNode():
             import_user_extensions('gather_import_light_after_hook', gltf, vnode, obj, light)
 
         elif vnode.is_arma:
-            armature = bpy.data.armatures.new(vnode.arma_name)
+            armature = bpy.data.armatures.new(vnode.arma_name, use_xbone=gltf.import_settings.get('use_xbone', False))
             name = vnode.name or armature.name
             obj = bpy.data.objects.new(name, armature)
-            if gltf.import_settings['bone_heuristic'] == "BLENDER":
+            if armature.is_xbone or gltf.import_settings['bone_heuristic'] == "BLENDER":
                 BlenderNode.armature_display(gltf, obj)
 
         else:
@@ -114,9 +114,11 @@ class BlenderNode():
                 obj.parent_type = 'BONE'
                 obj.parent_bone = parent_vnode.blender_bone_name
 
-                # Nodes with a bone parent need to be translated
-                # backwards from the tip to the root
-                obj.location += Vector((0, -parent_vnode.bone_length, 0))
+                # glTF attachments are relative to the joint origin.
+                if arma_vnode.blender_object.data.is_xbone:
+                    obj.parent_bone_head_tail_factor = 0.0
+                else:
+                    obj.location += Vector((0, -parent_vnode.bone_length, 0))
 
         # Store Rest matrix of object
         # Can't use directly matrix_world because not refreshed yet
@@ -150,7 +152,7 @@ class BlenderNode():
         obj.show_in_front = True
         obj.data.relation_line_position = "HEAD"
 
-        if gltf.import_settings['disable_bone_shape'] is True:
+        if obj.data.is_xbone or gltf.import_settings['disable_bone_shape'] is True:
             return
 
         # Create a special collection (if not exists already)
@@ -187,6 +189,7 @@ class BlenderNode():
         arma = gltf.vnodes[arma_id]
         blender_arma = arma.blender_object
         armature = blender_arma.data
+        use_blender_heuristic = not armature.is_xbone and gltf.import_settings['bone_heuristic'] == "BLENDER"
 
         # Find all bones for this arma
         bone_ids = []
@@ -217,7 +220,7 @@ class BlenderNode():
             arma_mat = vnode.editbone_arma_mat
             editbone.head = arma_mat @ Vector((0, 0, 0))
             editbone.tail = arma_mat @ Vector((0, 1, 0))
-            if gltf.import_settings['bone_heuristic'] == "BLENDER":
+            if use_blender_heuristic:
                 editbone.length = vnode.bone_length / max(blender_arma.scale)
             else:
                 editbone.length = vnode.bone_length
@@ -258,7 +261,7 @@ class BlenderNode():
                     pynode.extras['blender_object_data'] = blender_arma  # Used in case of for KHR_animation_pointer
                     pynode.extras['blender_bone_name'] = pose_bone.name  # Used in case of for KHR_animation_pointer
 
-            if gltf.import_settings['bone_heuristic'] == "BLENDER" and gltf.import_settings['disable_bone_shape'] is False:
+            if use_blender_heuristic and not gltf.import_settings['disable_bone_shape']:
                 pose_bone.custom_shape = bpy.data.objects[gltf.bone_shape]
                 armature_min_dim = min([blender_arma.dimensions[0] /
                                         blender_arma.scale[0], blender_arma.dimensions[1] /

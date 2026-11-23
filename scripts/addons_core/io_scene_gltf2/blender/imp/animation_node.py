@@ -93,7 +93,7 @@ class BlenderNodeAnim():
 
         # Objects parented to a bone are translated to the bone tip by default.
         # Correct for this by translating backwards from the tip to the root.
-        if vnode.type == VNode.Object and path == "translation":
+        if vnode.type == VNode.Object and path == "translation" and not gltf.import_settings.get('use_xbone', False):
             if vnode.parent is not None and gltf.vnodes[vnode.parent].type == VNode.Bone:
                 bone_length = gltf.vnodes[vnode.parent].bone_length
                 off = Vector((0, -bone_length, 0))

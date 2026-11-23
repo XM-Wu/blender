@@ -804,6 +804,12 @@ add_blender_test(
   --testdir "${TEST_SRC_DIR}/animation"
 )
 
+add_blender_test(
+  bl_io_xbone_gltf
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_io_xbone_gltf.py
+)
+set_tests_properties(bl_io_xbone_gltf PROPERTIES LABELS "xblender")
+
 if(WITH_IO_FBX)
   add_blender_test(
     bl_io_xbone_fbx

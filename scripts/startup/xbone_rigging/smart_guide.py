@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import bpy
+from bpy.app.handlers import persistent
 from bpy.app.translations import pgettext_iface as iface_
 from bpy.props import BoolProperty, EnumProperty, PointerProperty
 from bpy.types import Operator, Panel
@@ -30,11 +31,21 @@ def markers(root):
     return {o["xbone_landmark"]: o for o in root.children if "xbone_landmark" in o}
 
 
-def current_step(root):
+def current_step(root, active=None):
     order = steps(root)
+    if active and active.parent == root and "xbone_landmark" in active:
+        for i, (key, _) in enumerate(order):
+            if key == active["xbone_landmark"]:
+                return i
     placed = markers(root)
     missing = next((i for i, (key, _) in enumerate(order) if key not in placed), len(order))
-    return min(root["step"], missing)
+    # Saved sessions store the one-based number of the last visited marker.
+    return min(root["step"], missing) - 1
+
+
+def next_step(root, index):
+    placed = markers(root)
+    return next((i for i, (key, _) in enumerate(steps(root)) if i > index or key not in placed), None)
 
 
 @lru_cache(maxsize=1)
@@ -59,9 +70,8 @@ def select_marker(context, marker):
     context.view_layer.objects.active = marker
 
 
-def place_default(root):
+def place_default(root, index):
     order = steps(root)
-    index = current_step(root)
     key, label = order[index]
     marker = markers(root).get(key)
     if marker is None:
@@ -202,7 +212,42 @@ def fitted_template(root):
     return (result, shapes, settings, (scale, 'Y', ref), display), frames, root.matrix_world @ Matrix.Translation(origin)
 
 
+def hide_guides(scene):
+    for layer in scene.view_layers:
+        if "xbone_landmark_hidden_guides" in layer:
+            continue
+        guides_to_hide = [obj for obj in layer.objects
+                          if obj.get("rigging_role") == "GUIDE" and obj.visible_get(view_layer=layer)]
+        layer["xbone_landmark_hidden_guides"] = {str(i): obj for i, obj in enumerate(guides_to_hide)}
+        for obj in guides_to_hide:
+            obj.hide_set(True, view_layer=layer)
+
+
+@persistent
+def resume_landmarks(_filepath):
+    for scene in bpy.data.scenes:
+        root = scene.xbone_marker_session
+        if not root or scene.library or root.library:
+            continue
+        # Older files may have been saved before the first marker was created.
+        context = bpy.context
+        legacy_active_layer = scene == context.scene and "xbone_landmark_hidden_guides" not in context.view_layer
+        hide_guides(scene)
+        index = current_step(root)
+        if index < 0 or legacy_active_layer:
+            marker = place_default(root, max(0, index))
+            if scene == context.scene and context.mode == 'OBJECT' and context.view_layer.objects.get(marker.name):
+                select_marker(context, marker)
+
+
 def clear(context, root):
+    for layer in context.scene.view_layers:
+        hidden = layer.get("xbone_landmark_hidden_guides")
+        if hidden is not None:
+            for obj in hidden.values():
+                if obj and layer.objects.get(obj.name) == obj:
+                    obj.hide_set(False, view_layer=layer)
+            del layer["xbone_landmark_hidden_guides"]
     coll = next((c for c in root.users_collection if c.get("xbone_marker_collection")), None)
     context.scene.xbone_marker_session = None
     for obj in list(root.children):
@@ -240,6 +285,8 @@ class XBONE_OT_start_landmarks(Operator):
         root.hide_render = True
         root.empty_display_size = root["height"] * .02
         context.scene.xbone_marker_session = root
+        hide_guides(context.scene)
+        select_marker(context, place_default(root, 0))
         return {'FINISHED'}
 
 
@@ -257,9 +304,10 @@ class XBONE_OT_place_landmarks(SessionOperator, Operator):
 
     def execute(self, context):
         root = context.scene.xbone_marker_session
-        if current_step(root) >= len(steps(root)):
+        index = next_step(root, current_step(root, context.active_object))
+        if index is None:
             return {'CANCELLED'}
-        select_marker(context, place_default(root))
+        select_marker(context, place_default(root, index))
         return {'FINISHED'}
 
 
@@ -270,11 +318,10 @@ class XBONE_OT_marker_back(SessionOperator, Operator):
 
     def execute(self, context):
         root = context.scene.xbone_marker_session
-        step = current_step(root)
-        if step < 2:
+        index = current_step(root, context.active_object)
+        if index <= 0:
             return {'CANCELLED'}
-        root["step"] = step - 1
-        select_marker(context, markers(root)[steps(root)[step - 2][0]])
+        select_marker(context, place_default(root, index - 1))
         return {'FINISHED'}
 
 
@@ -323,18 +370,17 @@ class RIGGING_PT_landmarks(Panel):
         layout = self.layout
         root = context.scene.xbone_marker_session
         order = steps(root)
-        i = current_step(root)
-        if i < len(order):
+        i = current_step(root, context.active_object)
+        if i >= 0:
             layout.label(text=f"{i + 1}/{len(order)}  {order[i][1]}", icon='EMPTY_AXIS')
+        if next_step(root, i) is not None:
             layout.operator("xbone.place_landmarks")
-        else:
-            layout.label(text="Review markers in the viewport")
         placed = markers(root)
         if all(key in placed for key, _ in order):
             layout.operator("xbone.fit_landmarks", icon='ARMATURE_DATA')
         row = layout.row(align=True)
         back = row.row(align=True)
-        back.enabled = i > 1
+        back.enabled = i > 0
         back.operator("xbone.marker_back")
         row.operator("xbone.cancel_landmarks")
 
@@ -345,7 +391,9 @@ classes = (XBONE_OT_start_landmarks, XBONE_OT_place_landmarks,
 
 def register():
     bpy.types.Scene.xbone_marker_session = PointerProperty(type=bpy.types.Object)
+    bpy.app.handlers.load_post.append(resume_landmarks)
 
 
 def unregister():
+    bpy.app.handlers.load_post.remove(resume_landmarks)
     del bpy.types.Scene.xbone_marker_session

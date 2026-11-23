@@ -2,6 +2,7 @@
 """Place XBiped landmarks freely and build the ordinary editable rig."""
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import bpy
 from mathutils import Vector
@@ -10,6 +11,15 @@ from xbone_rigging import smart_guide as smart
 
 def near(a, b):
     assert (a - b).length < .0001, (a[:], b[:])
+
+
+def check_current(root, index):
+    order = smart.steps(root)
+    key, label = order[index]
+    assert c.selected_objects == [c.object] and c.object["xbone_landmark"] == key
+    panel = Mock()
+    smart.RIGGING_PT_landmarks.draw(panel, c)
+    panel.layout.label.assert_called_once_with(text=f"{index + 1}/{len(order)}  {label}", icon='EMPTY_AXIS')
 
 
 names = {"pelvis": "spine_C0", "neck": "neck_C0", "head": "neck_C0_head", "crown": "neck_C0_eff"}
@@ -29,14 +39,19 @@ assert not c.selected_objects and ops.start_landmarks(symmetric=False) == {'FINI
 root = c.scene.xbone_marker_session
 ref, *_ = smart.guides.template_points(Path(smart.__file__).with_name("biped.sgt"), 0.1, 'Y')
 neutral = {label: pos for label, pos, *_ in ref.values()}
-for key, _ in smart.steps(root):
-    assert ops.place_landmarks() == {'FINISHED'}
-    assert c.selected_objects == [c.object] and c.object["xbone_landmark"] == key
+for i, (key, _) in enumerate(smart.steps(root)):
+    if i:
+        assert ops.place_landmarks() == {'FINISHED'}
+    check_current(root, i)
     near(c.object.matrix_world.translation, neutral[names[key]])
+assert ops.place_landmarks() == {'CANCELLED'}
 assert ops.fit_landmarks() == {'FINISHED'}
 for name in names.values():
     near(c.object.matrix_world @ c.object.data.bones[name].head_local, neutral[name])
 near(c.scene.cursor.location, cursor)
+old_name = c.object.name
+other_layer = c.scene.view_layers.new("Other Layer")
+c.object.hide_set(True, view_layer=other_layer)
 
 bpy.ops.mesh.primitive_cube_add(size=2, location=(3, -4, 5))
 body = c.object
@@ -47,6 +62,7 @@ assert ops.start_landmarks(facing='POS_X') == {'FINISHED'}
 c.view_layer.update()
 root = c.scene.xbone_marker_session
 assert len(smart.steps(root)) == 12
+assert bpy.data.objects[old_name].hide_get() and body.visible_get()
 near(root.location, Vector((0, 0, 0)))
 root.location = (3, -4, 3.9)
 c.view_layer.update()
@@ -57,14 +73,16 @@ expected = {}
 for i, (key, _) in enumerate(smart.steps(root)):
     xyz = Vector(points[key.split('.')[0]])
     expected[key] = root.matrix_world @ xyz
-    assert ops.place_landmarks() == {'FINISHED'}
-    assert c.object["xbone_landmark"] == key
+    if i:
+        assert ops.place_landmarks() == {'FINISHED'}
+    check_current(root, i)
     near(c.object.location, neutral[names[key]])
     c.object.location = xyz
     if i == 2:
         assert ops.marker_back() == {'FINISHED'}
-        assert c.object["xbone_landmark"] == "neck"
+        check_current(root, i - 1)
         assert ops.place_landmarks() == {'FINISHED'}
+        check_current(root, i)
         near(c.object.location, xyz)
     if key.endswith('.L'):
         right = xyz.copy()
@@ -76,7 +94,8 @@ with tempfile.TemporaryDirectory() as tmp:
     bpy.ops.wm.open_mainfile(filepath=path)
     root = c.scene.xbone_marker_session
     body = bpy.data.objects["Cube"]
-    assert smart.current_step(root) == 12 and len(smart.markers(root)) == 12
+    check_current(root, 11)
+    assert bpy.data.objects[old_name].hide_get() and len(smart.markers(root)) == 12
     assert len([o for o in root.children if o.get("xbone_mirrored_landmark")]) == 8
     # Invalid joint centers leave the placement session available to correct.
     m = smart.markers(root)
@@ -87,11 +106,14 @@ with tempfile.TemporaryDirectory() as tmp:
     except RuntimeError:
         pass
     assert c.scene.xbone_marker_session == root
+    assert bpy.data.objects[old_name].hide_get()
     m["wrist.L"].location = pos
     assert ops.fit_landmarks() == {'FINISHED'}
 guide = c.object
 c.view_layer.update()
 assert guide.get("xbiped") and not c.scene.xbone_marker_session and not body.modifiers
+assert guide.visible_get() and bpy.data.objects[old_name].visible_get()
+assert bpy.data.objects[old_name].hide_get(view_layer=c.scene.view_layers["Other Layer"])
 assert body.matrix_world == original
 for key, name in names.items():
     near(guide.matrix_world @ guide.data.bones[name].head_local, expected[key])
@@ -123,12 +145,13 @@ assert ops.start_landmarks(symmetric=False) == {'FINISHED'}
 root = c.scene.xbone_marker_session
 c.view_layer.update()
 assert len(smart.steps(root)) == 20
-for key, _ in smart.steps(root):
+for i, (key, _) in enumerate(smart.steps(root)):
     v = Vector(points[key.split('.')[0]])
     if key.endswith('.R'):
         v.x = -v.x
         v.y += .1
-    assert ops.place_landmarks() == {'FINISHED'}
+    if i:
+        assert ops.place_landmarks() == {'FINISHED'}
     c.object.location = v
 right_wrist = root.matrix_world @ smart.markers(root)["wrist.R"].location
 assert ops.fit_landmarks() == {'FINISHED'}
@@ -139,5 +162,28 @@ for ob in c.selected_objects:
 body.select_set(True)
 c.view_layer.objects.active = body
 assert ops.start_landmarks() == {'FINISHED'}
+assert bpy.data.objects[old_name].hide_get()
 assert ops.cancel_landmarks() == {'FINISHED'} and not c.scene.xbone_marker_session
+assert bpy.data.objects[old_name].visible_get()
+assert bpy.data.objects[old_name].hide_get(view_layer=c.scene.view_layers["Other Layer"])
+# An older file saved on the initial Pelvis prompt has a session but no marker.
+assert ops.start_landmarks() == {'FINISHED'}
+root = c.scene.xbone_marker_session
+bpy.data.objects.remove(c.object, do_unlink=True)
+root["step"] = 0
+for layer in c.scene.view_layers:
+    for obj in layer["xbone_landmark_hidden_guides"].values():
+        obj.hide_set(False, view_layer=layer)
+    del layer["xbone_landmark_hidden_guides"]
+with tempfile.TemporaryDirectory() as tmp:
+    path = str(Path(tmp) / 'legacy.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path)
+    root = c.scene.xbone_marker_session
+    check_current(root, 0)
+    assert bpy.data.objects[old_name].hide_get()
+    assert ops.place_landmarks() == {'FINISHED'}
+    check_current(root, 1)
+    assert ops.cancel_landmarks() == {'FINISHED'}
+    assert bpy.data.objects[old_name].visible_get()
 print("PASS: template defaults, selection-independent placement, free movement, resumable landmarks, symmetry, fitted guide, XBiped and in-place rebuild")

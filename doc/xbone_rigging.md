@@ -6,8 +6,10 @@ In XBone Edit Mode, **Transform Children** in the viewport header controls wheth
 
 In Object Mode, open **Create Guide → Place XBiped Landmarks**, then set the character's
 forward direction and symmetry. The session starts at the world origin at the bundled XBiped
-template size. Start in an empty scene or use a visible character as a reference.
-Click **Next Marker** to create and select each joint at its template position. In the 3D
+template size with **Pelvis** selected. Existing guides are hidden while you place markers and
+their visibility is restored when you generate the guide or discard the markers. Start in an
+empty scene or use a visible character as a reference. The panel names the current marker.
+Click **Next Marker** to select the next joint at its template position. In the 3D
 Viewport, press **G** to move it. **Previous Marker** selects a placed joint for adjustment.
 Revisiting a marker preserves its position. You can save the scene and resume later.
 A symmetric setup uses 12 markers and reflects the left limbs across the pelvis. An

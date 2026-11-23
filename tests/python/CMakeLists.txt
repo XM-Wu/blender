@@ -836,6 +836,10 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
   )
   add_blender_test(
+    bl_xbone_guide_rig_switch
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_guide_rig_switch.py
+  )
+  add_blender_test(
     bl_xbone_rigging_editor
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging_editor.py
   )
@@ -856,7 +860,7 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_custom_attachment.py
   )
   set_tests_properties(
-    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_mesh_bindings bl_xbone_landmarks bl_xbone_xbiped bl_xbone_custom_attachment
+    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_guide_rig_switch bl_xbone_mesh_bindings bl_xbone_landmarks bl_xbone_xbiped bl_xbone_custom_attachment
     PROPERTIES LABELS "xblender"
   )
 endif()

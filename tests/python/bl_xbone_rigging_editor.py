@@ -65,6 +65,9 @@ with bpy.context.temp_override(area=area, region=window_region(area)):
     assert bpy.context.active_pose_bone == bend
     assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
     assert bpy.context.edit_object == guide
+    assert bpy.ops.xbone.return_to_rig() == {'FINISHED'} and bpy.context.active_object == rig
+    assert bpy.context.mode == 'POSE'
+    assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
     assert bpy.ops.xbone.build_rig() == {'FINISHED'} and bpy.context.active_object == rig
 
 area.type = 'WEIGHT_LAYERS'

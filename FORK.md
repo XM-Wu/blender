@@ -269,6 +269,10 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## Rigging 编辑器的 Guide / Rig 切换
+
+标题栏的 **Guide** 打开当前 Rig 对应的源 Guide，**Rig** 保留 Guide 编辑并返回原 Rig 的 Pose Mode。往返沿用同一个骨架数据块、蒙皮修改器、Skin Tools 层栈、Action、NLA 和当前姿势；保存重开后仍可继续。新 Guide 第一次用 **Build Rig** 生成骨架。已经配对的 Guide 只有在明确执行 **Apply Guide and Rebuild（应用 Guide 并重建）** 时才把编辑应用到 Rig。[切换回归](tests/python/bl_xbone_guide_rig_switch.py)
+
 ## Object Mode 的 Clear 菜单
 
 3D 视图在 Object Mode 提供 **Clear** 菜单；相同操作也在 **Object → Clear** 原有变换命令下方。前三项分别清理当前文件内零用户且无引用的 Mesh、图片与纹理、材质。同一次图片／纹理清理会处理删除纹理后释放的图片。资产、Fake User、库链接及覆盖、仍待保存的图片和渲染结果会被保留。命令处理 Blender 数据块，磁盘上的外部图片文件不会被删除。

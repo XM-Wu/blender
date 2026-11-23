@@ -9,9 +9,13 @@ from .biped_skeleton import even_samples, limb_samples
 
 
 def target_for(context, guide):
-    target = guide.get("rigging_target")
-    if target and target.get("rigging_guide") == guide and target in context.scene.objects.values():
-        return target
+    if "rigging_target" in guide:
+        target = guide.get("rigging_target")
+        if (isinstance(target, bpy.types.Object) and target.type == 'ARMATURE' and
+                target.get("rigging_role") == "RIG" and target.get("rigging_guide") == guide and
+                context.scene.objects.get(target.name) == target):
+            return target
+        return None
     candidates = [obj for obj in context.scene.objects if obj.get("rigging_guide") == guide
                   and obj.get("rigging_role") == "RIG"]
     return candidates[0] if len(candidates) == 1 else None
@@ -200,7 +204,7 @@ def adopt(context, rig, fresh, meshes, changed):
 def build(context, guide):
     target = target_for(context, guide)
     if not target and any(obj.get("rigging_guide") == guide for obj in context.scene.objects):
-        raise ValueError("Several rigs use this guide. Choose Edit Source Guide on the rig to rebuild")
+        raise ValueError("Choose the intended rig and switch to its guide before rebuilding")
     if target and (not target.is_editable or target not in context.view_layer.objects.values()):
         raise ValueError("The source rig must be editable in this view layer")
     old = division_layout(target.data) if target else {}

@@ -190,7 +190,8 @@ class XBONE_OT_add_component(Operator):
 
 class XBONE_OT_build_rig(Operator):
     bl_idname = "xbone.build_rig"
-    bl_label = "Build Rig"
+    bl_label = "Apply Guide and Rebuild"
+    bl_description = "Build from this guide and apply its changes to the associated rig, if one exists"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -303,31 +304,98 @@ class XBONE_OT_match_limb(Operator):
         return {'FINISHED'}
 
 
+def switch_guide_rig(context, operator, target, mode):
+    """Switch the editing context without evaluating the guide as input to a build."""
+    source = context.active_object
+    layer = context.view_layer
+    if target.data == source.data:
+        operator.report({'WARNING'}, "Guide and rig must have independent armature data")
+        return {'CANCELLED'}
+    if not target.is_editable or (mode == 'EDIT' and not target.data.is_editable):
+        operator.report({'WARNING'}, "The target armature is read-only")
+        return {'CANCELLED'}
+
+    was_hidden = target.hide_get(view_layer=layer)
+    target.hide_set(False, view_layer=layer)
+    view = context.space_data if context.area and context.area.type == 'VIEW_3D' else None
+    if target.hide_select or not target.visible_get(view_layer=layer, viewport=view):
+        target.hide_set(was_hidden, view_layer=layer)
+        operator.report({'WARNING'}, "Make the target armature visible and selectable in this view layer")
+        return {'CANCELLED'}
+
+    previous_mode = source.mode
+    selected = list(context.selected_objects)
+    try:
+        if mode == 'EDIT':
+            guide_display.ensure(target)
+        if previous_mode != 'OBJECT':
+            # Leaving Edit Mode commits pending edits to the guide's own armature.
+            bpy.ops.object.mode_set(mode='OBJECT')
+        for obj in selected:
+            obj.select_set(False, view_layer=layer)
+        target.select_set(True, view_layer=layer)
+        layer.objects.active = target
+        if bpy.ops.object.mode_set(mode=mode) != {'FINISHED'}:
+            raise RuntimeError("Could not switch armature mode")
+    except (RuntimeError, OSError, ValueError) as exc:
+        if layer.objects.active == target and target.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        target.select_set(False, view_layer=layer)
+        for obj in selected:
+            obj.select_set(True, view_layer=layer)
+        layer.objects.active = source
+        if source.mode != previous_mode:
+            bpy.ops.object.mode_set(mode=previous_mode)
+        target.hide_set(was_hidden, view_layer=layer)
+        operator.report({'WARNING'}, str(exc))
+        return {'CANCELLED'}
+
+    source.hide_set(True, view_layer=layer)
+    return {'FINISHED'}
+
+
 class XBONE_OT_edit_source_guide(Operator):
     bl_idname = "xbone.edit_source_guide"
     bl_label = "Edit Source Guide"
-    bl_description = "Edit this rig's guide and rebuild the same rig"
+    bl_description = "Edit this rig's source guide; the rig keeps its current pose and bindings"
     bl_options = {'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        obj = context.active_object
-        return (context.mode in {'POSE', 'OBJECT'} and obj and obj.get("rigging_role") == "RIG"
-                and obj.get("rigging_guide") in context.view_layer.objects.values())
+        rig = context.active_object
+        if (context.scene.xbone_marker_session or context.mode not in {'POSE', 'OBJECT'} or
+                not rig or rig.get("rigging_role") != "RIG"):
+            return False
+        guide = rig.get("rigging_guide")
+        return (isinstance(guide, bpy.types.Object) and guide.type == 'ARMATURE' and
+                guide.get("rigging_role") == "GUIDE" and context.view_layer.objects.get(guide.name) == guide)
 
     def execute(self, context):
-        rig = context.object
-        if context.mode == 'POSE':
-            bpy.ops.object.mode_set(mode='OBJECT')
+        rig = context.active_object
         guide = rig["rigging_guide"]
-        guide_display.ensure(guide)
-        guide["rigging_target"] = rig
-        rig.hide_set(True)
-        guide.hide_set(False)
-        guide.select_set(True)
-        context.view_layer.objects.active = guide
-        bpy.ops.object.mode_set(mode='EDIT')
-        return {'FINISHED'}
+        result = switch_guide_rig(context, self, guide, 'EDIT')
+        if result == {'FINISHED'} and guide.get("rigging_target") != rig:
+            guide["rigging_target"] = rig
+        return result
+
+
+class XBONE_OT_return_to_rig(Operator):
+    bl_idname = "xbone.return_to_rig"
+    bl_label = "Return to Rig"
+    bl_description = "Resume posing the existing rig; pending guide edits are kept on the guide"
+    bl_options = {'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        guide = context.active_object
+        if (context.scene.xbone_marker_session or context.mode not in {'EDIT_ARMATURE', 'OBJECT'} or
+                not guide or guide.get("rigging_role") != "GUIDE"):
+            return False
+        target = rebuild.target_for(context, guide)
+        return target is not None and context.view_layer.objects.get(target.name) == target
+
+    def execute(self, context):
+        return switch_guide_rig(context, self, rebuild.target_for(context, context.active_object), 'POSE')
 
 
 class XBONE_OT_toggle_guide_display(Operator):
@@ -365,6 +433,11 @@ class RIGGING_HT_header(Header):
         layout = self.layout
         layout.template_header()
         obj = context.active_object
+        role = obj.get("rigging_role") if obj and obj.type == 'ARMATURE' else None
+        if role in {"GUIDE", "RIG"} and not context.scene.xbone_marker_session:
+            row = layout.row(align=True)
+            row.operator("xbone.edit_source_guide", text="Guide", depress=role == "GUIDE")
+            row.operator("xbone.return_to_rig", text="Rig", depress=role == "RIG")
         layout.label(text=obj.name if obj and obj.type == 'ARMATURE' else "Rigging",
                      icon='ARMATURE_DATA')
 
@@ -428,7 +501,7 @@ class RIGGING_PT_guide(RiggingPanel, Panel):
                                    ("supportJoints", "Support Joints"), ("division", "Divisions")):
                     if key in bone:
                         layout.prop(bone, '["' + key + '"]', text=label)
-        label = "Rebuild Rig" if rebuild.target_for(context, obj) else "Build Rig"
+        label = "Apply Guide and Rebuild" if rebuild.target_for(context, obj) else "Build Rig"
         layout.operator("xbone.build_rig", text=label)
 
 
@@ -445,7 +518,6 @@ class RIGGING_PT_rig(RiggingPanel, Panel):
         obj = context.active_object
         if context.mode == 'OBJECT':
             layout.operator("object.mode_set", text="Pose Rig", icon='POSE_HLT').mode = 'POSE'
-        layout.operator("xbone.edit_source_guide")
         if smart_guide.XBONE_OT_edit_landmarks.poll(context):
             layout.operator("xbone.edit_landmarks")
         skeleton = obj.data.collections.get("Skeleton")
@@ -506,7 +578,7 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
 
 classes = (XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
-           XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_symmetrize_guide,
+           XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_return_to_rig, XBONE_OT_symmetrize_guide,
            XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
            *smart_guide.classes, RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)

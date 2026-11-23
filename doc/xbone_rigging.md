@@ -25,8 +25,8 @@ to define the IK plane.
 
 Select an XBiped Guide or its built Rig and choose **Edit XBiped Landmarks** to adjust it again.
 Existing XBiped templates can also start from their guide joints. **Update XBiped Guide**
-applies the changes to the same guide, including its custom branches. Use **Rebuild Rig**
-to update the existing rig. **Discard Markers** cancels this edit.
+applies the changes to the same guide, including its custom branches. Use **Rig** in the Rigging editor header to return with the edits pending, or **Apply Guide and Rebuild**
+to apply them to the existing rig. **Discard Markers** cancels this edit.
 
 In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
 The list shows all meshes in the current scene with an Armature modifier targeting that XBone, including hidden meshes.
@@ -39,7 +39,7 @@ Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide po
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.
 - For an extra chain on XBiped, edit its guide, select the attachment joint and use **Add Guide Component → FK Joint**. Set the side and length, rename the joint, then add the next joint with the previous one active. Build or rebuild and enable **Show Additional FK Controls** to pose the new chain. The branch attaches to the skin joint of its parent component, preserving its guide offset for animation and FBX export. Generic FK rings face across the chain; a terminal ring follows the incoming segment. The FK joint retains its authored rotation axes.
 - To keep an existing skeleton's joint names, hierarchy and rest frames, select the XBone object and choose **Create Guide from Selected XBone**. Select a wrist or ankle in Edit Mode and choose **Toggle Two-Joint IK at Active Joint**. The two ancestors form the limb. Give a straight limb a small bend toward its intended elbow or knee direction.
-- **Build Rig** creates an XBone armature and opens Pose Mode. Bind the character mesh to that armature. Use **Edit Source Guide → Rebuild Rig** to update the same rig object. Its mesh modifiers, Action and NLA tracks keep their targets. Matching control names retain their poses and animation paths. Changing classic Biped division counts distributes the existing division weights between neighboring new joints by position along the component. Renamed or removed controls may require animation-path edits.
+- **Build Rig** creates an XBone armature and opens Pose Mode. Bind the character mesh to that armature. Use **Guide / Rig** in the Rigging editor header to switch between editing the source guide and posing the existing rig. Edited joints stay on the guide across switches and file saves. Choose **Apply Guide and Rebuild** on the Guide panel to update the same rig object. Its mesh modifiers, Action and NLA tracks keep their targets. Matching control names retain their poses and animation paths. Changing classic Biped division counts distributes the existing division weights between neighboring new joints by position along the component. Renamed or removed controls may require animation-path edits.
 - Biped starts with IK legs and FK arms. In Pose Mode move or rotate **IK.leg_L0_ankle** or **IK.leg_R0_ankle** to pose a foot. Move the pole to steer the knee. Use **Show Skeleton** to see the deformation joints behind the controls.
 - The bundled Biped uses rest curves sampled from a Maya 2027 Shifter build, including the world octagon, nested ground squares and sided limb outlines. The pole lines follow the knees and elbows as the rig is posed. Supplemental Shifter outlines follow their XBone joints as display geometry. **Show Additional FK Controls** exposes XBone controls without a matching Shifter outline. Create a new Biped guide and build it to get this layout in an existing scene.
 - Rotate FK controls to pose their chains. The limb property blends from FK at 0 to IK at 1. **Match IK** and **Match FK** preserve the pose and select the incoming endpoint control. With Auto Key enabled the operator keys the matched channels and the switch at the current frame. The Biped eye targets aim each eye individually, and the shared eye control moves both targets.
@@ -66,7 +66,7 @@ XBiped legs default to **Max Stretch = 1**. Raise this setting on a foot IK cont
 stretchable leg. In FK, select the arc outside either knee or its **Knee FK** button in the
 Selector. Rotate local X to bend: a 90° input folds the knee by 90° and swings the thigh
 forward by 9°, moving the knee pivot and carrying the foot. The original shin FK control
-remains available for independent adjustments. Rebuild from **Edit Source Guide** to add
+remains available for independent adjustments. Edit the source with **Guide**, then choose **Apply Guide and Rebuild** to add
 the handles to an existing XBiped.
 
 Each XBiped arm has a separate **Elbow Glide** (0–4, default 1), **Forearm Rotation (°)**
@@ -103,4 +103,4 @@ In the mGear checkout at `a7dd1292`, Guide Explorer's **Build** (Ctrl+B in the t
 
 **Unbuild** (Ctrl+U in the tree) looks up rig roots via `*.is_rig` and deletes the first result's rig transform. To recreate a guide from the build snapshot, **Extract Guide From Rig** reads the rig root's `guide_data` JSON and imports a guide template. **Extract and Match Guide From Rig** additionally uses supported EPIC joint-to-guide mappings. [Unbuild](https://github.com/mgear-dev/mgear/blob/a7dd1292/release/scripts/mgear/shifter/guide_explorer/guide_tree_widget.py#L241) · [Guide extraction](https://github.com/mgear-dev/mgear/blob/a7dd1292/release/scripts/mgear/shifter/guide_manager.py#L250)
 
-In xBlender, **Edit Source Guide** follows the selected rig's `rigging_guide` pointer, hides that rig and opens the original guide in Edit Mode. **Build Rig** uses the stored target to rebuild into the same rig object. [Edit Source Guide](../scripts/startup/xbone_rigging/__init__.py) · [Rebuild](../scripts/startup/xbone_rigging/rebuild.py)
+In xBlender, **Guide** follows the selected rig's `rigging_guide` pointer, hides that rig and opens the original guide in Edit Mode. **Rig** returns to that rig in Pose Mode. Only **Apply Guide and Rebuild** applies the guide edits to it. [Edit Source Guide](../scripts/startup/xbone_rigging/__init__.py) · [Rebuild](../scripts/startup/xbone_rigging/rebuild.py)

@@ -12,13 +12,21 @@ empty scene or use a visible character as a reference. The panel names the curre
 Click **Next Marker** to select the next joint at its template position. In the 3D
 Viewport, press **G** to move it. **Previous Marker** selects a placed joint for adjustment.
 Revisiting a marker preserves its position. You can save the scene and resume later.
-A symmetric setup uses 12 markers and reflects the left limbs across the pelvis. An
-asymmetric setup uses 20.
+A symmetric setup starts with 12 body markers and reflects the left side across the pelvis.
+An asymmetric setup starts with 20. **Hide Other Landmarks** keeps the current marker visible
+as you step forward or back. Click it again to review all placed markers.
 
-After reviewing the markers, click **Generate Fitted XBiped Guide**. The hands, feet and face
-follow their fitted template segments. Check individual digits, eyes and foot pivots in **Edit Guide**
-and then **Build Rig**. Straight limbs get a small bend to define the IK plane. The wizard
-does not attach modifiers or author weights on the source meshes.
+After placing the body, choose **Match Finger Joints** or **Match Face** for more control.
+The finger steps cover three joints and the tip of each digit, reusing the middle fingertip
+already placed with the body. The face steps cover eye centers, eye aim targets, the mouth
+base, rotation center, jaw and lips. You can complete either group first, then add the other.
+Click **Generate Fitted XBiped Guide** and then **Build Rig**. Straight limbs get a small bend
+to define the IK plane.
+
+Select an XBiped Guide or its built Rig and choose **Edit XBiped Landmarks** to adjust it again.
+Existing XBiped templates can also start from their guide joints. **Update XBiped Guide**
+applies the changes to the same guide, including its custom branches. Use **Rebuild Rig**
+to update the existing rig. **Discard Markers** cancels this edit.
 
 In Object Mode, select the meshes and an XBone, then choose **Mesh Bindings → Add Armature to Selected Meshes**.
 The list shows all meshes in the current scene with an Armature modifier targeting that XBone, including hidden meshes.

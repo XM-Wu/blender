@@ -412,6 +412,8 @@ class RIGGING_PT_guide(RiggingPanel, Panel):
         layout = self.layout
         obj = context.active_object
         layout.operator("xbone.toggle_guide_display", depress=bool(obj.get("show_shifter_guide")))
+        if smart_guide.XBONE_OT_edit_landmarks.poll(context):
+            layout.operator("xbone.edit_landmarks")
         row = layout.row(align=True)
         row.operator("xbone.symmetrize_guide", text="Left to Right").side = 'L'
         row.operator("xbone.symmetrize_guide", text="Right to Left").side = 'R'
@@ -444,6 +446,8 @@ class RIGGING_PT_rig(RiggingPanel, Panel):
         if context.mode == 'OBJECT':
             layout.operator("object.mode_set", text="Pose Rig", icon='POSE_HLT').mode = 'POSE'
         layout.operator("xbone.edit_source_guide")
+        if smart_guide.XBONE_OT_edit_landmarks.poll(context):
+            layout.operator("xbone.edit_landmarks")
         skeleton = obj.data.collections.get("Skeleton")
         if skeleton:
             layout.prop(skeleton, "is_visible", text="Show Skeleton")

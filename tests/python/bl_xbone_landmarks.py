@@ -186,4 +186,110 @@ with tempfile.TemporaryDirectory() as tmp:
     check_current(root, 1)
     assert ops.cancel_landmarks() == {'FINISHED'}
     assert bpy.data.objects[old_name].visible_get()
-print("PASS: template defaults, selection-independent placement, free movement, resumable landmarks, symmetry, fitted guide, XBiped and in-place rebuild")
+def finish_steps(root):
+    while smart.next_step(root, smart.current_step(root, c.object)) is not None:
+        assert ops.place_landmarks() == {'FINISHED'}
+        if root.get("isolate_marker"):
+            assert c.object.visible_get()
+            assert all(not ob.visible_get() for ob in root.children if ob != c.object)
+
+
+for symmetric in (True, False):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    assert ops.start_landmarks(symmetric=symmetric) == {'FINISHED'}
+    root = c.scene.xbone_marker_session
+    finish_steps(root)
+    assert ops.landmark_details(detail='FINGERS') == {'FINISHED'}
+    assert c.object["xbone_landmark"] == "thumb_0.L"
+    assert ops.isolate_landmark() == {'FINISHED'}
+    finish_steps(root)
+    assert ops.marker_back() == {'FINISHED'} and c.object.visible_get()
+    finish_steps(root)
+    assert ops.landmark_details(detail='FACE') == {'FINISHED'}
+    finish_steps(root)
+    assert len(smart.steps(root)) == (38 if symmetric else 67)
+    assert ops.isolate_landmark() == {'FINISHED'}
+    assert all(ob.visible_get() for ob in root.children)
+    expected = {}
+    for key, marker in smart.markers(root).items():
+        component, locator = smart.landmark_keys()[key]
+        if component.startswith(("thumb_", "finger_", "eye_", "mouth_")):
+            # Bend, spread and vary each side independently.
+            j = smart.DIGIT_LOCS.index(locator) if locator in smart.DIGIT_LOCS else 0
+            marker.location += Vector((.005, .004 * (j + 1), -.003 * j * j)) * (-2 if key.endswith(".R") else 1)
+            expected[key] = marker.location.copy()
+            if symmetric and key.endswith(".L"):
+                other = expected[key].copy()
+                other.x = 2 * smart.markers(root)["pelvis"].location.x - other.x
+                expected[key[:-1] + 'R'] = other
+    assert ops.fit_landmarks() == {'FINISHED'}
+    guide = c.object
+    for key, pos in expected.items():
+        comp, loc = smart.landmark_keys()[key]
+        bone = guide.data.bones[comp if loc == "root" else comp + "_" + loc]
+        near(guide.matrix_world @ bone.head_local, pos)
+    # Preserve a custom branch and settings while changing an individual digit and eye.
+    guide.data.bones["arm_L0"]["div0"] = 4
+    bpy.ops.object.mode_set(mode='EDIT')
+    custom = guide.data.edit_bones.new("Accessory")
+    custom.parent = guide.data.edit_bones["finger_L0_0_loc"]
+    custom.head = custom.parent.head + Vector((0, .04, 0))
+    custom.tail = custom.head + Vector((0, .03, 0))
+    bpy.ops.object.mode_set(mode='OBJECT')
+    assert ops.build_rig() == {'FINISHED'}
+    rig = c.object
+    initial_mode = rig.mode
+    assert ops.edit_landmarks() == {'FINISHED'} and rig.hide_get()
+    root = c.scene.xbone_marker_session
+    assert len(smart.markers(root)) == (38 if symmetric else 67)
+    m = smart.markers(root)
+    near(root.matrix_world @ m["eye.L"].location, expected["eye.L"])
+    m["eye.L"].location.y += .01
+    assert ops.cancel_landmarks() == {'FINISHED'}
+    assert c.object == rig and rig.mode == initial_mode and not rig.hide_get()
+    assert ops.edit_landmarks() == {'FINISHED'}
+    root = c.scene.xbone_marker_session
+    m = smart.markers(root)
+    changes = {"index_1.L": Vector((0, -.005, .008)), "eye.L": Vector((.002, -.01, .004))}
+    for key, offset in changes.items():
+        m[key].location += offset
+        expected[key] = root.matrix_world @ m[key].location
+    assert ops.fit_landmarks() == {'FINISHED'} and c.object == guide
+    assert guide.data.bones["arm_L0"]["div0"] == 4 and "Accessory" in guide.data.bones
+    for key, name in (("index_1.L", "finger_L0_0_loc"), ("eye.L", "eye_L0")):
+        near(guide.matrix_world @ guide.data.bones[name].head_local, expected[key])
+    assert ops.build_rig() == {'FINISHED'} and c.object == rig
+    for key, name in (("index_1.L", "FK.finger_L0_0_loc"), ("eye.L", "eye_L0")):
+        near(rig.matrix_world @ rig.data.bones[name].head_local, expected[key])
+
+bpy.ops.wm.read_factory_settings(use_empty=True)
+assert ops.biped_guide(template='xbiped') == {'FINISHED'}
+guide = c.object
+guide.location = (3, -1, 2)
+guide.rotation_euler.z = .4
+bpy.ops.object.mode_set(mode='EDIT')
+guide.data.edit_bones["eye_L0"].translate(Vector((.012, .002, 0)))
+assert ops.edit_landmarks() == {'FINISHED'} and c.mode == 'OBJECT'
+root = c.scene.xbone_marker_session
+assert not root["symmetric"]
+assert ops.landmark_details(detail='FACE') == {'FINISHED'}
+near(c.object.location, guide.data.bones["eye_L0"].head_local)
+assert ops.isolate_landmark() == {'FINISHED'}
+with tempfile.TemporaryDirectory() as tmp:
+    path = str(Path(tmp) / "refit.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=path)
+    bpy.ops.wm.open_mainfile(filepath=path)
+    root = c.scene.xbone_marker_session
+    guide = root["editing_guide"]
+    assert c.object["xbone_landmark"] == "eye.L" and c.object.visible_get()
+    assert all(not ob.visible_get() for ob in root.children if ob != c.object)
+    finish_steps(root)
+    assert ops.landmark_details(detail='FINGERS') == {'FINISHED'}
+    finish_steps(root)
+    assert ops.fit_landmarks() == {'FINISHED'} and c.object == guide
+    assert ops.edit_landmarks() == {'FINISHED'}
+    root = c.scene.xbone_marker_session
+    assert root["isolate_marker"] and len(smart.markers(root)) == 67
+    assert ops.cancel_landmarks() == {'FINISHED'}
+
+print("PASS: XBiped body, fingers, face, marker isolation, cancel, guide refit and in-place rebuild")

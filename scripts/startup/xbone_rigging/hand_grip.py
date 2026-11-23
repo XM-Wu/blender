@@ -101,6 +101,23 @@ def create(rig, names, side, helper):
     return host_name, side, width, drivers
 
 
+HAND_PROPERTIES = (
+    ("grip", 0, "Close the whole hand"),
+    ("spread", -1, "Fan the fingers apart"),
+    ("cup", 0, "Cup the palm towards the thumb"),
+    *((digit + "_curl", -1, "Adjust " + digit + " curl relative to Grip") for digit, *_ in DIGITS),
+)
+
+
+def clear_pose(rig):
+    for side in "LR":
+        host = rig.pose.bones.get(rig.get("xbiped_hand_" + side, ""))
+        if host:
+            for key, *_ in HAND_PROPERTIES:
+                if host.get(key):
+                    host[key] = 0.0
+
+
 def configure(rig, hand):
     name, side, width, drivers = hand
     host = rig.pose.bones[name]
@@ -109,11 +126,7 @@ def configure(rig, hand):
     widget = biped_display.shape(rig.name + "." + name, [points])
     biped_display.configure(host, widget, 18 if side == 'L' else 13)
 
-    properties = [("grip", 0, "Close the whole hand"), ("spread", -1, "Fan the fingers apart"),
-                  ("cup", 0, "Cup the palm towards the thumb")]
-    properties.extend((digit + "_curl", -1, "Adjust " + digit + " curl relative to Grip")
-                      for digit, *_ in DIGITS)
-    for key, minimum, description in properties:
+    for key, minimum, description in HAND_PROPERTIES:
         host[key] = 0.0
         host.id_properties_ui(key).update(default=0.0, min=minimum, max=1.0, description=description)
     for bone, axis, expr, inputs in drivers:

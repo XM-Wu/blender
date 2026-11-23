@@ -75,6 +75,107 @@ class LayerTool:
         return bool(skin.rig_modifier(obj) and "_skin_source" in obj and obj.mode != 'EDIT')
 
 
+class PAINT_OT_skin_toggle_influence(LayerTool, Operator):
+    bl_idname = "paint.skin_toggle_influence"
+    bl_label = "Toggle Skin Influence"
+    bl_description = "Mute or restore this bone across the mesh's skin layers, keeping its authored weights"
+    bl_options = {'UNDO'}
+    bone: StringProperty()
+
+    def execute(self, context):
+        obj = context.active_object
+        if error := skin.topology_error(obj):
+            self.report({'WARNING'}, error)
+            return {'CANCELLED'}
+        bone = skin.rig_modifier(obj).object.data.bones.get(self.bone)
+        if not bone or not bone.use_deform or not obj.is_editable or not obj.data.is_editable:
+            return {'CANCELLED'}
+        skin.unique_storage(obj)
+        channel = str(group_for_bone(obj, bone.name).skin_channel)
+        muted = dict(obj.get("_skin_muted", {}))
+        if channel in muted:
+            del muted[channel]
+        else:
+            muted[channel] = True
+        if muted:
+            obj["_skin_muted"] = muted
+        elif "_skin_muted" in obj:
+            del obj["_skin_muted"]
+        skin.composite(obj)
+        return {'FINISHED'}
+
+
+# A snapshot, so editing or deleting the source after Copy cannot change a paste.
+_copied_weights = None
+
+
+@bpy.app.handlers.persistent
+def clear_weight_clipboard(_):
+    global _copied_weights
+    _copied_weights = None
+
+
+def clipboard_key(obj):
+    return obj.session_uid, obj.data.session_uid, obj.skin_layers.prefix, len(obj.data.vertices)
+
+
+def can_paste_weights(obj):
+    return _copied_weights is not None and _copied_weights[0] == clipboard_key(obj)
+
+
+class PAINT_OT_skin_bone_weights(LayerTool, Operator):
+    bl_idname = "paint.skin_bone_weights"
+    bl_label = "Bone Weights"
+    bl_options = {'UNDO'}
+    action: EnumProperty(items=[
+        ('COPY', "Copy", "Copy all vertex weights for the selected bone on this layer"),
+        ('PASTE', "Paste", "Replace this bone's weights on this layer with the copied values"),
+        ('DELETE', "Delete", "Remove this bone's weights from this layer")])
+
+    @classmethod
+    def description(cls, context, properties):
+        actions = bpy.ops.paint.skin_bone_weights.get_rna_type().properties["action"].enum_items
+        return actions[properties.action].description
+
+    def execute(self, context):
+        global _copied_weights
+        obj = context.active_object
+        state = obj.skin_layers
+        layer = skin.current_layer(state)
+        if not layer or layer.is_group or not any(g.skin_channel == state.influence for g in skin.channels(obj)):
+            self.report({'WARNING'}, "Choose a weight layer and a deform bone")
+            return {'CANCELLED'}
+        if error := skin.topology_error(obj):
+            self.report({'WARNING'}, error)
+            return {'CANCELLED'}
+        suffix = "_" + str(state.influence)
+        key = skin.layer_key(state, layer) + suffix
+        if self.action != 'PASTE' and key not in obj.data.attributes:
+            self.report({'INFO'}, "This bone has no weights on the current layer")
+            return {'CANCELLED'}
+        if self.action == 'COPY':
+            _copied_weights = clipboard_key(obj), skin.read_values(obj.data, key)
+            if context.area:
+                context.area.tag_redraw()
+            return {'FINISHED'}
+        if self.action == 'PASTE' and not can_paste_weights(obj):
+            self.report({'WARNING'}, "Copy bone weights from this mesh and topology first")
+            return {'CANCELLED'}
+        if not obj.is_editable or not obj.data.is_editable:
+            return {'CANCELLED'}
+        had_clipboard = can_paste_weights(obj)
+        skin.unique_storage(obj)
+        if had_clipboard:
+            _copied_weights = clipboard_key(obj), _copied_weights[1]
+        key = skin.layer_key(state, layer) + suffix
+        if self.action == 'DELETE':
+            obj.data.attributes.remove(obj.data.attributes[key])
+        else:
+            skin.write_values(obj.data, key, _copied_weights[1])
+        skin.composite(obj)
+        return {'FINISHED'}
+
+
 class PAINT_OT_skin_reparent(LayerTool, Operator):
     bl_idname = "paint.skin_reparent"
     bl_label = "Move Layer to Group"
@@ -110,7 +211,7 @@ class PaintRigTool:
 class PAINT_OT_skin_rest_pose(PaintRigTool, Operator):
     bl_idname = "paint.skin_rest_pose"
     bl_label = "Reset Pose"
-    bl_description = "Reset all local pose transforms to their rest values and continue posing"
+    bl_description = "Clear local pose transforms and XBiped hand gestures and continue posing"
     bl_options = {'UNDO'}
 
     def execute(self, context):
@@ -125,6 +226,10 @@ class PAINT_OT_skin_rest_pose(PaintRigTool, Operator):
         identity = Matrix.Identity(4)
         for bone in rig.pose.bones:
             bone.matrix_basis = identity
+        if "xbiped_hand_L" in rig or "xbiped_hand_R" in rig:
+            from xbone_rigging.hand_grip import clear_pose
+            clear_pose(rig)
+            rig.update_tag()
         return {'FINISHED'}
 
 
@@ -138,6 +243,7 @@ class SkinPoseSession(PropertyGroup):
     selection: CollectionProperty(type=SkinPoseSelection)
     rig_was_hidden: BoolProperty()
     rig_was_posing: BoolProperty()
+    controls_auto_shown: BoolProperty()
     group_name: StringProperty()
 
 
@@ -219,7 +325,9 @@ class PAINT_OT_skin_switch_pose(Operator):
             self.report({'WARNING'}, str(exc))
             return {'CANCELLED'}
 
+        from xbone_rigging import set_controls_visible
         if entering:
+            session.controls_auto_shown = set_controls_visible(rig, True)
             session.source, session.rig = source, rig
             session.rig_was_hidden, session.rig_was_posing = hidden, rig_was_posing
             session.group_name = group_name
@@ -231,6 +339,8 @@ class PAINT_OT_skin_switch_pose(Operator):
             if view:
                 view.overlay.show_bones = True
         else:
+            if session.controls_auto_shown:
+                set_controls_visible(rig, False)
             group = source.vertex_groups.get(session.group_name)
             if group:
                 source.vertex_groups.active_index = group.index
@@ -495,11 +605,14 @@ class PAINT_OT_skin_pick(LayerTool, Operator):
 
 
 def register():
+    bpy.app.handlers.load_pre.append(clear_weight_clipboard)
     bpy.types.ViewLayer.skin_pose_session = PointerProperty(type=SkinPoseSession)
 
 
 def unregister():
+    bpy.app.handlers.load_pre.remove(clear_weight_clipboard)
+    clear_weight_clipboard(None)
     del bpy.types.ViewLayer.skin_pose_session
 
 
-classes = (SkinPoseSelection, SkinPoseSession, PAINT_OT_skin_switch_pose, PAINT_OT_skin_reparent, PAINT_OT_skin_rest_pose, PAINT_OT_skin_front, PAINT_OT_skin_closest, PAINT_OT_skin_mirror, PAINT_OT_skin_pick)
+classes = (PAINT_OT_skin_toggle_influence, PAINT_OT_skin_bone_weights, SkinPoseSelection, SkinPoseSession, PAINT_OT_skin_switch_pose, PAINT_OT_skin_reparent, PAINT_OT_skin_rest_pose, PAINT_OT_skin_front, PAINT_OT_skin_closest, PAINT_OT_skin_mirror, PAINT_OT_skin_pick)

@@ -120,32 +120,38 @@ static GPUVertFormat &weight_format(const bool layered)
 }
 
 static void extract_skin_colors(const Mesh &mesh,
-                                const std::string &target,
+                                const DRW_MeshWeightState &state,
                                 MutableSpan<float4> out)
 {
+  const std::string target = state.skin_preview;
   const auto attrs = mesh.attributes();
-  const auto active = attrs.lookup_or_default<float>(target, bke::AttrDomain::Point, 0.0f);
-  for (const int i : out.index_range()) {
-    out[i] = float4(active.varray[i]);
-  }
   if (StringRef(target).endswith("_mask")) {
+    const auto mask = attrs.lookup_or_default<float>(target, bke::AttrDomain::Point, 0.0f);
+    for (const int i : out.index_range()) {
+      out[i] = float4(mask.varray[i]);
+    }
     return;
   }
+  out.fill(float4(0.0f));
   const size_t digits = target.find_last_not_of("0123456789") + 1;
   if (digits == target.size()) {
     return;
   }
   const std::string prefix = target.substr(0, digits);
-  for (const bDeformGroup &group : mesh.vertex_group_names) {
-    if (!group.skin_channel) {
+  for (const auto [index, group] : mesh.vertex_group_names.enumerate()) {
+    if (!group.skin_channel || (state.skin_group_muted && index < state.defgroup_len &&
+                                state.skin_group_muted[index])) {
       continue;
     }
     const std::string name = prefix + std::to_string(group.skin_channel);
-    if (name == target) {
-      continue;
-    }
     const auto weights = attrs.lookup<float>(name, bke::AttrDomain::Point);
     if (!weights) {
+      continue;
+    }
+    if (name == target) {
+      for (const int i : out.index_range()) {
+        out[i] += float4(weights.varray[i]);
+      }
       continue;
     }
     float3 color;
@@ -172,7 +178,7 @@ gpu::VertBufPtr extract_weights(const MeshRenderData &mr,
   gpu::VertBufPtr vert_vbo = gpu::VertBufPtr(GPU_vertbuf_create_with_format(format));
   GPU_vertbuf_data_alloc(*vert_vbo, mr.verts_num);
   if (layered) {
-    extract_skin_colors(*mr.mesh, weight_state.skin_preview, vert_vbo->data<float4>());
+    extract_skin_colors(*mr.mesh, weight_state, vert_vbo->data<float4>());
   }
   else {
     MutableSpan<float> vbo_data = vert_vbo->data<float>();

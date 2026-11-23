@@ -255,6 +255,8 @@ def build(context, guide):
         biped_endpoints.build(rig, guide)
         from . import biped_roundness
         biped_roundness.build(rig, guide, bind_plan)
+        if guide.get("xbiped"):
+            biped_skeleton.bind_neutral_outputs(context, rig, bind_plan)
         for name, frame in widget_frames.items():
             p = rig.pose.bones[name]
             p.custom_shape.data.transform(p.bone.matrix_local.inverted_safe() @ frame)

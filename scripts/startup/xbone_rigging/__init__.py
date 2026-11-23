@@ -353,6 +353,8 @@ def switch_guide_rig(context, operator, target, mode):
         operator.report({'WARNING'}, str(exc))
         return {'CANCELLED'}
 
+    if mode == 'POSE':
+        set_controls_visible(target, True)
     source.hide_set(True, view_layer=layer)
     return {'FINISHED'}
 
@@ -511,6 +513,77 @@ class RIGGING_PT_guide(RiggingPanel, Panel):
         layout.operator("xbone.build_rig", text=label)
 
 
+_CONTROL_COLLECTIONS = ("FK", "IK", "Biped Display", "Additional FK")
+_CONTROL_VISIBILITY = "xbone_control_visibility"
+
+
+def control_collections(rig):
+    collections = rig.data.collections_all
+    return [collections[name] for name in _CONTROL_COLLECTIONS if name in collections]
+
+
+def set_controls_visible(rig, show):
+    if (not rig or rig.get("rigging_role") != "RIG" or not rig.is_editable or
+            not rig.data.is_editable or rig.data.collections.is_solo_active):
+        return False
+    controls = control_collections(rig)
+    visible = {c.name: True for c in controls if c.is_visible}
+    if not controls or bool(visible) == show:
+        return False
+    if show:
+        restore = rig.get(_CONTROL_VISIBILITY, ("FK", "IK", "Biped Display"))
+        for c in controls:
+            c.is_visible = c.name in restore
+        if _CONTROL_VISIBILITY in rig:
+            del rig[_CONTROL_VISIBILITY]
+    else:
+        rig[_CONTROL_VISIBILITY] = visible
+        for c in controls:
+            c.is_visible = False
+    return True
+
+
+class XBONE_OT_toggle_controls(Operator):
+    bl_idname = "xbone.toggle_controls"
+    bl_label = "Show Controllers"
+    bl_description = "Hide the rig controls or restore the previously visible control collections"
+    bl_options = {'UNDO'}
+
+    @staticmethod
+    def rig(context):
+        target = getattr(context, "xbone_display_rig", None)
+        if target:
+            return target
+        obj = context.active_object
+        if obj and obj.type == 'MESH':
+            return obj.find_armature()
+        return obj
+
+    @classmethod
+    def poll(cls, context):
+        rig = cls.rig(context)
+        return bool(rig and rig.type == 'ARMATURE' and rig.get("rigging_role") == "RIG"
+                    and rig.is_editable and rig.data.is_editable and not rig.data.collections.is_solo_active)
+
+    def execute(self, context):
+        rig = self.rig(context)
+        set_controls_visible(rig, not any(c.is_visible for c in control_collections(rig)))
+        return {'FINISHED'}
+
+
+def draw_rig_visibility(layout, rig):
+    if not rig or rig.type != 'ARMATURE' or rig.get("rigging_role") != "RIG":
+        return
+    row = layout.row(align=True)
+    row.enabled = not rig.data.collections.is_solo_active
+    row.context_pointer_set("xbone_display_rig", rig)
+    row.operator("xbone.toggle_controls", icon='POSE_HLT',
+                 depress=any(c.is_visible for c in control_collections(rig)))
+    skeleton = rig.data.collections_all.get("Skeleton")
+    if skeleton:
+        row.prop(skeleton, "is_visible", text="Show Bones", icon='BONE_DATA', toggle=True)
+
+
 class RIGGING_PT_rig(RiggingPanel, Panel):
     bl_label = "Rig"
 
@@ -526,12 +599,12 @@ class RIGGING_PT_rig(RiggingPanel, Panel):
             layout.operator("object.mode_set", text="Pose Rig", icon='POSE_HLT').mode = 'POSE'
         if smart_guide.XBONE_OT_edit_landmarks.poll(context):
             layout.operator("xbone.edit_landmarks")
-        skeleton = obj.data.collections.get("Skeleton")
-        if skeleton:
-            layout.prop(skeleton, "is_visible", text="Show Skeleton")
+        draw_rig_visibility(layout, obj)
         extra = obj.data.collections.get("Additional FK")
         if extra and obj.data.collections.get("Biped Display"):
-            layout.prop(extra, "is_visible", text="Show Additional FK Controls")
+            row = layout.row()
+            row.enabled = _CONTROL_VISIBILITY not in obj and not obj.data.collections.is_solo_active
+            row.prop(extra, "is_visible", text="Show Additional FK Controls")
 
 
 class RIGGING_PT_hands(RiggingPanel, Panel):
@@ -611,7 +684,7 @@ class RIGGING_PT_pose(RiggingPanel, Panel):
 classes = (ARMATURE_OT_resample_chain, XBONE_OT_workspace, XBONE_OT_biped_guide, XBONE_OT_import_guide, XBONE_OT_new_guide,
            XBONE_OT_copy_guide, XBONE_OT_tag_limb, XBONE_OT_add_component, XBONE_OT_build_rig,
            XBONE_OT_match_limb, XBONE_OT_edit_source_guide, XBONE_OT_return_to_rig, XBONE_OT_symmetrize_guide,
-           XBONE_OT_toggle_guide_display, RIGGING_HT_header, RIGGING_PT_templates,
+           XBONE_OT_toggle_guide_display, XBONE_OT_toggle_controls, RIGGING_HT_header, RIGGING_PT_templates,
            *smart_guide.classes, RIGGING_PT_guide, RIGGING_PT_rig, *mesh_bindings.classes, RIGGING_PT_hands, RIGGING_PT_pose)
 _register, _unregister = bpy.utils.register_classes_factory(classes)
 

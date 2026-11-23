@@ -70,9 +70,9 @@ def update_preview(self, context):
     layer = current_layer(state)
     if not layer or "_skin_source" not in obj:
         return
-    if state.display == 'MASK' or (state.display == 'LAYER' and (state.target == 'MASK' or layer.is_group)):
+    if state.display == 'MASK' or (state.display in {'LAYER', 'AUTO'} and (state.target == 'MASK' or layer.is_group)):
         key = layer_key(state, layer) + "_mask"
-    elif state.display == 'FINAL':
+    elif state.display in {'FINAL', 'AUTO'}:
         key = state.prefix + "_r" + str(state.influence)
     else:
         key = layer_key(state, layer) + "_" + str(state.influence)
@@ -80,6 +80,17 @@ def update_preview(self, context):
     obj["_skin_active_channel"] = state.influence
     obj.data.update_gpu_tag()
     obj.update_tag(refresh={'DATA'})
+
+
+def layer_contribution(weights, mix, group_coverage=None):
+    """Authored weights define relative influence within a layer; its mask controls blending."""
+    if group_coverage is not None:
+        # The child stack already contains its coverage-weighted contribution.
+        return {j: w * mix for j, w in weights.items()}, 1 - mix * group_coverage
+    total = sum(weights.values())
+    painted = total > 0
+    divisor = np.where(painted, total, 1.0)
+    return {j: (w / divisor) * mix for j, w in weights.items()}, 1 - mix * painted
 
 
 def compose_stack(obj, layers, joint_ids):
@@ -96,27 +107,32 @@ def compose_stack(obj, layers, joint_ids):
         else:
             weights = {j: read_values(mesh, prefix + str(j)) for j in joint_ids
                        if mesh.attributes.get(prefix + str(j)) is not None}
-            coverage = np.minimum(sum(weights.values()), 1.0)
+            coverage = None
         if not weights:
             continue
         k = layer.opacity * read_values(mesh, prefix + "mask", 1)
-        remaining = 1 - k * coverage
+        weights, remaining = layer_contribution(weights, k, coverage)
         transmission *= remaining
         for values in results.values():
             values *= remaining
         for j, values in weights.items():
             if j in results:
-                results[j] += k * values
+                results[j] += values
             else:
-                results[j] = k * values
+                results[j] = values
     return results, transmission
+
+
+def muted_channels(obj):
+    return {int(key) for key in obj.get("_skin_muted", {})}
 
 
 def composite(obj):
     clear_influence_cache()
     state = obj.skin_layers
     mesh = obj.data
-    results, _ = compose_stack(obj, children(state), {g.skin_channel for g in channels(obj)})
+    ids = {g.skin_channel for g in channels(obj)} - muted_channels(obj)
+    results, _ = compose_stack(obj, children(state), ids)
     result_prefix = state.prefix + "_r"
     for key in tuple(mesh.attributes.keys()):
         if key.startswith(result_prefix) and key[len(result_prefix):].isdigit():
@@ -124,6 +140,7 @@ def composite(obj):
                 mesh.attributes.remove(mesh.attributes[key])
     for j, values in results.items():
         write_values(mesh, result_prefix + str(j), values)
+    obj["_skin_mix_version"] = 1
     update_preview(state, None)
     mesh.update()
 
@@ -180,6 +197,39 @@ def ensure_paint_influence(obj, groups):
     return []
 
 
+PREVIEW_PRESETS = (
+    ('LINEAR', "Linear", 1.0, 1.0),
+    ('LOW', "Low Weights", 0.5, 1.0),
+    ('TRACE', "Trace Weights (0-0.1)", 0.5, 0.1),
+    ('HIGH', "High Weights", 2.0, 1.0),
+)
+
+
+class PAINT_OT_skin_preview_preset(Operator):
+    bl_idname = "paint.skin_preview_preset"
+    bl_label = "Weight Display Preset"
+    bl_options = {'UNDO'}
+
+    preset: EnumProperty(items=[(key, label, "") for key, label, _, _ in PREVIEW_PRESETS])
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return bool(obj and obj.type == 'MESH' and obj.is_editable and "_skin_source" in obj)
+
+    def execute(self, context):
+        state = context.active_object.skin_layers
+        for key, _, exponent, white in PREVIEW_PRESETS:
+            if self.preset == key:
+                state.preview_exponent, state.preview_white = exponent, white
+                break
+        return {'FINISHED'}
+
+
+def update_display_mapping(self, context):
+    self.id_data.update_tag()
+
+
 class SkinWeightSettings(PropertyGroup):
     prefix: StringProperty()
     vertex_count: IntProperty()
@@ -193,11 +243,22 @@ class SkinWeightSettings(PropertyGroup):
     target: EnumProperty(name="Paint Target", items=[
         ('WEIGHT', "Weight", "Paint joint weights"), ('MASK', "Mask", "Paint layer coverage")],
         update=update_preview)
-    display: EnumProperty(name="Preview", items=[
-        ('LAYER', "Layer", "Current layer"), ('MASK', "Mask", "Layer mask"),
-        ('FINAL', "Final", "Composited joint weight")], update=update_preview)
+    display: EnumProperty(name="Preview", default='LAYER', items=[
+        ('LAYER', "Layer Only", "Weights authored on the selected layer"),
+        ('MASK', "Layer Mask", "Mask of the selected layer"),
+        ('FINAL', "Stack Result", "Composited weights used for deformation"),
+        ('AUTO', "Paint Result", "Show the stack result for weights and the active mask for mask painting")],
+        update=update_preview)
+    preview_exponent: FloatProperty(name="Exponent", default=0.5, min=0.1, max=4, precision=2,
+                                    description="Lower values brighten small weights", update=update_display_mapping)
+    preview_white: FloatProperty(name="White Point", default=1, min=0.001, max=1, precision=3,
+                                 description="Weight displayed at full intensity", update=update_display_mapping)
     brush: EnumProperty(name="Brush", items=[
-        ('REPLACE', "Replace", ""), ('ADD', "Add", ""), ('SCALE', "Scale", ""), ('SMOOTH', "Smooth", "")])
+        ('REPLACE', "Replace", ""), ('ADD', "Add", ""), ('SCALE', "Scale", ""), ('SMOOTH', "Smooth", ""),
+        ('HARD', "Hard Replace", "Set every vertex inside the radius to the target value in one dab")])
+    brush_area: EnumProperty(name="Brush Area", default='SURFACE', items=[
+        ('SURFACE', "Surface", "Paint connected vertices around the hit face"),
+        ('VOLUME', "Volume", "Paint vertices on any shell of this mesh inside the 3D brush sphere")])
     value: FloatProperty(name="Weight", default=1, min=0, max=1)
     strength: FloatProperty(name="Strength", default=1.0, min=0, max=1)
     radius: IntProperty(name="Radius", subtype='PIXEL', min=1, max=2000, default=50)
@@ -347,15 +408,12 @@ def merge_down(obj, lower, upper):
     remove_subtree(obj, state.layers[layer_index(state, upper_key)])
     merged = add_layer(obj, name, parent)
     prefix = layer_key(state, merged) + "_"
-    # Only a non-normalized source can require separate mask coverage to preserve
-    # both the output vector and its transmission to arbitrary lower siblings.
+    # Preserve the merged stack's effective coverage independently of bone ratios.
     coverage = 1 - trans
-    total = sum(values.values())
-    mask = np.where((coverage > 0) & (total > coverage + 1e-6), coverage, 1.0)
+    mask = np.where(coverage > 0, coverage, 1.0)
     write_values(obj.data, prefix + "mask", mask)
     for channel, weight in values.items():
-        normalized = weight / mask
-        write_values(obj.data, prefix + str(channel), normalized)
+        write_values(obj.data, prefix + str(channel), weight / mask)
     if next_key:
         destination = layer_index(state, next_key)
         state.layers.move(len(state.layers) - 1, destination)
@@ -490,6 +548,16 @@ class PAINT_OT_skin_bake(Operator):
         return {'FINISHED'}
 
 
+def empty_selection_mask(mesh):
+    for prop, elements in (("use_paint_mask", mesh.polygons), ("use_paint_mask_vertex", mesh.vertices)):
+        if getattr(mesh, prop):
+            selected = np.empty(len(elements), dtype=bool)
+            elements.foreach_get("select", selected)
+            if not selected.any():
+                return prop
+    return None
+
+
 def paintable_vertices(mesh):
     allowed = np.ones(len(mesh.vertices), dtype=bool)
     if mesh.use_paint_mask_vertex:
@@ -536,11 +604,22 @@ class SkinBrush:
         self.weights = {}
         self.original = {}
         self.allowed = paintable_vertices(mesh)
+        if not self.allowed.any():
+            mask = empty_selection_mask(mesh)
+            if mask == "use_paint_mask":
+                raise ValueError("Face Selection Mask is on. Select faces or turn off the face mask to paint")
+            if mask == "use_paint_mask_vertex":
+                raise ValueError("Vertex Selection Mask is on. Select vertices or turn off the vertex mask to paint")
+            raise ValueError("No visible vertices are available in the current paint selection")
         groups = channels(obj)
         if not self.mask:
             groups = ensure_paint_influence(obj, groups)
             if not groups:
                 raise ValueError("Choose a deform bone to paint")
+        muted = muted_channels(obj)
+        if not self.mask and state.influence in muted:
+            raise ValueError("Enable this bone's skin influence before painting it")
+        groups = [g for g in groups if g.skin_channel not in muted]
         self.active = "mask" if self.mask else str(state.influence)
         self.mirror_pair = None
         if stroke and obj.use_mesh_mirror_x:
@@ -552,14 +631,17 @@ class SkinBrush:
                 group = next(g for g in groups if g.skin_channel == state.influence)
                 other = mirrored_bone(obj, group)
                 if other:
-                    self.mirror_active = str(group_for_bone(obj, other.name).skin_channel)
-                    groups = channels(obj)
-                    self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
+                    other_channel = group_for_bone(obj, other.name).skin_channel
+                    if other_channel not in muted:
+                        self.mirror_active = str(other_channel)
+                        groups = [g for g in channels(obj) if g.skin_channel not in muted]
+                        self.mirror_x, self.mirror_pair = mirror_geometry(mesh)
         for channel in (["mask"] if self.mask else [str(g.skin_channel) for g in groups]):
             key = self.prefix + channel
             if key in mesh.attributes or channel == self.active or (self.mirror_pair is not None and channel == self.mirror_active):
                 self.weights[channel] = read_values(mesh, key, 1.0 if self.mask else 0.0)
                 self.original[channel] = self.weights[channel].copy() if key in mesh.attributes else None
+        self.muted_members = (used_channels(obj, self.layer) & muted) if muted and not self.mask else set()
         self.nonzero_counts = {key: np.count_nonzero(values) for key, values in self.weights.items()} if not self.mask else {}
         # Upper layers are an affine transform of the current layer result. Cache both
         # sides once per stroke; dabs only recomposite vertices inside the brush.
@@ -634,7 +716,9 @@ class SkinBrush:
             self.smooth(indices, amount)
         else:
             old = active[indices]
-            if mode == 'ADD':
+            if mode == 'HARD':
+                new = np.full_like(old, state.value)
+            elif mode == 'ADD':
                 new = np.minimum(1.0, old + amount * state.value)
             elif mode == 'SCALE':
                 new = old * (1.0 + amount * (state.value - 1.0))
@@ -650,10 +734,8 @@ class SkinBrush:
         for channel, values in self.weights.items():
             self.store_changed(self.prefix + channel, values, indices)
         k = self.layer.opacity * self.layer_mask[indices]
-        coverage = (self.group_coverage[indices] if self.group_coverage is not None else
-                    np.minimum(sum(values[indices] for values in self.local.values()), 1.0))
-        remaining = 1 - k * coverage
-        result = {j: values[indices] * k for j, values in self.local.items()}
+        coverage = self.group_coverage[indices] if self.group_coverage is not None else None
+        result, remaining = layer_contribution({j: w[indices] for j, w in self.local.items()}, k, coverage)
         for below, bottom_t, above, top_t, parent_mix in self.contexts:
             for j in result.keys() | below.keys() | above.keys():
                 value = result.get(j, 0)
@@ -679,7 +761,7 @@ class SkinBrush:
                 self.nonzero_counts[key] += np.count_nonzero(self.weights[key][indices]) - old
             cache_key = (self.obj.session_uid, self.mesh.session_uid)
             members = {int(key) for key, count in self.nonzero_counts.items() if count}
-            _influences[(*cache_key, self.layer.key)] = members
+            _influences[(*cache_key, self.layer.key)] = members | self.muted_members
             parent = self.layer.parent_key
             while parent:
                 _influences.pop((*cache_key, parent), None)
@@ -706,6 +788,41 @@ class SkinBrush:
                 self.mesh.attributes.remove(self.mesh.attributes[key])
         composite(self.obj)
 
+    def surface_vertices(self, evaluated, face, world, radius):
+        vertices = evaluated.data.vertices
+        matrix = evaluated.matrix_world
+        queue = list(self.mesh.polygons[face].vertices)
+        # Walk along the hit surface. Disconnected or overlapping shells stay independent.
+        self.build_adjacency()
+        visited = set()
+        picked, distances = [], []
+        while queue:
+            i = int(queue.pop())
+            if i in visited:
+                continue
+            visited.add(i)
+            if not self.allowed[i]:
+                continue
+            distance = (matrix @ vertices[i].co - world).length
+            if distance >= radius:
+                continue
+            picked.append(i)
+            distances.append(distance)
+            queue.extend(self.neighbors(i))
+        return np.asarray(picked, dtype=np.intp), np.asarray(distances)
+
+    def volume_vertices(self, evaluated, location, radius):
+        # A dab can change the deformed mesh. Read current positions each time and
+        # measure world distances so a scaled object still has a spherical brush.
+        vertices = evaluated.data.vertices
+        coordinates = np.empty(len(vertices) * 3, dtype=np.float32)
+        vertices.foreach_get("co", coordinates)
+        coarse = coordinates.reshape(-1, 3)[:len(self.allowed)]
+        delta = (coarse - np.asarray(location)) @ np.asarray(evaluated.matrix_world.to_3x3()).T
+        squared = np.einsum('ij,ij->i', delta, delta)
+        picked = np.flatnonzero(self.allowed & (squared < radius * radius))
+        return picked, np.sqrt(squared[picked])
+
     def dab(self, context, event):
         from bpy_extras.view3d_utils import (
             region_2d_to_location_3d, region_2d_to_origin_3d, region_2d_to_vector_3d,
@@ -722,38 +839,24 @@ class SkinBrush:
         hit, location, _, face = evaluated.ray_cast(*ray)
         if not hit or not 0 <= face < len(self.mesh.polygons):
             return False
-        queue = list(self.mesh.polygons[face].vertices)
         world = matrix @ location
         state = self.obj.skin_layers
         edge_world = region_2d_to_location_3d(region, view, (mouse[0] + state.radius, mouse[1]), world)
         radius = max((edge_world - world).length, 1e-10)
-        vertices = evaluated.data.vertices
-        # Walk along the hit surface. Disconnected or overlapping shells stay independent.
-        self.build_adjacency()
-        visited = set()
-        picked, falloff = [], []
-        while queue:
-            i = int(queue.pop())
-            if i in visited:
-                continue
-            visited.add(i)
-            if not self.allowed[i]:
-                continue
-            distance = (matrix @ vertices[i].co - world).length
-            if distance >= radius:
-                continue
-            picked.append(i)
-            t = 1 - distance / radius
-            falloff.append(t * t * (3 - 2 * t))
-            queue.extend(self.neighbors(i))
+        if state.brush_area == 'VOLUME':
+            picked, distances = self.volume_vertices(evaluated, location, radius)
+        else:
+            picked, distances = self.surface_vertices(evaluated, face, world, radius)
+        t = 1 - distances / radius
+        falloff = t * t * (3 - 2 * t)
         pressure = event.pressure if event.is_tablet else 1.0
         mode = 'SMOOTH' if event.shift else state.brush
-        amounts = np.asarray(falloff) * state.strength * pressure
-        if self.mirror_pair is None or not picked:
+        amounts = falloff * state.strength * pressure
+        if self.mirror_pair is None or not len(picked):
             return self.paint(picked, amounts, mode)
         ids = np.asarray(picked)
-        # Use the side with the strongest brush sample, measured in rest-space.
-        sign = 1 if self.mirror_x[ids[np.argmax(amounts)]] >= 0 else -1
+        # Choose the closest hit, then determine its mirror side in rest space.
+        sign = 1 if self.mirror_x[ids[np.argmin(distances)]] >= 0 else -1
         keep = ((self.mirror_x[ids] * sign >= 0) | (self.mirror_pair[ids] < 0) |
                 (self.mirror_pair[ids] == ids))
         ids, amounts = ids[keep], amounts[keep]
@@ -783,6 +886,26 @@ def brush_error(obj):
             return "Enable the active layer and its parent groups before painting"
         node = state.layers[layer_index(state, node.parent_key)] if node.parent_key else None
     return topology_error(obj)
+
+
+class PAINT_OT_native_weight_mask_toggle(Operator):
+    bl_idname = "paint.native_weight_mask_toggle"
+    bl_label = "Toggle Native Weight Paint Selection Mask"
+    bl_options = {'UNDO'}
+
+    target: EnumProperty(items=[('FACE', "Face", ""), ('VERTEX', "Vertex", "")])
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'PAINT_WEIGHT' and "_skin_source" not in context.active_object
+
+    def execute(self, context):
+        mesh = context.active_object.data
+        if self.target == 'FACE':
+            mesh.use_paint_mask = not mesh.use_paint_mask
+        else:
+            mesh.use_paint_mask_vertex = not mesh.use_paint_mask_vertex
+        return {'FINISHED'}
 
 
 class PAINT_OT_weight_brush_scale_size(Operator):
@@ -876,27 +999,38 @@ class PAINT_OT_skin_layer_stroke(Operator):
 
 
 classes = (
-    SkinWeightLayer, SkinWeightSettings, PAINT_OT_skin_source, PAINT_OT_skin_layer_edit,
-    PAINT_OT_skin_influence, PAINT_OT_skin_bake, PAINT_OT_weight_brush_scale_size, PAINT_OT_skin_flood,
+    SkinWeightLayer, SkinWeightSettings, PAINT_OT_skin_preview_preset, PAINT_OT_skin_source, PAINT_OT_skin_layer_edit,
+    PAINT_OT_skin_influence, PAINT_OT_skin_bake, PAINT_OT_native_weight_mask_toggle, PAINT_OT_weight_brush_scale_size, PAINT_OT_skin_flood,
     PAINT_OT_skin_layer_stroke,
 )
 
 
 _subscription_owner = object()
+_active_pose_rigs = set()
 
 
 def synchronize_tools():
+    posing = set()
     for window in bpy.context.window_manager.windows:
         with bpy.context.temp_override(window=window):
             context = bpy.context
             obj = context.active_object
+            if context.mode == 'POSE' and obj and obj.get("rigging_role") == "RIG":
+                posing.add(obj.session_uid)
+                if obj.session_uid not in _active_pose_rigs:
+                    from xbone_rigging import set_controls_visible
+                    set_controls_visible(obj, True)
             if context.mode != 'PAINT_WEIGHT' or not obj:
                 continue
             tool = context.workspace.tools.from_space_view3d_mode('PAINT_WEIGHT', create=False)
             is_layer_brush = tool and tool.idname == "builtin.skin_layer_brush"
             layered = "_skin_source" in obj
+            if layered and not obj.skin_layers.is_property_set("display") and obj.is_editable:
+                update_preview(obj.skin_layers, context)
             if bool(is_layer_brush) != layered:
                 activate_paint_tool(context, obj, layered)
+    _active_pose_rigs.clear()
+    _active_pose_rigs.update(posing)
 
 
 def queue_tool_sync():
@@ -906,16 +1040,28 @@ def queue_tool_sync():
 
 @bpy.app.handlers.persistent
 def subscribe_tools(_):
+    _active_pose_rigs.clear()
     bpy.msgbus.clear_by_owner(_subscription_owner)
     for key in ((bpy.types.LayerObjects, "active"), (bpy.types.Window, "workspace"), (bpy.types.Object, "mode")):
         bpy.msgbus.subscribe_rna(key=key, owner=_subscription_owner, args=(), notify=queue_tool_sync)
     queue_tool_sync()
 
 
+@bpy.app.handlers.persistent
+def refresh_saved_composites(_):
+    # The modifier reads serialized result attributes directly, even in Object Mode.
+    for obj in bpy.data.objects:
+        if (obj.type == 'MESH' and obj.is_editable and obj.data.is_editable and
+                "_skin_source" in obj and obj.get("_skin_mix_version", 0) < 1 and
+                rig_modifier(obj) and not topology_error(obj)):
+            composite(obj)
+
+
 def register():
     bpy.types.Object.skin_layers = PointerProperty(type=SkinWeightSettings)
     for handlers in (bpy.app.handlers.load_post, bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.append(clear_influence_cache)
+    bpy.app.handlers.load_post.append(refresh_saved_composites)
     bpy.app.handlers.load_post.append(subscribe_tools)
     subscribe_tools(None)
 
@@ -924,6 +1070,7 @@ def unregister():
     for handlers in (bpy.app.handlers.load_post, bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.remove(clear_influence_cache)
     clear_influence_cache()
+    bpy.app.handlers.load_post.remove(refresh_saved_composites)
     bpy.app.handlers.load_post.remove(subscribe_tools)
     bpy.msgbus.clear_by_owner(_subscription_owner)
     if bpy.app.timers.is_registered(synchronize_tools):

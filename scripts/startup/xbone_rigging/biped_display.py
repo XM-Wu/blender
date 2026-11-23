@@ -108,35 +108,34 @@ def apply(rig, guide, fk):
         role = data["role"]
         if role == "FK":
             target = fk.get(owner)
-            if target and name in pivots and name.split("_")[0] in {
-                    "finger", "thumb", "tongue", "foot", "meta", "mouth", "thumbRoll", "eye", "eyeslook",
-                    "spine", "neck", "global", "local", "body", "shoulder", "leg", "arm"}:
-                original = edit[target].matrix.copy()
-                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
-                ref = edit.new("MCH.FKOutput." + owner)
-                ref.head = original.translation
-                ref.tail = ref.head + Vector((0, scale / 2, 0))
-                ref.matrix = original
-                ref.parent = edit[target]
-                ref.use_deform = False
-                for group in list(ref.collections):
-                    group.unassign(ref)
-                arm.collections["Mechanism"].assign(ref)
-                fk_outputs[owner] = ref.name
         elif role == "display":
             target = helper(name, owner, edit[owner].head)
-            if name in pivots:
-                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
         else:
             target = role + "." + owner
-            if target in edit and name in pivots:
-                edit[target].matrix = transforms[label] @ read_frame(pivots[name], scale, basis)
         if not target or target not in edit:
             continue
-        frame = edit[target].matrix.inverted_safe()
+
+        pivot = read_frame(pivots[name], scale, basis)
+        original = edit[target].matrix.copy()
+        edit[target].matrix = transforms[label] @ pivot
+        if role == "FK":
+            ref = edit.new("MCH.FKOutput." + owner)
+            ref.head = original.translation
+            ref.tail = ref.head + Vector((0, scale / 2, 0))
+            ref.matrix = original
+            ref.parent = edit[target]
+            ref.use_deform = False
+            for group in list(ref.collections):
+                group.unassign(ref)
+            arm.collections["Mechanism"].assign(ref)
+            fk_outputs[owner] = ref.name
+
+        # Guide stretch places the pivot. The wire is authored in that pivot's
+        # local space and already includes the character-wide display scale.
+        to_local = pivot.inverted()
         lines, _ = widgets.setdefault(target, ([], data["color"]))
         for line in data["lines"]:
-            lines.append([frame @ point(label, p) for p in line])
+            lines.append([to_local @ xyz(p, scale, up) for p in line])
 
     for n in control_names - widgets.keys():
         for collection in list(edit[n].collections):

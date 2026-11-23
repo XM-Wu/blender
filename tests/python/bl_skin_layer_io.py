@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
+import bmesh
 import bpy
 import numpy as np
 from bl_operators import skin_layers as skin
@@ -107,4 +108,70 @@ with tempfile.TemporaryDirectory() as temp:
             assert False, "Expected an interrupted import"
     assert not upper.skin_layers.prefix and not upper.skin_layers.layers and not upper.vertex_groups
     assert attr_names == set(upper.data.attributes.keys())
+    edited = make_mesh("Edit and reimport", [v.co[:] for v in source.data.vertices],
+                       [p.vertices[:] for p in source.data.polygons], [(0, 0), (1, 0), (0, 1), (1, 1)])
+    assert op(filepath=fixture, mode='vertexId') == {'FINISHED'}
+    backup = str(Path(temp) / "before-edit.json")
+    assert bpy.ops.paint.skin_export_layers(filepath=backup) == {'FINISHED'}
+    initial_names = [layer.name for layer in edited.skin_layers.layers]
+    bm = bmesh.new()
+    bm.from_mesh(edited.data)
+    bmesh.ops.poke(bm, faces=list(bm.faces))
+    bm.to_mesh(edited.data)
+    bm.free()
+    assert skin.topology_error(edited) and len(edited.data.vertices) == 6
+    current = str(Path(temp) / "after-edit.json")
+    assert bpy.ops.paint.skin_export_layers(filepath=current) == {'FINISHED'}
+    snapshot = json.loads(Path(current).read_text())
+    assert len(snapshot["mesh"]["vertPositions"]) == 18
+    assert all(len(node["mask"]) == 6 for node in snapshot["layers"])
+    old_prefix = edited.skin_layers.prefix
+    stale_plan = io.plan_import(json.loads(Path(backup).read_text()), edited, 'closestPoint', 100, None)
+    before_attrs = set(edited.data.attributes.keys())
+    with patch.object(skin, 'write_values', side_effect=RuntimeError("interrupted recovery")):
+        try:
+            io.append_layers(bpy.context, edited, stale_plan)
+        except RuntimeError as error:
+            assert str(error) == "interrupted recovery"
+        else:
+            assert False, "Expected a failed topology recovery"
+    assert edited.skin_layers.prefix == old_prefix and skin.topology_error(edited)
+    assert before_attrs == set(edited.data.attributes.keys())
+    assert [l.name for l in edited.skin_layers.layers] == initial_names
+    sibling = edited.copy()
+    bpy.context.collection.objects.link(sibling)
+    edited.skin_layers.index = initial_names.index("Arm weights")
+    edited.data.use_paint_mask = True
+    for face in edited.data.polygons:
+        face.select = False
+    assert not skin.paintable_vertices(edited.data).any()
+    assert op(filepath=backup, mode='closestPoint') == {'FINISHED'}
+    assert not skin.topology_error(edited) and edited.skin_layers.vertex_count == edited["_skin_vertex_count"] == 6
+    assert not edited.data.use_paint_mask and skin.paintable_vertices(edited.data).all()
+    assert skin.current_layer(edited.skin_layers).name == "Arm weights"
+    assert skin.topology_error(sibling) and old_prefix in sibling.data.attributes
+    assert [l.name for l in edited.skin_layers.layers] == initial_names
+    def check_interpolated():
+        x, y = np.array([v.co[:2] for v in edited.data.vertices]).T + .5
+        check(edited, .3*x + .7*y, .1 + .4*x + .6*y - .3*np.maximum(0, x+y-1))
+    check_interpolated()
+    # A same-count reorder still invalidates the marker and needs spatial matching.
+    bm = bmesh.new()
+    bm.from_mesh(edited.data)
+    bm.verts.sort(key=lambda v: -v.index)
+    bm.to_mesh(edited.data)
+    bm.free()
+    assert skin.topology_error(edited)
+    edited.data.use_paint_mask_vertex = True
+    for i, vertex in enumerate(edited.data.vertices):
+        vertex.select = i == 0
+    assert op(filepath=backup, mode='uvSpace') == {'FINISHED'}
+    assert not skin.topology_error(edited)
+    assert [l.name for l in edited.skin_layers.layers] == initial_names
+    check_interpolated()
+    assert edited.data.use_paint_mask_vertex and np.flatnonzero(skin.paintable_vertices(edited.data)).tolist() == [0]
+    edited.data.vertices[0].select = False
+    assert op(filepath=backup, mode='closestPoint', replace_existing=True)
+    assert not edited.data.use_paint_mask_vertex == {'FINISHED'}
+    assert [l.name for l in edited.skin_layers.layers] == initial_names
 print("ngSkinTools layer IO: Maya fixture, hierarchy, masks, ID, 3D/UV barycentric matching and failed import passed")

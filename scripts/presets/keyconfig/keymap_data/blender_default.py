@@ -4750,6 +4750,7 @@ def km_pose(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         # Transform Actions.
         *_template_items_transform_actions(params, use_mirror=True),
 
@@ -5240,6 +5241,7 @@ def km_weight_paint(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS', "ctrl": True},
          {"properties": [("mode", 'INVERT')]}),
@@ -5264,10 +5266,10 @@ def km_weight_paint(params):
         )),
         ("wm.context_menu_enum", {"type": 'E', "value": 'PRESS', "alt": True},
          {"properties": [("data_path", "tool_settings.vertex_paint.brush.stroke_method")]}),
-        ("wm.context_toggle", {"type": 'ONE', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask")]}),
-        ("wm.context_toggle", {"type": 'TWO', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask_vertex")]}),
+        ("paint.native_weight_mask_toggle", {"type": 'ONE', "value": 'PRESS'},
+         {"properties": [("target", 'FACE')]}),
+        ("paint.native_weight_mask_toggle", {"type": 'TWO', "value": 'PRESS'},
+         {"properties": [("target", 'VERTEX')]}),
         ("wm.context_toggle", {"type": 'THREE', "value": 'PRESS'},
          {"properties": [("data_path", "weight_paint_object.data.use_paint_bone_selection")]}),
         ("wm.context_toggle", {"type": 'S', "value": 'PRESS', "shift": True},

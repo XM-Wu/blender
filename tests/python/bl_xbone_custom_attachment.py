@@ -25,11 +25,11 @@ def add_at(guide, parent, name, location):
 def check_chain(rig):
     pose = rig.pose.bones
     for name, parent, direction in (
-            ("Branch.L", "shoulder_L0_shoulder_jnt", points[1] - points[0]),
+            ("Branch.L", "clavicle_l", points[1] - points[0]),
             ("Segment.L", "Branch.L", points[2] - points[1]),
             ("Tip.L", "Segment.L", points[2] - points[1]),
-            ("Antenna.C", "neck_C0_head_jnt", None),
-            ("Cuff.L", "arm_L0_end_jnt", None)):
+            ("Antenna.C", "head", None),
+            ("Cuff.L", "hand_l", None)):
         joint, fk = pose[name], pose["FK." + name]
         assert joint.bone.use_deform and joint.parent.name == fk.parent.name == parent
         near(joint.head, fk.head)
@@ -65,7 +65,7 @@ assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
 rig.data.collections["Additional FK"].is_visible = True
 check_chain(rig)
-parent = rig.pose.bones["shoulder_L0_shoulder_jnt"]
+parent = rig.pose.bones["clavicle_l"]
 start = parent.matrix.inverted() @ rig.pose.bones["Branch.L"].head
 control = rig.pose.bones["FK.shoulder_L0"]
 control.rotation_mode = 'XYZ'
@@ -99,10 +99,10 @@ with tempfile.TemporaryDirectory() as directory:
     bpy.ops.wm.read_factory_settings(use_empty=True)
     assert bpy.ops.wm.xbone_fbx_import(filepath=fbx) == {'FINISHED'}
     arm, = (obj.data for obj in bpy.context.scene.objects if obj.type == 'ARMATURE')
-    assert arm.bones["Branch.L"].parent.name == "shoulder_L0_shoulder_jnt"
+    assert arm.bones["Branch.L"].parent.name == "clavicle_l"
     assert arm.bones["Segment.L"].parent.name == "Branch.L"
     assert arm.bones["Tip.L"].parent.name == "Segment.L"
-    assert arm.bones["Antenna.C"].parent.name == "neck_C0_head_jnt"
-    assert arm.bones["Cuff.L"].parent.name == "arm_L0_end_jnt"
+    assert arm.bones["Antenna.C"].parent.name == "head"
+    assert arm.bones["Cuff.L"].parent.name == "hand_l"
     assert all(not b.name.startswith(("Display.", "MCH.", "FK.")) for b in arm.bones)
 print("Custom shoulder, head and wrist attachments, live FK links and ring orientations passed")

@@ -47,6 +47,7 @@ struct DRW_MeshWeightState {
   short flags;
   char alert_mode;
   char skin_preview[64];
+  bool *skin_group_muted; /* #defgroup_len, only for a skin weight preview with muted bones. */
 
   /* Set of all selected bones for Multi-paint. */
   bool *defgroup_sel; /* #defgroup_len */

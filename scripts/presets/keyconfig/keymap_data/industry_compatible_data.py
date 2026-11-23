@@ -2502,6 +2502,7 @@ def km_pose(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         *_template_items_animation(),
         ("object.parent_set", {"type": 'P', "value": 'PRESS'}, None),
         ("pose.hide", {"type": 'H', "value": 'PRESS', "ctrl": True},
@@ -2917,6 +2918,7 @@ def km_weight_paint(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         # Brush Strokes
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS'},
          {"properties": [("mode", 'NORMAL')]}),
@@ -2937,10 +2939,10 @@ def km_weight_paint(params):
          {"properties": [("scalar", 1.0 / 0.9)]}),
         *_template_paint_radial_control("weight_paint", weight=True),
         # Mask Modes
-        ("wm.context_toggle", {"type": 'ONE', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask")]}),
-        ("wm.context_toggle", {"type": 'TWO', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask_vertex")]}),
+        ("paint.native_weight_mask_toggle", {"type": 'ONE', "value": 'PRESS'},
+         {"properties": [("target", 'FACE')]}),
+        ("paint.native_weight_mask_toggle", {"type": 'TWO', "value": 'PRESS'},
+         {"properties": [("target", 'VERTEX')]}),
         # Stabilize Stroke
         ("wm.context_toggle", {"type": 'L', "value": 'PRESS'},
          {"properties": [("data_path", "tool_settings.weight_paint.brush.use_smooth_stroke")]}),

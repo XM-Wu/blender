@@ -124,6 +124,17 @@ class Paints : Overlay {
         const auto preview = settings ? IDP_group_lookup_string(*settings, "_skin_preview") :
                                         std::nullopt;
         sub.push_constant("skin_colors", preview.has_value());
+        float2 mapping(1.0f);
+        if (preview && !preview->endswith("_mask")) {
+          mapping.x = 0.5f;
+          const IDProperty *skin = IDP_GetPropertyFromGroup_null(state.object_active->id.system_properties,
+                                                                "skin_layers");
+          if (skin && skin->type == IDP_GROUP) {
+            mapping.x = IDP_group_lookup_float(*skin, "preview_exponent").value_or(0.5f);
+            mapping.y = IDP_group_lookup_float(*skin, "preview_white").value_or(1.0f);
+          }
+        }
+        sub.push_constant("skin_mapping", mapping);
         sub.push_constant("opacity", state.overlay.weight_paint_mode_opacity);
         if (!shadeless) {
           /* Arbitrary light to give a hint of the geometry behind the weights. */

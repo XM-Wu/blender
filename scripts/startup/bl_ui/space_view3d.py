@@ -82,9 +82,12 @@ class VIEW3D_HT_tool_header(Header):
         if tool_mode == 'PAINT_WEIGHT' and "_skin_source" in context.active_object:
             state = context.active_object.skin_layers
             layout.prop(state, "brush", text="")
+            layout.prop(state, "brush_area", expand=True)
             layout.prop(state, "value")
             layout.prop(state, "radius")
-            layout.prop(state, "strength", slider=True)
+            strength = layout.row()
+            strength.enabled = state.brush != 'HARD'
+            strength.prop(state, "strength", slider=True)
             return
 
         # Active Tool
@@ -956,12 +959,11 @@ class VIEW3D_HT_header(Header):
             from .space_weight_layers import draw_source
             draw_source(layout, obj)
             layout.operator("paint.skin_switch_pose", text="Pose Rig", icon='POSE_HLT')
-            rig = obj.find_armature()
-            if rig and rig.get("rigging_role") == "RIG":
-                skeleton = rig.data.collections.get("Skeleton")
-                if skeleton:
-                    layout.prop(skeleton, "is_visible", text="Show Skeleton", toggle=True)
+            from xbone_rigging import draw_rig_visibility
+            draw_rig_visibility(layout, obj.find_armature())
         elif mode_string == 'POSE':
+            from xbone_rigging import draw_rig_visibility
+            draw_rig_visibility(layout, obj)
             bone = context.active_pose_bone
             if bone and bone.name in (obj.get("xbiped_hand_L"), obj.get("xbiped_hand_R")) and "grip" in bone:
                 layout.prop(bone, '["grip"]', text="Grip", slider=True)
@@ -9207,8 +9209,11 @@ class VIEW3D_PT_paint_weight_context_menu(Panel):
         if "_skin_source" in context.active_object:
             state = context.active_object.skin_layers
             layout.prop(state, "brush")
+            layout.prop(state, "brush_area", expand=True)
             layout.prop(state, "value", slider=True)
-            layout.prop(state, "strength", slider=True)
+            strength = layout.row()
+            strength.enabled = state.brush != 'HARD'
+            strength.prop(state, "strength", slider=True)
             layout.prop(state, "radius")
             return
 

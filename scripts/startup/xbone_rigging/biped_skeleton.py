@@ -153,6 +153,36 @@ def attachment_joint(parent, output):
     return "spine_C0_0_jnt"
 
 
+def bind_neutral_outputs(context, rig, joint_names):
+    """Bind fitted skin joints to the completed solver before adopting animation or posing."""
+    position = rig.data.pose_position
+    try:
+        rig.data.pose_position = 'POSE'
+        context.view_layer.update()
+        evaluated = rig.evaluated_get(context.evaluated_depsgraph_get())
+        offsets = {}
+        for name in joint_names:
+            joint = evaluated.pose.bones[name]
+            source = joint.constraints[-1].subtarget
+            offsets[name] = (source, evaluated.pose.bones[source].matrix.inverted() @ joint.bone.matrix_local)
+
+        # A full Child Of with a local owner and world-space bone target evaluates
+        # to rig_world @ solver_pose @ inverse_bind @ joint_rest for neutral local channels.
+        # This keeps the exported rest skeleton and cancels even a scaled neutral solver.
+        for name, (source, offset) in offsets.items():
+            joint = rig.pose.bones[name]
+            joint.constraints.remove(joint.constraints[-1])
+            bind = joint.constraints.new('CHILD_OF')
+            bind.name = "Skin Bind"
+            bind.target, bind.subtarget = rig, source
+            bind.owner_space, bind.target_space = 'LOCAL', 'WORLD'
+            bind.inverse_matrix = offset
+            bind.set_inverse_pending = False
+    finally:
+        rig.data.pose_position = position
+    context.view_layer.update()
+
+
 def build(rig, guide, output, skeleton, mechanism, fk):
     arm = rig.data
     guide_names = [b.name for b in skeleton.bones if "biped_locator" in b]

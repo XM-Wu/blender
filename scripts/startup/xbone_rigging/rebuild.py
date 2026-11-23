@@ -4,7 +4,7 @@ import json
 
 import bpy
 
-from . import builder
+from . import builder, skin_names
 from .biped_skeleton import even_samples, limb_samples
 
 
@@ -41,9 +41,10 @@ def generated_paths(rig):
 
 def division_layout(arm, *, guide=False):
     layout = {}
+    aliases = {b.get("xbiped_legacy_name", b.name) for b in arm.bones if b.use_deform}
     for b in arm.bones:
         name = b.get("biped_locator")
-        if not name or (not guide and name + "_0_jnt" not in arm.bones):
+        if not name or (not guide and name + "_0_jnt" not in aliases):
             continue
         if name in {"arm_L0", "arm_R0", "leg_L0", "leg_R0"}:
             layout[name] = limb_samples(b.get("div0", 2), b.get("div1", 2), b.get("supportJoints", True))
@@ -52,9 +53,8 @@ def division_layout(arm, *, guide=False):
     return layout
 
 
-def remap_weights(obj, component, old, new):
+def remap_weights(obj, old, new, group_names, target_names):
     """Distribute each weighted division between its nearest new neighbors."""
-    group_names = [f"{component}_{i}_jnt" for i in range(len(old))]
     groups = obj.vertex_groups
     by_index = {groups[n].index: i for i, n in enumerate(group_names) if n in groups}
     if not by_index:
@@ -78,7 +78,7 @@ def remap_weights(obj, component, old, new):
             groups[group_names[index]].remove([vertex.index])
         for index, weight in weights.items():
             if index not in needed:
-                name = f"{component}_{index}_jnt"
+                name = target_names[index]
                 needed[index] = groups.get(name) or groups.new(name=name)
             needed[index].add([vertex.index], weight, 'REPLACE')
 
@@ -159,8 +159,8 @@ def adopt(context, rig, fresh, meshes, changed):
     for mesh in meshes:
         if mesh.data.users > 1 or not mesh.data.is_editable:
             mesh.data = mesh.data.copy()
-        for component, (old, new) in changed.items():
-            remap_weights(mesh, component, old, new)
+        for layout in changed.values():
+            remap_weights(mesh, *layout)
     for path in new_paths:
         path.parent = rig
         for mod in path.modifiers:
@@ -210,7 +210,14 @@ def build(context, guide):
     old = division_layout(target.data) if target else {}
     new = division_layout(guide.data, guide=True)
     changed = {c: (old[c], new[c]) for c in old.keys() & new.keys() if old[c] != new[c]}
-    affected_groups = {f"{c}_{i}_jnt" for c in changed for i in range(len(old[c]))}
+    anatomical = guide.get("xbiped") and (not target or target.data.get(skin_names.SCHEME))
+    old_names = skin_names.name_map(target.data) if target and anatomical and changed else {}
+    new_names = skin_names.name_map(guide.data) if anatomical and changed else {}
+    for comp, (before, after) in list(changed.items()):
+        source = [f"{comp}_{i}_jnt" for i in range(len(before))]
+        dest = [f"{comp}_{i}_jnt" for i in range(len(after))]
+        changed[comp] = (before, after, [old_names.get(n, n) for n in source], [new_names.get(n, n) for n in dest])
+    affected_groups = {n for _, _, source, _ in changed.values() for n in source}
     meshes = [o for o in bpy.data.objects if changed and o.type == 'MESH'
               and any(m.type == 'ARMATURE' and m.object == target for m in o.modifiers)
               and not affected_groups.isdisjoint(o.vertex_groups.keys())]
@@ -221,6 +228,8 @@ def build(context, guide):
     before = {item.session_uid for ids in datablocks for item in ids}
     try:
         fresh = builder.build(context, guide)
+        if anatomical:
+            skin_names.apply(fresh)
     except Exception:
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')

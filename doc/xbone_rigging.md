@@ -42,6 +42,7 @@ Use **Left to Right** or **Right to Left** in the Guide panel to mirror guide po
 
 - **Biped Template** and **Game Biped Template** read the bundled mGear Shifter guides. **Import Shifter Template (.sgt)** reads templates made with the supported components. Set the source up axis and scale in the importer. The presets use Y up and scale factors of 0.1 and 0.01, respectively.
 - **Edit Guide** lets you place and rename joints before building. **New Custom Guide** starts with a root. In Edit Mode select the intended parent, then use **Add Guide Component** for FK joints, left or right arms, or legs. Each limb supplies three joint pivots and a bend plane.
+- **Show Controllers** and **Show Bones** in the Rigging panel and the 3D View headers for Pose and Weight Paint toggle the control shapes and deform skeleton independently. Entering Pose Mode restores the previously visible FK, IK and supplemental controls when the controllers are hidden. Returning to Weight Paint with Tab hides them again if the switch temporarily revealed them.
 - For an extra chain on XBiped, edit its guide, select the attachment joint and use **Add Guide Component → FK Joint**. Set the side and length, rename the joint, then add the next joint with the previous one active. Build or rebuild and enable **Show Additional FK Controls** to pose the new chain. The branch attaches to the skin joint of its parent component, preserving its guide offset for animation and FBX export. Generic FK rings face across the chain; a terminal ring follows the incoming segment. The FK joint retains its authored rotation axes.
 - To keep an existing skeleton's joint names, hierarchy and rest frames, select the XBone object and choose **Create Guide from Selected XBone**. Select a wrist or ankle in Edit Mode and choose **Toggle Two-Joint IK at Active Joint**. The two ancestors form the limb. Give a straight limb a small bend toward its intended elbow or knee direction.
 - **Build Rig** creates an XBone armature and opens Pose Mode. Bind the character mesh to that armature. Use **Guide / Rig** in the Rigging editor header to switch between editing the source guide and posing the existing rig. Edited joints stay on the guide across switches and file saves. Choose **Apply Guide and Rebuild** on the Guide panel to update the same rig object. Its mesh modifiers, Action and NLA tracks keep their targets. Matching control names retain their poses and animation paths. Changing classic Biped division counts distributes the existing division weights between neighboring new joints by position along the component. Renamed or removed controls may require animation-path edits.
@@ -79,6 +80,21 @@ Each XBiped arm has a separate **Elbow Glide** (0–4, default 1), **Forearm Rot
 scaled to forearm length. Rotate the outer elbow arc around local X in FK, or select
 **Elbow FK** in the Selector. In IK the wrist position, pole and independent wrist rotation
 controls remain available. XBiped arms also start with **Max Stretch = 1**.
+
+### XBiped deform bone names
+
+New XBiped rigs use anatomical skin joint names in Weight Paint, vertex groups and deform-only
+FBX export. The suffixes `_l` and `_r` denote the character's left and right. Rebuilding retains the rig's naming convention.
+
+With two divisions per segment and support joints enabled, the left leg runs from `thigh_l`
+through `thigh_roll_01_l`, `thigh_roll_02_l`, `knee_support_upper_l`, `knee_l`,
+`knee_support_lower_l`, `calf_l`, `calf_roll_01_l` and `calf_roll_02_l`, then
+`foot_l`, `ball_l` and `toe_l`. Use `knee_l` for the bend and `calf_l` for the shin shaft.
+Roll indices count along each limb segment. Changes to the division count retain the anatomical
+landmarks. The arm follows the same scheme with `clavicle`, `upperarm`, `elbow`, `lowerarm`
+and `hand`. Fingers use names such as `index_metacarpal_l` and `index_01_l` to `index_03_l`.
+The central chain starts at `pelvis` and continues through the numbered spine and neck joints to `head`.
+Skin Tools can resolve the earlier Shifter deform names when importing layer JSON.
 
 ### Hand controls
 

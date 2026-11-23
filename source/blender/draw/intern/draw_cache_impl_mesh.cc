@@ -267,6 +267,7 @@ static void mesh_cd_calc_used_gpu_layers(const Object &object,
 /** Reset the selection structure, deallocating heap memory as appropriate. */
 static void drw_mesh_weight_state_clear(DRW_MeshWeightState *wstate)
 {
+  MEM_SAFE_DELETE(wstate->skin_group_muted);
   MEM_SAFE_DELETE(wstate->defgroup_sel);
   MEM_SAFE_DELETE(wstate->defgroup_locked);
   MEM_SAFE_DELETE(wstate->defgroup_unlocked);
@@ -280,12 +281,16 @@ static void drw_mesh_weight_state_clear(DRW_MeshWeightState *wstate)
 static void drw_mesh_weight_state_copy(DRW_MeshWeightState *wstate_dst,
                                        const DRW_MeshWeightState *wstate_src)
 {
+  MEM_SAFE_DELETE(wstate_dst->skin_group_muted);
   MEM_SAFE_DELETE(wstate_dst->defgroup_sel);
   MEM_SAFE_DELETE(wstate_dst->defgroup_locked);
   MEM_SAFE_DELETE(wstate_dst->defgroup_unlocked);
 
   memcpy(wstate_dst, wstate_src, sizeof(*wstate_dst));
 
+  if (wstate_src->skin_group_muted) {
+    wstate_dst->skin_group_muted = MEM_dupalloc(wstate_src->skin_group_muted);
+  }
   if (wstate_src->defgroup_sel) {
     wstate_dst->defgroup_sel = MEM_dupalloc(wstate_src->defgroup_sel);
   }
@@ -311,6 +316,7 @@ static bool drw_mesh_weight_state_compare(const DRW_MeshWeightState *a,
   return a->defgroup_active == b->defgroup_active && a->defgroup_len == b->defgroup_len &&
          a->flags == b->flags && a->alert_mode == b->alert_mode &&
          STREQ(a->skin_preview, b->skin_preview) &&
+         drw_mesh_flags_equal(a->skin_group_muted, b->skin_group_muted, a->defgroup_len) &&
          a->defgroup_sel_count == b->defgroup_sel_count &&
          drw_mesh_flags_equal(a->defgroup_sel, b->defgroup_sel, a->defgroup_len) &&
          drw_mesh_flags_equal(a->defgroup_locked, b->defgroup_locked, a->defgroup_len) &&
@@ -330,6 +336,14 @@ static void drw_mesh_weight_state_extract(
   if (paint_mode && ob.id.properties) {
     if (auto name = IDP_group_lookup_string(*ob.id.properties, "_skin_preview")) {
       STRNCPY(wstate->skin_preview, name->c_str());
+      const IDProperty *muted = IDP_GetPropertyTypeFromGroup(ob.id.properties, "_skin_muted", IDP_GROUP);
+      if (muted && wstate->defgroup_len && !name->endswith("_mask")) {
+        wstate->skin_group_muted = MEM_new_array_uninitialized<bool>(wstate->defgroup_len, __func__);
+        for (const auto [index, group] : mesh.vertex_group_names.enumerate()) {
+          wstate->skin_group_muted[index] =
+              IDP_GetPropertyFromGroup(muted, std::to_string(group.skin_channel)) != nullptr;
+        }
+      }
     }
   }
 

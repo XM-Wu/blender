@@ -57,6 +57,20 @@ def run():
     assert rig.data.bones.active.name == 'Arm.R' and rig.pose.bones['Arm.R'].select
     assert bpy.context.active_object == obj
     state.value, state.strength = 1, 1
+    # A partially painted upper influence still owns the vertex at full mask and opacity.
+    skin.SkinBrush(obj).paint(np.array([0, 1, 2]), np.array([0., .5, 1.]), 'REPLACE')
+    for compose in (False, True):
+        if compose:
+            skin.composite(obj)
+        np.testing.assert_allclose(result('Arm.L'), [1, 0, 0])
+        np.testing.assert_allclose(result('Arm.R'), [0, 1, 1])
+    # Two influences in one layer retain their ratio, independently of the lower bone.
+    prefix = skin.layer_key(state, layer()) + "_"
+    skin.write_values(obj.data, prefix + str(left), [.1, .1, .1])
+    skin.write_values(obj.data, prefix + str(right), [.3, .3, .3])
+    skin.composite(obj)
+    np.testing.assert_allclose(result('Arm.L'), .25)
+    np.testing.assert_allclose(result('Arm.R'), .75)
     flood()
     assert skin.used_channels(obj, layer()) == {right}
     edit(action='CHILD')
@@ -67,13 +81,13 @@ def run():
     flood()
     select(group)
     layer().opacity = 0.5
-    np.testing.assert_allclose(result('Arm.L'), 0.75)
-    np.testing.assert_allclose(result('Arm.R'), 0.25)
+    np.testing.assert_allclose(result('Arm.L'), 1)
+    np.testing.assert_allclose(result('Arm.R'), 0)
     assert skin.used_channels(obj, layer()) == {right, left}
     state.value = 0.5
     flood()  # The group brush writes its shared mask.
-    np.testing.assert_allclose(result('Arm.L'), 0.875)
-    np.testing.assert_allclose(result('Arm.R'), 0.125)
+    np.testing.assert_allclose(result('Arm.L'), 1)
+    np.testing.assert_allclose(result('Arm.R'), 0)
     select(child)
     state.value = 0
     flood()
@@ -177,10 +191,15 @@ def run():
         np.testing.assert_allclose(rig.pose.bones['Arm.L'].rotation_euler.z, 0.4)
     obj.name = "Skin V2"
     bpy.ops.paint.skin_source(layered=False)
+    assert bpy.ops.paint.native_weight_mask_toggle.poll()
+    assert bpy.ops.paint.native_weight_mask_toggle(target='FACE') == {'FINISHED'}
+    assert obj.data.use_paint_mask
+    bpy.ops.paint.native_weight_mask_toggle(target='FACE')
     assert bpy.ops.paint.skin_switch_pose() == {'FINISHED'}
     assert bpy.ops.paint.skin_switch_pose() == {'FINISHED'}
     assert bpy.context.active_object == obj and "_skin_source" not in obj
     bpy.ops.paint.skin_source()
+    assert not bpy.ops.paint.native_weight_mask_toggle.poll()
     edit(action='CHILD')
     leaf, parent = layer().key, layer().parent_key
     assert bpy.ops.paint.skin_reparent(parent_key="") == {'FINISHED'}
@@ -197,5 +216,62 @@ def run():
     print("PASS nested masks, grouped incremental strokes, influence membership, merge, mirror, closest joint, rest pose and reload")
 
 
+def check_bone_weight_tools():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    obj, rig = setup_mesh()
+    state = obj.skin_layers
+    ops = bpy.ops.paint
+    edit = ops.skin_bone_weights
+    current = lambda: skin.layer_key(state, skin.current_layer(state)) + "_"
+    ops.skin_layer_edit(action='ADD')
+    ops.skin_influence(bone="Arm.R")
+    right = state.influence
+    raw = np.array([.2, .5, .8], dtype=np.float32)
+    skin.write_values(obj.data, current() + str(right), raw)
+    skin.composite(obj)
+    rig.pose.bones["Arm.R"].location.x = 1
+
+    def x():
+        bpy.context.view_layer.update()
+        return obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.vertices[0].co.x
+
+    assert abs(x() - 2) < 1e-5
+    assert ops.skin_toggle_influence(bone="Arm.R") == {'FINISHED'}
+    assert abs(x() - 1) < 1e-5
+    np.testing.assert_array_equal(skin.read_values(obj.data, current() + str(right)), raw)
+    assert edit(action='COPY') == {'FINISHED'}
+    ops.skin_influence(bone="Arm.L")
+    left = state.influence
+    assert edit(action='PASTE') == {'FINISHED'}
+    np.testing.assert_array_equal(skin.read_values(obj.data, current() + str(left)), raw)
+    state.value = 1
+    skin.SkinBrush(obj).paint([0], 1., 'REPLACE')
+    assert right in skin.used_channels(obj, skin.current_layer(state))
+    np.testing.assert_array_equal(skin.read_values(obj.data, current() + str(right)), raw)
+    assert abs(x() - 1) < 1e-5
+    assert edit(action='DELETE') == {'FINISHED'}
+    assert current() + str(left) not in obj.data.attributes
+    np.testing.assert_array_equal(skin.read_values(obj.data, skin.layer_key(state, state.layers[0]) + "_" + str(left)), 1)
+    assert ops.skin_toggle_influence(bone="Arm.R") == {'FINISHED'}
+    assert abs(x() - 2) < 1e-5
+    ops.skin_influence(bone="Arm.R")
+    assert edit(action='DELETE') == {'FINISHED'}
+    assert abs(x() - 1) < 1e-5
+    ops.skin_layer_edit(action='ADD')
+    assert edit(action='PASTE') == {'FINISHED'}
+    np.testing.assert_array_equal(skin.read_values(obj.data, current() + str(right)), raw)
+    assert abs(x() - 2) < 1e-5
+    assert ops.skin_toggle_influence(bone="Arm.R") == {'FINISHED'}
+    name = obj.name
+    with tempfile.TemporaryDirectory() as temp:
+        path = os.path.join(temp, "muted.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=path)
+        bpy.ops.wm.open_mainfile(filepath=path)
+        obj = bpy.data.objects[name]
+        assert skin.muted_channels(obj) == {right} and abs(x() - 1) < 1e-5
+        assert ops.skin_toggle_influence(bone="Arm.R") == {'FINISHED'} and abs(x() - 2) < 1e-5
+
+
 if __name__ == "__main__":
     run()
+    check_bone_weight_tools()

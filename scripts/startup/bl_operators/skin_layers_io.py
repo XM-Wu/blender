@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 
 import bpy
 import numpy as np
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Vector
@@ -68,6 +68,8 @@ def export_data(obj, unit):
         channel_index[group.skin_channel] = len(influences)
         pivot = maya_points(bone.head_local, rig.matrix_world, unit).tolist()
         influences.append(dict(index=len(influences), path=path, pivot=pivot, labelText="", labelSide=0))
+        if "xbiped_legacy_name" in bone:
+            extra.setdefault("legacyBones", {})[bone.name] = bone["xbiped_legacy_name"]
     if not influences:
         raise ValueError("The source mesh has no skin influences")
     layers = []
@@ -147,6 +149,10 @@ def vertex_map(data, obj, mode, unit, uv_source):
     if mode == 'vertexId':
         if len(source) != len(obj.data.vertices):
             raise ValueError("Vertex ID matching requires the same vertex count and order")
+        if (obj.skin_layers.prefix and skin.topology_error(obj) and
+                not np.allclose(source, positions(obj, unit), rtol=0, atol=1e-6)):
+            raise ValueError("Vertex order cannot be verified after a topology edit; "
+                             "choose Closest Surface Point or UV Space")
         return len(source), None
     target = positions(obj, unit)
     if mode == 'closestPoint':
@@ -186,13 +192,19 @@ def transfer(values, count, mapping):
 def plan_import(data, obj, mode, unit, uv_source):
     count, mapping = vertex_map(data, obj, mode, unit, uv_source)
     bones = skin.rig_modifier(obj).object.data.bones
+    aliases = {b["xbiped_legacy_name"]: b for b in bones if "xbiped_legacy_name" in b}
+    source_aliases = data.get("xblender", {}).get("legacyBones", {})
     influences = {}
     for influence in data["influences"]:
         index = str(influence["index"])
         if index in influences:
             raise ValueError(f"Duplicate influence {index}")
         name = (influence.get("path") or influence["name"]).split("|")[-1]
-        bone = bones.get(name) or bones.get(name.rsplit(":", 1)[-1])
+        short = name.rsplit(":", 1)[-1]
+        bone = bones.get(name) or bones.get(short) or aliases.get(short)
+        if bone is None and short in source_aliases:
+            legacy = source_aliases[short]
+            bone = aliases.get(legacy) or bones.get(legacy)
         influences[index] = (name, bone.name if bone and bone.use_deform else None)
     nodes = {l["id"]: l for l in data["layers"]}
     if not nodes or len(nodes) != len(data["layers"]) or None in nodes:
@@ -250,12 +262,21 @@ def check_binding(obj):
     if obj.skin_layers.prefix:
         if obj.get("_skin_armature") != mod.object or obj.get("_skin_modifier") != mod.persistent_uid:
             raise ValueError("Restore the original armature binding")
-        if error := skin.topology_error(obj):
-            raise ValueError(error)
     return mod
 
 
-def append_layers(context, obj, plan):
+def layer_path(state, layer):
+    """Name and occurrence at each level, independent of regenerated layer IDs."""
+    path = []
+    while layer:
+        siblings = skin.children(state, layer.parent_key)
+        matches = [s.key for s in siblings if s.name == layer.name and s.is_group == layer.is_group]
+        path.append((layer.name, layer.is_group, matches.index(layer.key)))
+        layer = state.layers[skin.layer_index(state, layer.parent_key)] if layer.parent_key else None
+    return tuple(reversed(path))
+
+
+def append_layers(context, obj, plan, *, replace=False):
     mod = check_binding(obj)
     state, mesh = obj.skin_layers, obj.data
     if not obj.is_editable or not mesh.is_editable or obj.mode == 'EDIT':
@@ -268,8 +289,18 @@ def append_layers(context, obj, plan):
     channels = {g.name: g.skin_channel for g in obj.vertex_groups}
     group_index = obj.vertex_groups.active_index
     previous_count = len(state.layers)
+    old_prefix = state.prefix
+    replace = bool(old_prefix and (replace or skin.topology_error(obj)))
+    previous_path = layer_path(state, skin.current_layer(state)) if replace else None
     try:
-        if state.prefix:
+        if replace:
+            # Stage a new namespace. The old layers have no attributes in it, so
+            # they contribute nothing during compositing and remain intact on failure.
+            state.prefix = ".skin_" + skin.token()
+            state.vertex_count = len(mesh.vertices)
+            skin.copy_marker(mesh, None, state.prefix)
+            obj["_skin_vertex_count"] = state.vertex_count
+        elif state.prefix:
             skin.unique_storage(obj)
         else:
             skin.initialize(obj, mod)
@@ -309,9 +340,19 @@ def append_layers(context, obj, plan):
                 del obj[key]
         for key, value in previous.items():
             obj[key] = value
-        if previous_count:
+        if previous_count and not replace:
             skin.composite(obj)
         raise
+    if replace:
+        for _ in range(previous_count):
+            state.layers.remove(0)
+        state.index = next((i for i, layer in enumerate(state.layers) if layer_path(state, layer) == previous_path),
+                           len(state.layers) - 1)
+        if not any(other != obj and other.type == 'MESH' and other.data == mesh and
+                   other.skin_layers.prefix == old_prefix for other in bpy.data.objects):
+            for key in attrs:
+                if key == old_prefix or key.startswith(old_prefix + "_"):
+                    mesh.attributes.remove(mesh.attributes[key])
     skin.activate_paint_tool(context, obj, True)
 
 
@@ -332,6 +373,15 @@ class PAINT_OT_skin_export_layers(Operator, ExportHelper):
         temporary = None
         try:
             check_binding(obj)
+            edited = skin.topology_error(obj) is not None
+            if edited:
+                # Mesh edit operations carry point attributes to the edited vertices.
+                # Export those surviving values with the geometry they now belong to.
+                for layer in obj.skin_layers.layers:
+                    mask = obj.data.attributes.get(skin.layer_key(obj.skin_layers, layer) + "_mask")
+                    if mask is None or mask.domain != 'POINT' or mask.data_type != 'FLOAT':
+                        raise ValueError(f"Layer data missing on the edited mesh ({layer.name}); "
+                                         "import the JSON saved before editing topology")
             data = export_data(obj, context.scene.unit_settings.scale_length * 100)
             path = Path(self.filepath)
             with NamedTemporaryFile(mode="w", dir=path.parent, delete=False, encoding="utf8") as stream:
@@ -344,14 +394,15 @@ class PAINT_OT_skin_export_layers(Operator, ExportHelper):
         finally:
             if temporary and temporary.exists():
                 temporary.unlink()
-        self.report({'INFO'}, f"Exported {len(data['layers'])} skin layers")
+        suffix = " from the current mesh topology" if edited else ""
+        self.report({'INFO'}, f"Exported {len(data['layers'])} skin layers{suffix}")
         return {'FINISHED'}
 
 
 class PAINT_OT_skin_import_layers(Operator, ImportHelper):
     bl_idname = "paint.skin_import_layers"
     bl_label = "Import Skin Layers"
-    bl_description = "Append an ngSkinTools 2 layer stack above the existing layers"
+    bl_description = "Transfer layers onto the current mesh; replace the old stack when its topology has changed"
     bl_options = {'UNDO'}
     filename_ext = ".json"
     filter_glob: StringProperty(default="*.json", options={'HIDDEN'})
@@ -360,6 +411,8 @@ class PAINT_OT_skin_import_layers(Operator, ImportHelper):
         ('uvSpace', "UV Space", "Interpolate on triangles of the active UV maps"),
         ('vertexId', "Vertex ID", "Copy weights by index for meshes with the same vertex order"),
     ))
+    replace_existing: BoolProperty(name="Replace Existing Layers", default=False,
+                                  description="Use the imported stack instead of appending above the existing layers")
     source_uv_mesh: StringProperty(name="Source UV Mesh",
                                    description="Original mesh with matching source vertex order for files without UVs")
 
@@ -369,6 +422,12 @@ class PAINT_OT_skin_import_layers(Operator, ImportHelper):
         return skin.rig_modifier(obj) is not None and obj.is_editable and obj.data.is_editable and obj.mode != 'EDIT'
 
     def draw(self, context):
+        obj = context.active_object
+        if obj and obj.type == 'MESH' and obj.skin_layers.prefix:
+            if skin.topology_error(obj):
+                self.layout.label(text="Topology changed: import replaces existing layers", icon='INFO')
+            else:
+                self.layout.prop(self, "replace_existing")
         self.layout.prop(self, "mode")
         if self.mode == 'uvSpace':
             self.layout.prop_search(self, "source_uv_mesh", bpy.data, "objects", text="Source UV Mesh")
@@ -380,12 +439,21 @@ class PAINT_OT_skin_import_layers(Operator, ImportHelper):
             with open(self.filepath, encoding="utf-8-sig") as stream:
                 data = json.load(stream)
             source = bpy.data.objects.get(self.source_uv_mesh) if self.source_uv_mesh else None
-            plan = plan_import(data, obj, self.mode, context.scene.unit_settings.scale_length * 100, source)
-            append_layers(context, obj, plan)
+            unit = context.scene.unit_settings.scale_length * 100
+            plan = plan_import(data, obj, self.mode, unit, source)
+            append_layers(context, obj, plan, replace=self.replace_existing)
         except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError, RuntimeError) as exc:
             self.report({'ERROR'}, f"Could not import skin layers: {exc}")
             return {'CANCELLED'}
-        self.report({'INFO'}, f"Imported {len(plan)} skin layers")
+        # A topology edit can discard the selection but leave paint masking enabled.
+        # Retain nonempty selections and the authored masks on every skin layer.
+        message = f"Imported {len(plan)} skin layers"
+        empty = skin.empty_selection_mask(obj.data)
+        if empty:
+            setattr(obj.data, empty, False)
+            label = "face" if empty == "use_paint_mask" else "vertex"
+            message += f"; turned off empty {label} selection mask"
+        self.report({'INFO'}, message)
         return {'FINISHED'}
 
 

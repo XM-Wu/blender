@@ -71,12 +71,24 @@ with bpy.context.temp_override(area=viewport, region=window_region(viewport)):
     bend.select = True
 with bpy.context.temp_override(area=area, region=window_region(area)):
     assert bpy.context.active_pose_bone == bend
+    rig.data.collections["IK"].is_visible = False
+    rig.data.collections["Additional FK"].is_visible = True
+    before = {c.name: c.is_visible for c in ui.control_collections(rig)}
+    assert bpy.ops.xbone.toggle_controls() == {'FINISHED'}
+    assert not any(c.is_visible_effectively for c in ui.control_collections(rig))
+    skeleton = rig.data.collections["Skeleton"]
+    skeleton.is_visible = True
+    assert skeleton.is_visible_effectively and not rig.data.collections["Mechanism"].is_visible
+    assert rig.data.bones.active == bend.bone and bend.select
     assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
     assert bpy.context.edit_object == guide
     assert bpy.ops.xbone.return_to_rig() == {'FINISHED'} and bpy.context.active_object == rig
     assert bpy.context.mode == 'POSE'
+    assert {c.name: c.is_visible for c in ui.control_collections(rig)} == before
     assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
     assert bpy.ops.xbone.build_rig() == {'FINISHED'} and bpy.context.active_object == rig
+    # Hiding controls manually during posing is still possible.
+    assert bpy.ops.xbone.toggle_controls() == {'FINISHED'}
 
 area.type = 'WEIGHT_LAYERS'
 assert isinstance(area.spaces.active, bpy.types.SpaceWeightLayers)
@@ -91,6 +103,11 @@ with tempfile.TemporaryDirectory() as temp:
     assert isinstance(area.spaces.active, bpy.types.SpaceRigging)
     assert any(a.type == 'VIEW_3D' for a in bpy.context.screen.areas)
     with bpy.context.temp_override(area=area, region=window_region(area)):
+        rig = bpy.context.active_object
+        assert not any(c.is_visible for c in ui.control_collections(rig))
+        assert bpy.ops.xbone.toggle_controls() == {'FINISHED'}
+        assert {c.name: c.is_visible for c in ui.control_collections(rig)} == before
+        assert rig.data.collections["Skeleton"].is_visible
         assert bpy.ops.xbone.edit_source_guide.poll()
         bpy.ops.object.mode_set(mode='OBJECT')
         assert bpy.ops.xbone.new_guide() == {'FINISHED'}

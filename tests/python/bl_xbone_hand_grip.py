@@ -14,8 +14,9 @@ def update(rig):
 
 def tips(rig, side):
     points = []
-    for digit in [f"thumb_{side}0"] + [f"finger_{side}{i}" for i in range(4)]:
-        skin = rig.pose.bones[digit + "_2_jnt"]
+    for i, name in enumerate(("thumb", "index", "middle", "ring", "pinky")):
+        digit = f"thumb_{side}0" if name == "thumb" else f"finger_{side}{i-1}"
+        skin = rig.pose.bones[f"{name}_03_{side.lower()}"]
         tip = rig.data.bones[digit + "_2_loc"].head_local
         points.append(skin.matrix @ skin.bone.matrix_local.inverted() @ tip)
     return points
@@ -64,6 +65,27 @@ left["index_curl"] = -1.
 update(rig)
 pointing = tips(rig, 'L')
 same(pointing, [closed[0], opened[1], *closed[2:]])
+
+# Weight Paint's reset also clears the procedural gestures on both hands.
+bpy.ops.object.mode_set(mode='OBJECT')
+bpy.ops.mesh.primitive_cube_add()
+mesh = bpy.context.object
+mesh.modifiers.new("Skin", 'ARMATURE').object = rig
+bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+left["spread"] = -1.
+right["cup"] = .7
+assert bpy.ops.paint.skin_rest_pose() == {'FINISHED'}
+update(rig)
+same(tips(rig, 'L'), opened)
+same(tips(rig, 'R'), other)
+bpy.ops.object.mode_set(mode='OBJECT')
+mesh.select_set(False)
+rig.select_set(True)
+bpy.context.view_layer.objects.active = rig
+bpy.ops.object.mode_set(mode='POSE')
+left["grip"] = right["grip"] = 1.
+left["index_curl"] = -1.
+update(rig)
 
 fk = rig.pose.bones["FK.finger_L0_0_loc"]
 fk.rotation_mode = 'XYZ'

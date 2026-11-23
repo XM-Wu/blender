@@ -1,16 +1,44 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Place XBiped landmarks freely and build the ordinary editable rig."""
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
 import bpy
+import numpy as np
 from mathutils import Vector
 from xbone_rigging import smart_guide as smart
 
 
 def near(a, b):
     assert (a - b).length < .0001, (a[:], b[:])
+
+
+def check_control_shapes(rig):
+    # Compare edge lengths and diagonals. Pivots can move and rotate with the guide;
+    # only the character's overall display scale belongs in the wire geometry.
+    controls = json.loads(Path(smart.__file__).with_name("biped_display.json").read_text())["controls"]
+    scale = rig["rigging_guide"]["biped_display_scale"]
+    for name, data in controls.items():
+        role = data["role"]
+        control = rig.pose.bones["Display." + name if role == "display" else role + "." + data["anchor"]]
+        template = np.array([p for line in data["lines"] for p in line]) * scale
+        wire = np.array([v.co[:] for v in control.custom_shape.data.vertices])
+        i, j = np.triu_indices(len(template), k=1)
+        np.testing.assert_allclose(np.linalg.norm(wire[i] - wire[j], axis=1),
+                                   np.linalg.norm(template[i] - template[j], axis=1),
+                                   atol=1e-5, rtol=1e-5, err_msg=name)
+
+
+def check_neutral_skin(rig):
+    # An identity control pose must produce identity deformation including off-axis
+    # points; testing bone heads alone misses rotations and scale at the bind pivot.
+    bpy.context.view_layer.update()
+    for joint in rig.pose.bones:
+        if joint.bone.use_deform:
+            np.testing.assert_allclose(joint.matrix, joint.bone.matrix_local,
+                                       rtol=0, atol=2e-5, err_msg=joint.name)
 
 
 def check_current(root, index):
@@ -120,6 +148,8 @@ for key, name in names.items():
 assert ops.build_rig() == {'FINISHED'}
 rig = c.object
 c.view_layer.update()
+check_control_shapes(rig)
+check_neutral_skin(rig)
 assert sum(b.use_deform for b in rig.data.bones) == 106
 assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
 for side in 'LR':
@@ -262,6 +292,8 @@ for symmetric in (True, False):
     for key, name in (("index_1.L", "finger_L0_0_loc"), ("eye.L", "eye_L0")):
         near(guide.matrix_world @ guide.data.bones[name].head_local, expected[key])
     assert ops.build_rig() == {'FINISHED'} and c.object == rig
+    check_control_shapes(rig)
+    check_neutral_skin(rig)
     for key, name in (("index_1.L", "FK.finger_L0_0_loc"), ("eye.L", "eye_L0")):
         near(rig.matrix_world @ rig.data.bones[name].head_local, expected[key])
 

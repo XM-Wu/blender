@@ -1896,6 +1896,11 @@ endif()
 # ------------------------------------------------------------------------------
 
 if(WITH_UI_TESTS)
+  if(WIN32)
+    add_python_test(wm_last_monitor_win32 ${CMAKE_CURRENT_LIST_DIR}/bl_window_monitor_win32.py "${TEST_BLENDER_EXE}")
+    set_tests_properties(wm_last_monitor_win32 PROPERTIES LABELS "xblender" SKIP_RETURN_CODE 77)
+  endif()
+
   # This could be generated with:
   # `"${TEST_PYTHON_EXE}" "${CMAKE_CURRENT_LIST_DIR}/ui_simulate/run.py" --list-tests`
   # list explicitly so changes bisecting/updated are sure to re-run CMake.

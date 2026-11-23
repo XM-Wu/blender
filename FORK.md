@@ -269,6 +269,10 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## Windows 主窗口记住上次使用的显示器
+
+正常退出时，xBlender 将主窗口所在显示器的设备标识写入用户配置目录的 `recents.toml`。下次启动或双击打开工程时，第一个主窗口优先在该显示器创建；大小和最大化状态沿用启动设置。显示器已断开时回到主屏，显式 `--window-geometry` 优先。临时编辑器、后台渲染和同一进程中新建的窗口沿用各自的窗口逻辑。多屏回归见 [Windows 窗口测试](tests/python/bl_window_monitor_win32.py)。
+
 ## GLB / glTF 导入为 XBone
 
 从 **File → Import → glTF 2.0 (XBone) (.glb/.gltf)** 选择文件，或在普通 glTF 导入器的 **Bones & Skin** 中勾选 **Import as XBone**。导入器把 skin 的关节建成原生 XBone，保留绑定位置、关节轴和父子层级。骨骼挂件以关节原点为父级，蒙皮与动画继续使用 glTF 导入流程。纯静态模型照常导入网格。脚本入口为 `bpy.ops.import_scene.gltf(filepath=path, use_xbone=True)`。后台回归见 [GLB 导入测试](tests/python/bl_io_xbone_gltf.py)。

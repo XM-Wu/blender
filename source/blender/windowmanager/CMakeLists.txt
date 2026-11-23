@@ -128,6 +128,10 @@ else()
   )
 endif()
 
+if(WIN32)
+  list(APPEND SRC intern/wm_window_monitor_win32.cc)
+endif()
+
 if(WITH_GHOST_WAYLAND)
   list(APPEND SRC
     intern/wm_window_icon.cc

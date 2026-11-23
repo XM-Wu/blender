@@ -2931,9 +2931,9 @@ def km_weight_paint(params):
         # Vertex Lock Pie
         op_menu_pie("VIEW3D_MT_wpaint_vgroup_lock_pie", {"type": 'I', "value": 'PRESS', "ctrl": True, "alt": True}),
         # Brush properties
-        ("brush.scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 0.9)]}),
-        ("brush.scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 1.0 / 0.9)]}),
         *_template_paint_radial_control("weight_paint", weight=True),
         # Mask Modes

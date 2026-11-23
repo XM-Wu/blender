@@ -785,6 +785,30 @@ def brush_error(obj):
     return topology_error(obj)
 
 
+class PAINT_OT_weight_brush_scale_size(Operator):
+    bl_idname = "paint.weight_brush_scale_size"
+    bl_label = "Scale Weight Paint Brush Radius"
+
+    scalar: FloatProperty(name="Scale", default=1, min=0, max=2)
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'PAINT_WEIGHT'
+
+    def execute(self, context):
+        obj = context.active_object
+        if "_skin_source" not in obj:
+            return bpy.ops.brush.scale_size(scalar=self.scalar)
+
+        state = obj.skin_layers
+        radius = state.radius
+        scaled = round(radius * self.scalar)
+        if scaled == radius and self.scalar != 1:
+            scaled += 1 if self.scalar > 1 else -1
+        state.radius = scaled
+        return {'FINISHED'}
+
+
 class PAINT_OT_skin_flood(Operator):
     bl_idname = "paint.skin_flood"
     bl_label = "Flood Layer Target"
@@ -853,7 +877,8 @@ class PAINT_OT_skin_layer_stroke(Operator):
 
 classes = (
     SkinWeightLayer, SkinWeightSettings, PAINT_OT_skin_source, PAINT_OT_skin_layer_edit,
-    PAINT_OT_skin_influence, PAINT_OT_skin_bake, PAINT_OT_skin_flood, PAINT_OT_skin_layer_stroke,
+    PAINT_OT_skin_influence, PAINT_OT_skin_bake, PAINT_OT_weight_brush_scale_size, PAINT_OT_skin_flood,
+    PAINT_OT_skin_layer_stroke,
 )
 
 

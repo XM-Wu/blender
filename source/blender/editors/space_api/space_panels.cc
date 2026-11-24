@@ -44,8 +44,16 @@ template<eSpace_Type Type> static void register_panel_space(const char *name)
 
   ARegionType *window = MEM_new_zeroed<ARegionType>(__func__);
   window->regionid = RGN_TYPE_WINDOW;
-  window->keymapflag = ED_KEYMAP_UI | ED_KEYMAP_VIEW2D;
-  window->init = ED_region_panels_init;
+  /* ED_region_panels_init installs View2D Buttons List, where the wheel scrolls panels.
+   * The generic View2D map handles the same event as zoom before that map gets it. */
+  window->keymapflag = ED_KEYMAP_UI;
+  window->init = [](wmWindowManager *wm, ARegion *region) {
+    ED_region_panels_init(wm, region);
+    if constexpr (Type == SPACE_WEIGHT_LAYERS) {
+      region->v2d.keepzoom |= V2D_LOCKZOOM_X | V2D_LOCKZOOM_Y;
+      ui::view2d_curRect_validate(&region->v2d);
+    }
+  };
   window->layout = ED_region_panels_layout;
   window->draw = ED_region_panels_draw;
   window->listener = [](const wmRegionListenerParams *params) {
@@ -60,9 +68,7 @@ template<eSpace_Type Type> static void register_panel_space(const char *name)
   header->init = [](wmWindowManager *, ARegion *region) { ED_region_header_init(region); };
   header->layout = ED_region_header_layout;
   header->draw = ED_region_header_draw;
-  if (Type == SPACE_RIGGING) {
-    header->listener = window->listener;
-  }
+  header->listener = window->listener;
   BLI_addtail(&st->regiontypes, header);
   BKE_spacetype_register(std::move(st));
 }

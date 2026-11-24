@@ -57,6 +57,21 @@ def copy_pose(owner, rig, target, kind='COPY_TRANSFORMS'):
     return constraint
 
 
+def orient_fk_ring(control, bone, primary_axis):
+    """Fit the generic ring across the outgoing shaft without changing animation axes."""
+    primary = bone.matrix_local.to_3x3().col["XYZ".index(primary_axis)]
+    directions = [(child.head_local - bone.head_local).normalized() for child in bone.children
+                  if (child.head_local - bone.head_local).length_squared > 1e-12]
+    if directions:
+        axis = max(directions, key=lambda direction: direction.dot(primary))
+    elif bone.parent and (bone.head_local - bone.parent.head_local).length_squared > 1e-12:
+        axis = (bone.head_local - bone.parent.head_local).normalized()
+    else:
+        axis = primary
+    local_axis = bone.matrix_local.to_quaternion().inverted() @ axis
+    control.custom_shape_rotation_euler = Vector((0, 1, 0)).rotation_difference(local_axis).to_euler()
+
+
 def build(context, guide):
     chains = limb_chains(guide.data.bones)
     from . import biped_skeleton
@@ -163,6 +178,8 @@ def build(context, guide):
             follow = copy_pose(pose[name], rig, fk[name])
             follow.owner_space = follow.target_space = 'LOCAL'
         style(fk[name], "FK", max(0.015, pose[name].length * 0.24), name)
+        if "biped_locator" not in arm.bones[name] and pose[fk[name]].custom_shape == shapes["FK"]:
+            orient_fk_ring(pose[fk[name]], guide.data.bones[name], arm.xbone_primary_axis)
     for name, (eye, _) in eye_targets.items():
         aim = pose[eye].constraints.new('DAMPED_TRACK')
         aim.target = rig
@@ -225,7 +242,7 @@ def build(context, guide):
         widget_frames = biped_display.apply(rig, guide, fk)
         from . import biped_foot
         biped_foot.build(rig, guide)
-        biped_skeleton.build(rig, guide, bind_plan, groups["Skeleton"], groups["Mechanism"])
+        biped_skeleton.build(rig, guide, bind_plan, groups["Skeleton"], groups["Mechanism"], fk)
         from . import biped_spine
         biped_spine.build(rig, guide, bind_plan)
         from . import biped_components
@@ -238,6 +255,8 @@ def build(context, guide):
         biped_endpoints.build(rig, guide)
         from . import biped_roundness
         biped_roundness.build(rig, guide, bind_plan)
+        if guide.get("xbiped"):
+            biped_skeleton.bind_neutral_outputs(context, rig, bind_plan)
         for name, frame in widget_frames.items():
             p = rig.pose.bones[name]
             p.custom_shape.data.transform(p.bone.matrix_local.inverted_safe() @ frame)

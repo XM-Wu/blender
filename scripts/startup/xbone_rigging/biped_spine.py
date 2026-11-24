@@ -305,6 +305,13 @@ def _component(rig, guide, names, part, endpoint, output):
         return obj
 
     def follow(n, path, u):
+        # Follow Path multiplies the curve's world matrix by the owner's
+        # incoming world transform. These bones sample points on the curve;
+        # their armature object's translation must not become a path offset.
+        zero = pose[n].constraints.new('LIMIT_LOCATION')
+        zero.owner_space = 'WORLD'
+        zero.use_min_x = zero.use_min_y = zero.use_min_z = True
+        zero.use_max_x = zero.use_max_y = zero.use_max_z = True
         c = pose[n].constraints.new('FOLLOW_PATH')
         c.target = path
         c.use_fixed_location = True

@@ -269,6 +269,28 @@ blender --background --factory-startup --python-exit-code 1 --python tests/pytho
 - `7da2c6887b3` UV Tools 和增量畸变显示；`9df416d9a36` 快速晶格；`60cf6df1283` Texel Packing 和逐岛约束；`fd80b9b7156` 互斥 UV 选择模式、诊断与固定缩放岛优先打包。
 - `a4740c9527a` 棋盘格预览与原生叠加层；`8c3ed847eae` 启发式排布搜索、UV 快捷工具栏、变换与分组管理；`a9052e72015` 参考密度打包和多组堆叠检测；`85df77dfe0b` U/V 翻转和 Rect 局部选择。
 
+## Rigging 编辑器的 Guide / Rig 切换
+
+标题栏的 **Guide** 打开当前 Rig 对应的源 Guide，**Rig** 保留 Guide 编辑并返回原 Rig 的 Pose Mode。往返沿用同一个骨架数据块、蒙皮修改器、Skin Tools 层栈、Action、NLA 和当前姿势；保存重开后仍可继续。新 Guide 第一次用 **Build Rig** 生成骨架。已经配对的 Guide 只有在明确执行 **Apply Guide and Rebuild（应用 Guide 并重建）** 时才把编辑应用到 Rig。[切换回归](tests/python/bl_xbone_guide_rig_switch.py)
+
+XBiped 已加入左右手独立的整体握持控制。**Rigging → Hand Controls** 提供 Grip、五指独立 Curl、Spread 和 Cup，可与逐节 FK 动画叠加。Pose Mode 选中手背的手形控制器也可在 3D 视图标题栏调 Grip。已有 XBiped 通过 **Guide → Apply Guide and Rebuild** 生成手部控制器。[使用说明](doc/xbone_rigging.md#hand-controls) · [握持回归](tests/python/bl_xbone_hand_grip.py)
+
+Rigging 面板的普通滚轮上下滚动内容。重新编辑 XBiped 标记时，以 Guide 当前的关节位置为准；手工改成不对称的 Guide 会分别显示左右标记。**Mirror Left to Right** 可切换单侧驱动预览和双侧独立编辑。**Cancel** 或 **Esc** 放弃标记并返回原对象与模式；**Update XBiped Guide** 更新 Guide，已有 Rig 继续使用上一次重建的结果。
+
+## Object Mode 的 Clear 菜单
+
+3D 视图在 Object Mode 提供 **Clear** 菜单；相同操作也在 **Object → Clear** 原有变换命令下方。前三项分别清理当前文件内零用户且无引用的 Mesh、图片与纹理、材质。同一次图片／纹理清理会处理删除纹理后释放的图片。资产、Fake User、库链接及覆盖、仍待保存的图片和渲染结果会被保留。命令处理 Blender 数据块，磁盘上的外部图片文件不会被删除。
+
+**Unused Empties** 只清理当前场景中的普通空物体，从没有子物体的节点向上处理整条空链。有保留子物体的父级、其他场景共用的物体、约束／修改器／驱动／自定义属性引用的目标、参与实例化的集合内容，以及图片空物体、力场和带动画或元数据的节点会被保留。四项操作都支持撤销。[回归用例](tests/python/bl_object_clear_unused.py)
+
+## Windows 主窗口记住上次使用的显示器
+
+正常退出时，xBlender 将主窗口所在显示器的设备标识写入用户配置目录的 `recents.toml`。下次启动或双击打开工程时，第一个主窗口优先在该显示器创建；大小和最大化状态沿用启动设置。显示器已断开时回到主屏，显式 `--window-geometry` 优先。临时编辑器、后台渲染和同一进程中新建的窗口沿用各自的窗口逻辑。多屏回归见 [Windows 窗口测试](tests/python/bl_window_monitor_win32.py)。
+
+## GLB / glTF 导入为 XBone
+
+从 **File → Import → glTF 2.0 (XBone) (.glb/.gltf)** 选择文件，或在普通 glTF 导入器的 **Bones & Skin** 中勾选 **Import as XBone**。导入器把 skin 的关节建成原生 XBone，保留绑定位置、关节轴和父子层级。骨骼挂件以关节原点为父级，蒙皮与动画继续使用 glTF 导入流程。纯静态模型照常导入网格。脚本入口为 `bpy.ops.import_scene.gltf(filepath=path, use_xbone=True)`。后台回归见 [GLB 导入测试](tests/python/bl_io_xbone_gltf.py)。
+
 ## 骨骼批量命名
 
 Edit Mode 的 **Armature → Names → Batch Rename Bones** 和 Pose Mode 的 **Pose → Names** 可为选中骨骼按深度优先顺序编号。XBone 的编辑菜单与右键菜单直接提供该命令。输入基础名 `Arm`，可生成 `Arm_001`、`Arm_002`，或选用侧别得到 `Arm_001_L`、`Arm_002_L`；`_L` 与 `_R` 可用于骨架对称化和 Skin Tools 权重镜像。父骨先于子骨，同级依骨架已有顺序；遍历经过未选骨骼时只给选中项编号。多骨架选择从活动骨架开始连续编号。目标名被未选骨骼或其他变形组占用时可换一个基础名重试。
@@ -283,13 +305,19 @@ Edit Mode 的 **Armature → Names → Batch Rename Bones** 和 Pose Mode 的 **
 
 - **工作区入口**。普通启动和新建 General 时，个人启动布局缺少 Weight Paint 会自动补上，保留原来的活动工作区。旧项目使用文件里保存的标签，可从顶部 **+ → General → Weight Paint** 添加。
 - 在 3D 视图标题栏用 **Native / Skin Tools** 切换权重来源。进入姿态模式、播放或渲染时，Armature 继续使用对象最后选择的来源。
-- 点 **+** 建修正层，选择影响骨后绘制。**Mask** 可用同一套画笔绘制逐顶点遮罩，黑色露出下层，白色保留本层。各层可调序、复制、开关和调整不透明度。
+- 点 **+** 建修正层，选择影响骨后绘制。顶点在上层有正权重时，该层按内部各骨骼的权重比例覆盖下层，覆盖量由遮罩与不透明度控制。默认 **Layer Only** 显示本层笔画。**Mask** 可用同一套画笔绘制逐顶点遮罩，黑色露出下层，白色保留本层。各层可调序、复制、开关和调整不透明度。
 - Skin Tools 笔刷强度默认 **1.0**。**Replace / Add / Scale / Smooth** 支持表面笔画、顶点或面选区与 Flood。Shift 落笔临时平滑。**Display** 可选择本层、灰度遮罩或最终权重。
+- 空权重绑定首次启用 Skin Tools 会选取当前变形骨或第一根可用变形骨。X 镜像笔刷支持 `arm_L0_0_jnt` 这样的 XBiped 名称，缺少对侧骨时仍可画当前侧。Armature 后仅叠加 Subdivision Surface 时，笔刷从显示表面拾取，校验顶点对应后写回基础网格。
 - **Bake to Vertex Groups** 把合成结果写回变形组，保留层栈并支持撤销。共享网格需要先转为单用户才能烘焙。原始顶点对应关系失效时，恢复拓扑后可继续绘制。
 - **图层树**。支持嵌套组、子层、移动子树和同级向下合并。普通层点 **Add Child** 会原位包进新组。子层先合成，组遮罩与不透明度只对合成结果应用一次。
+- **导入层 / 导出层**。在 Weight Layers 编辑器用 ngSkinTools 2 JSON 交换整棵图层树，包括同级顺序、开关、透明度、逐点遮罩和各骨骼权重。默认追加到已有层栈上方，也可选 **Replace Existing Layers**。原网格增删或重排顶点后，导入会在当前拓扑上重建层栈；可用编辑前的 JSON 按最近表面点或 UV 重投影权重与遮罩。如果编辑操作保留了图层点属性，也能在修改拓扑后直接导出当前结果。**顶点编号**适用于顶点数和顺序一致的模型；**最近表面点**在静止网格的三维三角形上插值；**UV 空间**使用活动 UV 图。在接缝或重叠 UV 有多个同样近的候选时，优先采用三维位置更接近的源三角形。Blender 导出的文件内嵌三角形角点 UV；对缺少 UV 的 Maya JSON，可在导入窗口指定顶点编号与文件一致的**源 UV 网格**。三维坐标按世界空间、Maya Y 向上和厘米交换，骨骼按名称匹配。DQ 绘制权重和实时镜像效果暂不支持。
+- **权重显示映射**。在 **Weight Display Mapping** 调节指数和白点。指数越小，低权重越亮；白点决定达到最大显示亮度的输入值。预设包含线性、低权重、微量权重和高权重。每个网格对象独立保存设置，图层遮罩仍用线性灰阶。
+- **Hard Replace**。在笔刷类型中选择后，半径内可绘制的顶点一次写入 Weight 指定值，支持表面、体积、权重、遮罩和镜像。按 Shift 仍可临时平滑。
+- **单骨权重**。骨骼列表每行的静音开关暂停该骨在当前网格所有 Skin Tools 图层中的蒙皮影响，并同步隐藏该骨的灰阶与彩色贡献。再次启用可恢复原始数据。列表下的 **Copy / Paste / Delete Weights** 操作当前普通图层的整根骨骼通道；复制快照可以粘贴到同一网格的另一根骨或另一层。**Layer Only** 保留显示原始笔画，**Stack Result** 显示参与变形的合成结果。
 - **选骨与显示**。当前影响骨以黑白显示权重，其他骨骼按稳定通道标识着色。点列表会高亮视口骨骼。绿色骨形图标表示层内至少一个顶点在该骨上有正权重。**Influenced Only** 可叠加名称搜索，刷黑遮罩仍保留已画骨骼的绿标。
 - **赋权与镜像**。支持从表面取样主导骨骼、按最近静止关节赋权，以及本地 X 轴的一次性镜像和随笔镜像。顶点按静止几何双向配对，影响骨沿用 Blender 左右命名。随笔镜像直接使用 3D 视图工具标题栏的 X 开关。Weight Layers 的 **Mirror** 可独立执行：**Current Bone** 根据绑定姿势将当前骨骼的权重复制到对侧骨骼；**All Bones** 可选择左到右（+X 到 −X）或右到左。遮罩及没有明确左右位置的骨骼可手选方向。
-- **摆姿势后接着画**。视图顶栏的 **Pose Rig** 进入绑定骨架的 Pose Mode，**Back to Weight Paint** 带着新姿势返回发起切换的网格、图层和影响骨。返回目标按 View Layer 记录，同一骨架绑定多个网格时也能找回原对象。**Bones In Front** 和 **Reset Pose** 位于 3D 视图的 **N → Weight Paint → Rig**，仅在 Weight Paint 模式显示。重置一次性清除局部姿态变换，随后可立即摆姿势，动画和约束继续求值。
+- **笔刷范围**。Skin Tools 顶部笔刷栏可选 **Surface**（默认）或 **Volume**。表面模式从命中面沿相连网格取样；体积模式使用命中点周围的三维球体，可画到同一对象中半径以内的背面和独立网格壳。两者都使用当前姿势、半径、衰减和绘制选区。
+- **摆姿势后接着画**。在 3D 视图按 **Tab** 从 Weight Paint 切到绑定骨架，再按一次返回原网格继续绘制。进入 Pose Mode 自动显示控制器；若因 Tab 切换临时显示，回到绘制时会恢复隐藏。视图顶栏的 **Pose Rig** 进入绑定骨架的 Pose Mode，**Back to Weight Paint** 带着新姿势返回发起切换的网格、图层和影响骨。返回目标按 View Layer 记录，同一骨架绑定多个网格时也能找回原对象。**Bones In Front** 和 **Reset Pose** 位于 3D 视图的 **N → Weight Paint → Rig**，仅在 Weight Paint 模式显示。重置一次性清除局部姿态变换，随后可立即摆姿势，动画和约束继续求值。
 
 ### 从哪里接手
 

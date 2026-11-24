@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from bpy.types import Header, Menu, Panel, UIList
-from bl_operators.skin_layers import children, current_layer, rig_modifier, subtree, used_channels
+from bl_operators.skin_layers_tools import can_paste_weights
+from bl_operators.skin_layers import children, current_layer, layer_key, rig_modifier, subtree, used_channels
 
 
 def draw_source(layout, obj):
@@ -57,7 +58,11 @@ class WEIGHT_LAYERS_UL_bones(UIList):
         group = obj.vertex_groups.get(item.name)
         used = used_channels(obj, current_layer(obj.skin_layers))
         icon = 'BONE_INFLUENCED' if group and group.skin_channel in used else 'BONE_DATA'
-        layout.operator("paint.skin_influence", text=item.name, icon=icon, emboss=False).bone = item.name
+        row = layout.row(align=True)
+        row.operator("paint.skin_influence", text=item.name, icon=icon, emboss=False).bone = item.name
+        muted = group and str(group.skin_channel) in obj.get("_skin_muted", {})
+        row.operator("paint.skin_toggle_influence", text="", icon='MUTE_IPO_ON' if muted else 'MUTE_IPO_OFF',
+                     emboss=False).bone = item.name
 
     def filter_items(self, context, data, propname):
         obj = context.active_object
@@ -86,6 +91,8 @@ class VIEW3D_PT_weight_paint_rig(Panel):
         if not mod:
             layout.label(text="Requires one Armature modifier", icon='INFO')
             return
+        from xbone_rigging import draw_rig_visibility
+        draw_rig_visibility(layout, mod.object)
         layout.operator("paint.skin_front", depress=mod.object.show_in_front, icon='BONE_DATA')
         layout.operator("paint.skin_rest_pose", icon='LOOP_BACK')
 
@@ -112,11 +119,13 @@ class WEIGHT_LAYERS_PT_layers(Panel):
 
     def draw(self, context):
         layout = self.layout
+        title = layout.row(align=True)
+        title.prop(context.area, "ui_type", text="", icon_only=True)
         obj = context.active_object
         if not obj or obj.type != 'MESH':
-            layout.label(text="Select a mesh to paint.", icon='MESH_DATA')
+            title.label(text="Select a mesh to paint.", icon='MESH_DATA')
             return
-        layout.label(text=obj.name, icon='MESH_DATA')
+        title.label(text=obj.name, icon='MESH_DATA')
         mod = rig_modifier(obj)
         state = obj.skin_layers
         if not mod:
@@ -124,12 +133,24 @@ class WEIGHT_LAYERS_PT_layers(Panel):
             if "_skin_source" in obj:
                 layout.operator("paint.skin_source", text="Return to Native").layered = False
             return
+        files = layout.row(align=True)
+        files.operator("paint.skin_import_layers", text="Import Layers", icon='IMPORT')
+        files.operator("paint.skin_export_layers", text="Export Layers", icon='EXPORT')
         if not state.prefix:
             layout.operator("paint.skin_source", text="Create Layers from Weights", icon='ADD')
             return
         draw_source(layout, obj)
         tools = layout.column()
         tools.enabled = "_skin_source" in obj
+        if context.mode == 'OBJECT':
+            tools.operator("object.mode_set", text="Enter Weight Paint", icon='WPAINT_HLT').mode = 'WEIGHT_PAINT'
+        tools.prop(state, "display", text="Preview")
+        header, mapping = tools.panel("skin_display_mapping", default_closed=True)
+        header.label(text="Weight Display Mapping")
+        if mapping:
+            mapping.operator_menu_enum("paint.skin_preview_preset", "preset", text="Presets")
+            mapping.prop(state, "preview_exponent", slider=True)
+            mapping.prop(state, "preview_white", slider=True)
         row = tools.row()
         row.template_list("WEIGHT_LAYERS_UL_layers", "", state, "layers", state, "index", rows=5)
         ops = row.column(align=True)
@@ -154,8 +175,15 @@ class WEIGHT_LAYERS_PT_layers(Panel):
         row.prop(state, "search", text="", icon='VIEWZOOM')
         row.prop(state, "only_influenced", text="Influenced Only", toggle=True)
         tools.template_list("WEIGHT_LAYERS_UL_bones", "", mod.object.data, "bones", state, "bone_index", rows=5)
+        if not layer.is_group:
+            row = tools.row(align=True)
+            for action, label, icon in (('COPY', "Copy", 'COPYDOWN'), ('PASTE', "Paste", 'PASTEDOWN'),
+                                        ('DELETE', "Delete Weights", 'TRASH')):
+                button = row.row(align=True)
+                button.enabled = (can_paste_weights(obj) if action == 'PASTE' else
+                                  layer_key(state, layer) + "_" + str(state.influence) in obj.data.attributes)
+                button.operator("paint.skin_bone_weights", text=label, icon=icon).action = action
         tools.separator()
-        tools.prop(state, "display", text="Display")
         tools.operator("paint.skin_flood", text="Flood Selection", icon='BRUSH_DATA')
         tools.operator("paint.skin_pick", icon='EYEDROPPER')
         tools.operator("paint.skin_mirror", text="Mirror", icon='MOD_MIRROR')

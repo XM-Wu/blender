@@ -681,7 +681,9 @@ def _template_items_legacy_tools_from_numbers():
 # Window, Screen, Areas, Regions
 
 def km_window(params):
-    items = []
+    items = [
+        ("xbone.cancel_landmarks", {"type": 'ESC', "value": 'PRESS'}, None),
+    ]
     keymap = (
         "Window",
         {"space_type": 'EMPTY', "region_type": 'WINDOW'},
@@ -4748,6 +4750,7 @@ def km_pose(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         # Transform Actions.
         *_template_items_transform_actions(params, use_mirror=True),
 
@@ -5238,6 +5241,7 @@ def km_weight_paint(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS', "ctrl": True},
          {"properties": [("mode", 'INVERT')]}),
@@ -5250,9 +5254,9 @@ def km_weight_paint(params):
         ("paint.weight_gradient", {"type": 'A', "value": 'PRESS', "shift": True},
          {"properties": [("type", 'LINEAR')]}),
         ("paint.weight_set", {"type": 'X', "value": 'PRESS', "ctrl": True}, None),
-        ("brush.scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 0.9)]}),
-        ("brush.scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 1.0 / 0.9)]}),
         *_template_paint_radial_control("weight_paint"),
         ("wm.radial_control", {"type": 'F', "value": 'PRESS', "ctrl": True},
@@ -5262,10 +5266,10 @@ def km_weight_paint(params):
         )),
         ("wm.context_menu_enum", {"type": 'E', "value": 'PRESS', "alt": True},
          {"properties": [("data_path", "tool_settings.vertex_paint.brush.stroke_method")]}),
-        ("wm.context_toggle", {"type": 'ONE', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask")]}),
-        ("wm.context_toggle", {"type": 'TWO', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask_vertex")]}),
+        ("paint.native_weight_mask_toggle", {"type": 'ONE', "value": 'PRESS'},
+         {"properties": [("target", 'FACE')]}),
+        ("paint.native_weight_mask_toggle", {"type": 'TWO', "value": 'PRESS'},
+         {"properties": [("target", 'VERTEX')]}),
         ("wm.context_toggle", {"type": 'THREE', "value": 'PRESS'},
          {"properties": [("data_path", "weight_paint_object.data.use_paint_bone_selection")]}),
         ("wm.context_toggle", {"type": 'S', "value": 'PRESS', "shift": True},

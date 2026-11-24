@@ -2015,6 +2015,13 @@ class ImportGLTF2(Operator, ConvertGLTF2_Base, ImportHelper):
         description="How normals are computed during import",
         default="NORMALS")
 
+    use_xbone: BoolProperty(
+        name="Import as XBone",
+        description="Create point-joint armatures with the glTF bind positions and joint axes",
+        default=False,
+        options={'SKIP_SAVE'},
+    )
+
     bone_heuristic: EnumProperty(
         name="Bone Dir",
         items=(
@@ -2224,6 +2231,10 @@ def import_bone_panel(layout, operator):
     header, body = layout.panel("GLTF_import_bone", default_closed=False)
     header.label(text="Bones & Skin")
     if body:
+        body.prop(operator, 'use_xbone')
+        if operator.use_xbone:
+            body.prop(operator, 'guess_original_bind_pose')
+            return
         body.prop(operator, 'bone_heuristic')
         if operator.bone_heuristic == 'BLENDER':
             body.prop(operator, 'guess_original_bind_pose')
@@ -2344,6 +2355,7 @@ class IO_FH_gltf2(bpy.types.FileHandler):
 
 def menu_func_import(self, context):
     self.layout.operator(ImportGLTF2.bl_idname, text=bpy.types.FileHandler.label_with_extensions("IO_FH_gltf2"))
+    self.layout.operator(ImportGLTF2.bl_idname, text="glTF 2.0 (XBone) (.glb/.gltf)").use_xbone = True
 
 
 classes = (

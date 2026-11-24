@@ -21,6 +21,7 @@ def close(actual, expected, message, tolerance=0.00015):
 
 
 def check_leg(rig, comp):
+    side = comp.split("_")[1][0].lower()
     p = rig.pose.bones
     tip = comp + "_ankle"
     knee = comp + "_knee"
@@ -64,7 +65,7 @@ def check_leg(rig, comp):
             assert glide > .001 and abs((t - f).dot((end - t).normalized())) < 0.00015
         close(p["MCH.Curve." + comp + ".femoralEnd"].head, f, "FK upper skin anchor")
         close(p["Display." + comp + "_mid_ctl"].head, t, "FK lower skin anchor")
-        before = {n: p[n].matrix.copy() for n in (comp, knee, tip, comp + "_3_jnt", comp + "_4_jnt", comp + "_end_jnt")}
+        before = {n: p[n].matrix.copy() for n in (comp, knee, tip, f"knee_support_upper_{side}", f"knee_{side}", f"foot_{side}")}
         for mode in ('IK', 'FK'):
             assert bpy.ops.xbone.match_limb(control=ctl.name, mode=mode) == {'FINISHED'}
             update(rig)
@@ -84,7 +85,7 @@ def check_leg(rig, comp):
     tibia = p[prefix + "tibia"]
     assert (femur.head - tibia.head).length > .03 * b
     # Check that changing glide changes weighted joint positions with the same IK target.
-    skin = p[comp + "_4_jnt"]
+    skin = p[f"knee_{side}"]
     before = skin.head.copy()
     ctl[strength] = 0.
     update(rig)
@@ -94,8 +95,8 @@ def check_leg(rig, comp):
     ctl[strength] = 1.
     update(rig)
     close(skin.head, before, "glide on")
-    shaft = p[comp + "_6_jnt"]
-    foot = p[comp + "_end_jnt"]
+    shaft = p[f"calf_{side}"]
+    foot = p[f"foot_{side}"]
     twisted = shaft.matrix.to_quaternion()
     foot_frame = foot.matrix.copy()
     ctl["knee_internal_rotation"] = 0.
@@ -122,7 +123,7 @@ def check_leg(rig, comp):
     pose_goal.translation += Vector((.045, .023, -.020))
     ctl.matrix = pose_goal
     update(rig)
-    locked = {n: p[n].matrix.copy() for n in (comp, knee, tip, comp + "_4_jnt", comp + "_end_jnt")}
+    locked = {n: p[n].matrix.copy() for n in (comp, knee, tip, f"knee_{side}", f"foot_{side}")}
     for mode in ('FK', 'IK'):
         assert bpy.ops.xbone.match_limb(control=ctl.name, mode=mode) == {'FINISHED'}
         for name, saved in locked.items():
@@ -173,7 +174,7 @@ def check_bend_control(rig, comp):
     assert not bend.hide
     hip, knee, ankle = (p[n] for n in ctl["joints"])
     hip_rest, knee_rest, ankle_rest = (joint.head.copy() for joint in (hip, knee, ankle))
-    skin = p[comp + "_4_jnt"]
+    skin = p[("elbow_" if arm else "knee_") + comp.split("_")[1][0].lower()]
     skin_rest = skin.head.copy()
     upper_length = (knee_rest - hip_rest).length
     lower_length = (ankle_rest - knee_rest).length
@@ -237,7 +238,7 @@ def check_elbow(rig, comp):
     assert abs(wrist.matrix.to_quaternion().dot(fixed.to_quaternion())) < .99
     ctl["elbow_glide"] = 2.
     update(rig)
-    shaft = p[comp + "_6_jnt"]
+    shaft = p["lowerarm_" + comp.split("_")[1][0].lower()]
     twisted = shaft.matrix.to_quaternion()
     wrist_frame = wrist.matrix.copy()
     ctl["forearm_rotation"] = 0.
@@ -261,16 +262,22 @@ def check_elbow(rig, comp):
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
+cursor_position = Vector((3, -4, 2))
+bpy.context.scene.cursor.location = cursor_position
 assert bpy.ops.xbone.biped_guide(template='xbiped') == {'FINISHED'}
 guide = bpy.context.object
+close(guide.matrix_world.translation, Vector((0, 0, 0)), "guide at world origin")
 assert guide["xbiped"]
 for side in ("L0", "R0"):
     assert guide.data.bones[f"leg_{side}_ankle"]["maxstretch"] == 1
 assert bpy.ops.xbone.build_rig() == {'FINISHED'}
 rig = bpy.context.object
+close(rig.matrix_world.translation, Vector((0, 0, 0)), "rig at world origin")
+close(bpy.context.scene.cursor.location, cursor_position, "cursor position preserved")
 with Path(xbone_rigging.__file__).with_name("biped_bind.json").open() as stream:
     reference = json.load(stream)
-skin = {b.name: b.parent.name if b.parent else None for b in rig.data.bones if b.use_deform}
+skin = {b["xbiped_legacy_name"]: b.parent["xbiped_legacy_name"] if b.parent else None
+        for b in rig.data.bones if b.use_deform}
 assert skin == {name: entry[0] for name, entry in reference.items()}
 for comp in ("leg_L0", "leg_R0"):
     check_leg(rig, comp)
@@ -283,8 +290,8 @@ rig_name = rig.name
 rig.pose.bones["IK.leg_R0_ankle"]["knee_glide"] = 2.5
 update(rig)
 saved = {n: rig.pose.bones[n].head.copy() for n in
-         ("leg_L0_knee", "leg_L0_4_jnt", "leg_R0_knee", "leg_R0_end_jnt",
-          "arm_L0_elbow", "arm_L0_4_jnt", "arm_R0_wrist")}
+         ("leg_L0_knee", "knee_l", "leg_R0_knee", "foot_r",
+          "arm_L0_elbow", "elbow_l", "arm_R0_wrist")}
 assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
 # Simulate a previous-version guide and one explicitly authored rig override.
 bpy.ops.object.mode_set(mode='OBJECT')
@@ -308,3 +315,43 @@ with tempfile.TemporaryDirectory() as directory:
         close(rig.pose.bones[name].head, location, ("rebuilt and reopened", name), .0005)
     assert not any(not f.driver.is_valid for f in rig.animation_data.drivers)
 print("XBiped elbow and knee glide, skin joints, IK/FK, wrist rotation, rebuild and reload passed")
+
+# Exercise conversion on a pre-anatomical rig with a live vertex group and animation path.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.xbone.biped_guide(template='xbiped')
+guide = bpy.context.object
+from xbone_rigging import builder, skin_names
+rig = builder.build(bpy.context, guide)
+knee = rig.pose.bones["leg_L0_4_jnt"]
+for frame, value in ((1, .2), (2, .7)):
+    knee["test_channel"] = value
+    knee.keyframe_insert(data_path='["test_channel"]', frame=frame)
+mesh = bpy.data.meshes.new("Naming test")
+mesh.from_pydata([(0, 0, 0)], [], [])
+obj = bpy.data.objects.new("Naming test", mesh)
+bpy.context.collection.objects.link(obj)
+obj.modifiers.new("Bind", 'ARMATURE').object = rig
+group = obj.vertex_groups.new(name="leg_L0_4_jnt")
+group.add([0], .8, 'REPLACE')
+group.skin_channel = 123
+conflict = obj.vertex_groups.new(name="calf_l")
+try:
+    skin_names.apply(rig)
+except ValueError as error:
+    assert "calf_l" in str(error)
+assert group.name == "leg_L0_4_jnt" and "thigh_l" not in rig.data.bones
+obj.vertex_groups.remove(conflict)
+assert skin_names.apply(rig) == len(reference)
+assert obj.vertex_groups["knee_l"].skin_channel == 123
+assert abs(obj.vertex_groups["knee_l"].weight(0) - .8) < 1e-6
+for frame, value in ((1, .2), (2, .7)):
+    bpy.context.scene.frame_set(frame)
+    assert abs(rig.pose.bones["knee_l"]["test_channel"] - value) < .0001
+assert bpy.ops.xbone.edit_source_guide() == {'FINISHED'}
+bpy.ops.object.mode_set(mode='OBJECT')
+guide.data.bones["leg_L0"]["div0"] = 3
+assert bpy.ops.xbone.build_rig() == {'FINISHED'}
+assert rig.data.bones["knee_l"]["xbiped_legacy_name"] == "leg_L0_5_jnt"
+assert abs(obj.vertex_groups["knee_l"].weight(0) - .8) < 1e-6
+assert rig.data.bones["thigh_roll_03_l"].parent.name == "thigh_roll_02_l"
+print("XBiped legacy migration, conflict preflight, keyed paths and variable leg divisions passed")

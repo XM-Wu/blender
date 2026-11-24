@@ -164,8 +164,9 @@ def template_points(path, scale, up_axis):
         "game_biped" if game else "biped", scale, up_axis)
 
 
-def new_guide(context, name):
-    bpy.ops.object.xbone_add(enter_editmode=True)
+def new_guide(context, name, *, at_origin=False):
+    placement = {"location": (0.0, 0.0, 0.0)} if at_origin else {}
+    bpy.ops.object.xbone_add(enter_editmode=True, **placement)
     obj = context.edit_object
     obj.name = name
     obj.data.edit_bones.remove(obj.data.edit_bones.active)
@@ -183,9 +184,9 @@ def joint(edit, name, point, parent=None, length=0.1):
     return bone
 
 
-def import_template(context, template, name):
+def import_template(context, template, name, *, at_origin=False, fit_frames=None):
     specs, shapes, settings, biped, display = template
-    obj = new_guide(context, name)
+    obj = new_guide(context, name, at_origin=at_origin)
     edit = obj.data.edit_bones
     names = {}
     span = max(p.z for _, p, *_ in specs.values()) - min(p.z for _, p, *_ in specs.values())
@@ -227,13 +228,22 @@ def import_template(context, template, name):
         if reference_positions:
             bpy.ops.object.mode_set(mode='EDIT')
             edit = obj.data.edit_bones
+            up_vectors = {}
             for key, actual in names.items():
                 bone = edit[actual]
+                segment = fit_frames.get(key) if fit_frames else None
+                if segment:
+                    delta = segment.rotation @ (bone.tail - bone.head) * segment.scale
+                    up_vectors[actual] = segment.rotation @ bone.matrix.to_3x3().col[2]
                 bone.translate(specs[key][1] - bone.head)
+                if segment:
+                    bone.tail = bone.head + delta
             for bone in edit:
                 child = next((b for b in bone.children if (b.head-bone.head).length > 0.0001), None)
                 if child:
                     bone.tail = child.head
+                if bone.name in up_vectors:
+                    bone.align_roll(up_vectors[bone.name])
             bpy.ops.object.mode_set(mode='OBJECT')
     from . import guide_display
     guide_display.install(obj, names, *display)

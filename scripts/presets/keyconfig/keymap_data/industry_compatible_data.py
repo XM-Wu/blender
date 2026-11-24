@@ -191,7 +191,9 @@ def _template_items_editmode_mesh_select_mode(params):
 # Window, Screen, Areas, Regions
 
 def km_window(params):
-    items = []
+    items = [
+        ("xbone.cancel_landmarks", {"type": 'ESC', "value": 'PRESS'}, None),
+    ]
     keymap = (
         "Window",
         {"space_type": 'EMPTY', "region_type": 'WINDOW'},
@@ -2500,6 +2502,7 @@ def km_pose(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         *_template_items_animation(),
         ("object.parent_set", {"type": 'P', "value": 'PRESS'}, None),
         ("pose.hide", {"type": 'H', "value": 'PRESS', "ctrl": True},
@@ -2915,6 +2918,7 @@ def km_weight_paint(params):
     )
 
     items.extend([
+        ("paint.skin_switch_pose", {"type": 'TAB', "value": 'PRESS'}, None),
         # Brush Strokes
         ("paint.weight_paint", {"type": 'LEFTMOUSE', "value": 'PRESS'},
          {"properties": [("mode", 'NORMAL')]}),
@@ -2929,16 +2933,16 @@ def km_weight_paint(params):
         # Vertex Lock Pie
         op_menu_pie("VIEW3D_MT_wpaint_vgroup_lock_pie", {"type": 'I', "value": 'PRESS', "ctrl": True, "alt": True}),
         # Brush properties
-        ("brush.scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'LEFT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 0.9)]}),
-        ("brush.scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True},
+        ("paint.weight_brush_scale_size", {"type": 'RIGHT_BRACKET', "value": 'PRESS', "repeat": True, "shift": -1},
          {"properties": [("scalar", 1.0 / 0.9)]}),
         *_template_paint_radial_control("weight_paint", weight=True),
         # Mask Modes
-        ("wm.context_toggle", {"type": 'ONE', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask")]}),
-        ("wm.context_toggle", {"type": 'TWO', "value": 'PRESS'},
-         {"properties": [("data_path", "weight_paint_object.data.use_paint_mask_vertex")]}),
+        ("paint.native_weight_mask_toggle", {"type": 'ONE', "value": 'PRESS'},
+         {"properties": [("target", 'FACE')]}),
+        ("paint.native_weight_mask_toggle", {"type": 'TWO', "value": 'PRESS'},
+         {"properties": [("target", 'VERTEX')]}),
         # Stabilize Stroke
         ("wm.context_toggle", {"type": 'L', "value": 'PRESS'},
          {"properties": [("data_path", "tool_settings.weight_paint.brush.use_smooth_stroke")]}),

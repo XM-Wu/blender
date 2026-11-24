@@ -82,9 +82,12 @@ class VIEW3D_HT_tool_header(Header):
         if tool_mode == 'PAINT_WEIGHT' and "_skin_source" in context.active_object:
             state = context.active_object.skin_layers
             layout.prop(state, "brush", text="")
+            layout.prop(state, "brush_area", expand=True)
             layout.prop(state, "value")
             layout.prop(state, "radius")
-            layout.prop(state, "strength", slider=True)
+            strength = layout.row()
+            strength.enabled = state.brush != 'HARD'
+            strength.prop(state, "strength", slider=True)
             return
 
         # Active Tool
@@ -956,7 +959,14 @@ class VIEW3D_HT_header(Header):
             from .space_weight_layers import draw_source
             draw_source(layout, obj)
             layout.operator("paint.skin_switch_pose", text="Pose Rig", icon='POSE_HLT')
+            from xbone_rigging import draw_rig_visibility
+            draw_rig_visibility(layout, obj.find_armature())
         elif mode_string == 'POSE':
+            from xbone_rigging import draw_rig_visibility
+            draw_rig_visibility(layout, obj)
+            bone = context.active_pose_bone
+            if bone and bone.name in (obj.get("xbiped_hand_L"), obj.get("xbiped_hand_R")) and "grip" in bone:
+                layout.prop(bone, '["grip"]', text="Grip", slider=True)
             session = context.view_layer.skin_pose_session
             if session.rig == obj and session.source:
                 layout.operator("paint.skin_switch_pose", text="Back to Weight Paint", icon='WPAINT_HLT')
@@ -1369,6 +1379,9 @@ class VIEW3D_MT_editor_menus(Menu):
         else:
             layout.menu("VIEW3D_MT_object")
             layout.template_node_operator_asset_root_items()
+
+        if mode_string == 'OBJECT':
+            layout.menu("VIEW3D_MT_clear_unused")
 
 
 # ********** Menu **********
@@ -3151,6 +3164,17 @@ class VIEW3D_MT_object_rigid_body(Menu):
         layout.operator("rigidbody.connect", text="Connect")
 
 
+class VIEW3D_MT_clear_unused(Menu):
+    bl_label = "Clear"
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT'
+
+    def draw(self, context):
+        self.layout.operator_enum("object.clear_unused", "type")
+
+
 class VIEW3D_MT_object_clear(Menu):
     bl_label = "Clear"
 
@@ -3164,6 +3188,8 @@ class VIEW3D_MT_object_clear(Menu):
         layout.separator()
 
         layout.operator("object.origin_clear", text="Origin")
+        layout.separator()
+        layout.operator_enum("object.clear_unused", "type")
 
 
 class VIEW3D_MT_object_context_menu(Menu):
@@ -5849,6 +5875,7 @@ class VIEW3D_MT_edit_armature(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.resample_chain")
             layout.operator("armature.symmetrize")
             layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
@@ -5879,6 +5906,7 @@ class VIEW3D_MT_edit_armature(Menu):
         layout.separator()
 
         layout.operator("armature.subdivide", text="Subdivide")
+        layout.operator("armature.resample_chain")
         layout.operator("armature.switch_direction", text="Switch Direction")
 
         layout.separator()
@@ -5919,6 +5947,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
         if arm.is_xbone:
             layout.operator("armature.xbone_joint_add", icon='ADD')
             layout.operator("armature.extrude_move", text="Extrude Joint")
+            layout.operator("armature.resample_chain")
             layout.operator("armature.symmetrize")
             layout.operator("armature.batch_rename_hierarchy")
             layout.operator("armature.delete", text="Delete Joints")
@@ -5926,6 +5955,7 @@ class VIEW3D_MT_armature_context_menu(Menu):
 
         # Add
         layout.operator("armature.subdivide", text="Subdivide")
+        layout.operator("armature.resample_chain")
         layout.operator("armature.duplicate_move", text="Duplicate", icon='DUPLICATE')
         layout.operator("armature.extrude_move")
         if arm.use_mirror_x:
@@ -9179,8 +9209,11 @@ class VIEW3D_PT_paint_weight_context_menu(Panel):
         if "_skin_source" in context.active_object:
             state = context.active_object.skin_layers
             layout.prop(state, "brush")
+            layout.prop(state, "brush_area", expand=True)
             layout.prop(state, "value", slider=True)
-            layout.prop(state, "strength", slider=True)
+            strength = layout.row()
+            strength.enabled = state.brush != 'HARD'
+            strength.prop(state, "strength", slider=True)
             layout.prop(state, "radius")
             return
 
@@ -9611,6 +9644,7 @@ classes = (
     VIEW3D_MT_object_animation,
     VIEW3D_MT_object_asset,
     VIEW3D_MT_object_rigid_body,
+    VIEW3D_MT_clear_unused,
     VIEW3D_MT_object_clear,
     VIEW3D_MT_object_context_menu,
     VIEW3D_MT_object_convert,

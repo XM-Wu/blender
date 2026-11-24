@@ -654,12 +654,16 @@ static Text *rna_Main_texts_load(Main *bmain,
   return txt;
 }
 
-static bArmature *rna_Main_armatures_new(Main *bmain, const char *name)
+static bArmature *rna_Main_armatures_new(Main *bmain, const char *name, bool use_xbone)
 {
   char safe_name[MAX_ID_NAME - 2];
   rna_idname_validate(name, safe_name);
 
   bArmature *arm = BKE_armature_add(bmain, safe_name);
+  if (use_xbone) {
+    arm->flag |= ARM_XBONE;
+    arm->deformflag &= ~ARM_DEF_ENVELOPE;
+  }
   id_us_min(&arm->id);
 
   WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
@@ -1916,6 +1920,7 @@ void RNA_def_main_armatures(BlenderRNA *brna, PropertyRNA *cprop)
   RNA_def_function_ui_description(func, "Add a new armature to the main database");
   parm = RNA_def_string(func, "name", "Armature", 0, "", "New name for the data-block");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  RNA_def_boolean(func, "use_xbone", false, "XBone", "Create a point-joint armature");
   /* return type */
   parm = RNA_def_pointer(func, "armature", "Armature", "", "New armature data-block");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, ParameterFlag(0));

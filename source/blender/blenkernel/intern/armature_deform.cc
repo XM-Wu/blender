@@ -296,6 +296,7 @@ struct ArmatureDeformParams {
     VArray<float> weights;
   };
   Vector<LayerChannel> layer_channels;
+  Vector<const bPoseChannel *> muted_envelopes;
   bool use_layer_channels = false;
 
   /* List of all pose channels on the target object. */
@@ -449,7 +450,7 @@ static void armature_vert_task_with_mixer(const ArmatureDeformParams &params,
   if (!deformed && params.use_envelope) {
     for (const bPoseChannel *pchan : params.pose_channels) {
       const Bone *bone = pchan->bone_get(*params.armature);
-      if (!(bone->flag & BONE_NO_DEFORM)) {
+      if (!(bone->flag & BONE_NO_DEFORM) && !params.muted_envelopes.contains(pchan)) {
         contrib += dist_bone_deform({pchan, bone}, co, mixer);
       }
     }
@@ -555,10 +556,18 @@ static void init_layer_channels(const Object &ob,
     }
   }
   params.use_layer_channels = true;
+  const IDProperty *muted = IDP_GetPropertyTypeFromGroup(ob.id.properties, "_skin_muted", IDP_GROUP);
   for (const auto [index, group] : groups.enumerate()) {
     const PChanBone joint = params.pose_channel_by_vertex_group[index];
     if (joint.pchan && group.skin_channel > 0) {
-      const std::string name = std::string(prefix) + "_r" + std::to_string(group.skin_channel);
+      const std::string channel = std::to_string(group.skin_channel);
+      if (muted && IDP_GetPropertyFromGroup_null(muted, channel.c_str())) {
+        if (params.use_envelope) {
+          params.muted_envelopes.append(joint.pchan);
+        }
+        continue;
+      }
+      const std::string name = std::string(prefix) + "_r" + channel;
       auto values = layer_values<float>(mesh, bm, name, CD_PROP_FLOAT);
       if (values) {
         params.layer_channels.append({joint, std::move(values)});

@@ -374,6 +374,8 @@ foreach(test_name IN ITEMS
   sdf_remap
   skin_layers
   skin_layers_v2
+  skin_layer_brush
+  skin_layer_io
   uv_fit_align
   uv_fit_lifetime
   uv_group_buttons
@@ -802,6 +804,18 @@ add_blender_test(
   --testdir "${TEST_SRC_DIR}/animation"
 )
 
+add_blender_test(
+  bl_object_clear_unused
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_object_clear_unused.py
+)
+set_tests_properties(bl_object_clear_unused PROPERTIES LABELS "xblender")
+
+add_blender_test(
+  bl_io_xbone_gltf
+  --python ${CMAKE_CURRENT_LIST_DIR}/bl_io_xbone_gltf.py
+)
+set_tests_properties(bl_io_xbone_gltf PROPERTIES LABELS "xblender")
+
 if(WITH_IO_FBX)
   add_blender_test(
     bl_io_xbone_fbx
@@ -822,15 +836,39 @@ if(WITH_IK_SOLVER AND WITH_IO_FBX)
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_selector.py
   )
   add_blender_test(
+    bl_xbone_guide_rig_switch
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_guide_rig_switch.py
+  )
+  add_blender_test(
     bl_xbone_rigging_editor
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_rigging_editor.py
+  )
+  add_blender_test(
+    bl_xbone_mesh_bindings
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_mesh_bindings.py
+  )
+  add_blender_test(
+    bl_xbone_landmarks
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_landmarks.py
   )
   add_blender_test(
     bl_xbone_xbiped
     --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_xbiped.py
   )
+  add_blender_test(
+    bl_xbone_hand_grip
+    --disable-autoexec --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_hand_grip.py
+  )
+  add_blender_test(
+    bl_xbone_guide_chains
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_guide_chains.py
+  )
+  add_blender_test(
+    bl_xbone_custom_attachment
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_xbone_custom_attachment.py
+  )
   set_tests_properties(
-    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_xbiped
+    bl_xbone_rigging bl_xbone_selector bl_xbone_rigging_editor bl_xbone_guide_rig_switch bl_xbone_mesh_bindings bl_xbone_landmarks bl_xbone_xbiped bl_xbone_hand_grip bl_xbone_guide_chains bl_xbone_custom_attachment
     PROPERTIES LABELS "xblender"
   )
 endif()
@@ -1882,6 +1920,11 @@ endif()
 # ------------------------------------------------------------------------------
 
 if(WITH_UI_TESTS)
+  if(WIN32)
+    add_python_test(wm_last_monitor_win32 ${CMAKE_CURRENT_LIST_DIR}/bl_window_monitor_win32.py "${TEST_BLENDER_EXE}")
+    set_tests_properties(wm_last_monitor_win32 PROPERTIES LABELS "xblender" SKIP_RETURN_CODE 77)
+  endif()
+
   # This could be generated with:
   # `"${TEST_PYTHON_EXE}" "${CMAKE_CURRENT_LIST_DIR}/ui_simulate/run.py" --list-tests`
   # list explicitly so changes bisecting/updated are sure to re-run CMake.

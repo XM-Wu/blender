@@ -583,7 +583,8 @@ def pick_bone_rotation(gltf, bone_id, parent_rot):
     A bone's tip lies on its local +Y axis so rotating a bone let's us
     adjust the bone direction.
     """
-    if bpy.app.debug_value == 100:
+    # Point joints keep the imported axes, including terminal and branching joints.
+    if gltf.import_settings.get('use_xbone', False) or bpy.app.debug_value == 100:
         return None
 
     if gltf.import_settings['bone_heuristic'] == 'BLENDER':

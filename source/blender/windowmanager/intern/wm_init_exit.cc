@@ -536,6 +536,9 @@ void WM_exit_ex(bContext *C, const bool do_python_exit, const bool do_user_exit_
   /* NOTE: same code copied in `wm_files.cc`. */
   if (C && wm) {
     if (do_user_exit_actions) {
+#ifdef _WIN32
+      wm_window_monitor_store(*wm, CTX_wm_window(C));
+#endif
       wm_exit_project_data_store(CTX_data_main(C));
 
       /* Save quit.blend. */

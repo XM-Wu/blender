@@ -1,0 +1,91 @@
+{
+    "mesh":{"triangles":[0,1,2,2,1,3],"vertPositions":[-50.0,0.0,50.0,50.0,0.0,50.0,-50.0,0.0,-50.0,50.0,0.0,-50.0]},
+    "influences": [{
+            "pivot": [0.0, 0.0, 0.0],
+            "path": "|Root",
+            "index": 0,
+            "labelText": "",
+            "labelSide": 0
+        }, {
+            "pivot": [20.0, 30.0, 40.0],
+            "path": "|Root|Arm",
+            "index": 1,
+            "labelText": "",
+            "labelSide": 0
+        }],
+    "layers": [{
+            "id": 1,
+            "name": "Base",
+            "enabled": true,
+            "opacity": 1.0,
+            "index": 0,
+            "paintTarget": null,
+            "paintTargets": [],
+            "parentId": null,
+            "children": [],
+            "effects": {
+                "mirrorMask": false,
+                "mirrorWeights": false,
+                "mirrorDq": false,
+                "mirrorDirection": 1
+            },
+            "influences": {
+                "0": [0.6163174857542736, 0.5, 0.8854314651024243, 0.7967644906918137],
+                "1": [0.38368251424572638, 0.5, 0.1145685348975757, 0.20323550930818636]
+            }
+        }, {
+            "id": 2,
+            "name": "Group",
+            "enabled": true,
+            "opacity": 1.0,
+            "index": 1,
+            "paintTarget": "mask",
+            "paintTargets": ["mask"],
+            "parentId": null,
+            "children": [3, 4],
+            "effects": {
+                "mirrorMask": false,
+                "mirrorWeights": false,
+                "mirrorDq": false,
+                "mirrorDirection": 1
+            },
+            "influences": {}
+        }, {
+            "id": 3,
+            "name": "Arm weights",
+            "enabled": true,
+            "opacity": 0.75,
+            "index": 0,
+            "paintTarget": null,
+            "paintTargets": [],
+            "parentId": 2,
+            "children": [],
+            "effects": {
+                "mirrorMask": false,
+                "mirrorWeights": false,
+                "mirrorDq": false,
+                "mirrorDirection": 1
+            },
+            "mask": [0.1, 0.5, 0.7, 0.8],
+            "influences": {
+                "1": [0.0, 0.3, 0.7, 1.0]
+            }
+        }, {
+            "id": 4,
+            "name": "Second",
+            "enabled": false,
+            "opacity": 1.0,
+            "index": 1,
+            "paintTarget": null,
+            "paintTargets": [],
+            "parentId": 2,
+            "children": [],
+            "effects": {
+                "mirrorMask": false,
+                "mirrorWeights": false,
+                "mirrorDq": false,
+                "mirrorDirection": 1
+            },
+            "influences": {}
+        }]
+}

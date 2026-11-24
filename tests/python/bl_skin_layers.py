@@ -110,13 +110,13 @@ def run():
     assert bpy.ops.paint.skin_influence(bone="Arm") == {'FINISHED'}
     state.value, state.strength = 0.6, 1.0
     assert bpy.ops.paint.skin_flood() == {'FINISHED'}
-    near(posed_x(), 1.2)
+    near(posed_x(), 2)
     state.target = 'MASK'
     state.value = 0.5
     bpy.ops.paint.skin_flood()
     state.layers[1].opacity = 0.5
-    near(posed_x(), 0.3)
-    near(read_values(mesh, state.prefix + "_r" + str(clavicle.skin_channel)), [0.85] * 3)
+    near(posed_x(), 0.5)
+    near(read_values(mesh, state.prefix + "_r" + str(clavicle.skin_channel)), [0.75] * 3)
     near(clavicle.weight(0), 1)
     state.layers[1].enabled = False
     near(posed_x(), 0)
@@ -128,13 +128,13 @@ def run():
     clavicle.remove([0])
     near(posed_x(), 2)
     bpy.ops.paint.skin_source()
-    near(posed_x(), 0.3)
+    near(posed_x(), 0.5)
 
     bpy.ops.paint.skin_layer_edit(action='DUPLICATE')
     assert len(state.layers) == 3
     bpy.ops.paint.skin_layer_edit(action='DOWN')
     bpy.ops.paint.skin_layer_edit(action='DELETE')
-    near(posed_x(), 0.3)
+    near(posed_x(), 0.5)
     # Linked duplicates start with the same attributes and separate on the first write.
     twin = obj.copy()
     scene.collection.objects.link(twin)
@@ -145,18 +145,19 @@ def run():
         assert twin.skin_layers.prefix == state.prefix
     twin.skin_layers.layers[1].opacity = 0
     assert twin.skin_layers.prefix != state.prefix
-    near(posed_x(), 0.3)
+    assert twin["_skin_preview"].startswith(twin.skin_layers.prefix + "_")
+    near(posed_x(), 0.5)
     bpy.data.objects.remove(twin, do_unlink=True)
     bpy.context.view_layer.objects.active = obj
     arm.bones['Arm'].name = 'Upper Arm'
-    near(posed_x(), 0.3)
-    check_render_pose(obj, 0.3)
+    near(posed_x(), 0.5)
+    check_render_pose(obj, 0.5)
     mod.show_in_editmode = True
     bpy.ops.object.mode_set(mode='EDIT')
     evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
     edit_result = evaluated.to_mesh()
     try:
-        near(edit_result.vertices[0].co.x, 0.3)
+        near(edit_result.vertices[0].co.x, 0.5)
     finally:
         evaluated.to_mesh_clear()
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -178,7 +179,7 @@ def run():
     bpy.ops.paint.skin_flood()
     near(read_values(mesh, key), [0, 0.2, 0.2])
     bpy.ops.paint.skin_layer_edit(action='DELETE')
-    near(posed_x(), 0.3)
+    near(posed_x(), 0.5)
 
     edited = obj.copy()
     edited.data = mesh.copy()
@@ -190,7 +191,7 @@ def run():
     near(edited.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.vertices[0].co.x, 2)
     bpy.data.objects.remove(edited, do_unlink=True)
     assert bpy.ops.paint.skin_bake() == {'FINISHED'}
-    near(obj.vertex_groups['Upper Arm'].weight(0), 0.15)
+    near(obj.vertex_groups['Upper Arm'].weight(0), 0.25)
     near(obj.vertex_groups['Cloth Pin'].weight(0), 0.7)
 
     with tempfile.TemporaryDirectory() as folder:
@@ -199,7 +200,7 @@ def run():
         bpy.ops.wm.open_mainfile(filepath=path)
         obj = bpy.data.objects["Shoulder"]
         assert len(obj.skin_layers.layers) == 2
-        near(posed_x(), 0.3)
+        near(posed_x(), 0.5)
     print("PASS layered skin weights, masks, pose coordinates, independent sources, linked duplicates, rename, bake, reload")
 
 

@@ -27740,8 +27740,272 @@ msgid "UV Mirror"
 msgstr "UV 镜像"
 
 
+msgid "Match Finger Joints"
+msgstr "匹配手指关节"
+
+
+msgid "Match Face"
+msgstr "匹配面部"
+
+
+msgid "Add Detail Landmarks"
+msgstr "添加细部标记"
+
+
+msgid "Hide Other Landmarks"
+msgstr "隐藏其他标记"
+
+
+msgid "Edit XBiped Landmarks"
+msgstr "重新调整 XBiped 标记"
+
+
+msgid "Update XBiped Guide"
+msgstr "更新 XBiped Guide"
+
+
+msgid "Index Finger"
+msgstr "食指"
+
+
+msgid "Middle Finger"
+msgstr "中指"
+
+
+msgid "Ring Finger"
+msgstr "无名指"
+
+
+msgid "Little Finger"
+msgstr "小指"
+
+
+msgid "Base Joint"
+msgstr "指根"
+
+
+msgid "Second Joint"
+msgstr "第二关节"
+
+
+msgid "Third Joint"
+msgstr "第三关节"
+
+
+msgid "Fingertip"
+msgstr "指尖"
+
+
+msgid "Eye Center"
+msgstr "眼球中心"
+
+
+msgid "Eye Aim Target"
+msgstr "眼睛注视目标"
+
+
+msgid "Mouth Base"
+msgstr "口部根节点"
+
+
+msgid "Mouth Rotation Center"
+msgstr "口部旋转中心"
+
+
+msgid "Jaw"
+msgstr "下颌"
+
+
+msgid "Upper Lip"
+msgstr "上唇"
+
+
+msgid "Lower Lip"
+msgstr "下唇"
+
+
+msgid "Place XBiped Landmarks"
+msgstr "放置 XBiped 标记"
+
+
+msgid "XBiped Landmarks"
+msgstr "XBiped 标记向导"
+
+
+msgid "Symmetrical Character"
+msgstr "对称角色"
+
+
+msgid "Character Faces"
+msgstr "角色朝向"
+
+
+msgid "Start at the world origin and fit an XBiped guide using movable landmarks"
+msgstr "从世界原点开始，通过移动标记拟合 XBiped Guide"
+
+
+msgid "Previous Marker"
+msgstr "上一个标记"
+
+
+msgid "Discard Markers"
+msgstr "丢弃标记"
+
+
+msgid "Generate Fitted XBiped Guide"
+msgstr "生成拟合的 XBiped Guide"
+
+
+msgid "Review markers in the viewport"
+msgstr "在视图中检查标记，可用 G 调整"
+
+
+msgid "Select the next landmark, creating it at the XBiped template position on its first visit"
+msgstr "选中下一个标记，首次放置时在 XBiped 模板的对应关节位置生成"
+
+
+msgid "Pelvis"
+msgstr "骨盆"
+
+
+msgid "Base of Neck"
+msgstr "颈根"
+
+
+msgid "Base of Head"
+msgstr "头部根关节（耳下）"
+
+
+msgid "Top of Head"
+msgstr "头顶"
+
+
+msgid "Shoulder"
+msgstr "肩关节"
+
+
+msgid "Elbow"
+msgstr "肘关节"
+
+
+msgid "Wrist"
+msgstr "手腕"
+
+
+msgid "Middle Fingertip"
+msgstr "中指尖"
+
+
+msgid "Hip Joint"
+msgstr "髋关节"
+
+
+msgid "Knee"
+msgstr "膝关节"
+
+
+msgid "Toe Tip"
+msgstr "前脚趾尖"
+
+
+msgid "Open a 3D Viewport beside Rigging to place markers"
+msgstr "请在 Rigging 旁打开 3D 视图以放置标记"
+
+
+msgid "Click on a source mesh"
+msgstr "请点击用于拟合的人物网格"
+
+
+msgid "Place the left shoulder and hip on the character's left (right in the front view)"
+msgstr "请将左肩和左髋放在角色左侧（正视图画面右侧）"
+
+
+msgid "Select an upright character mesh"
+msgstr "请选择直立的人物网格"
+
+
+msgid "Place all required markers first"
+msgstr "请先放置全部标记"
+
+
+msgid "Check the vertical order of the toe, pelvis, neck and head markers"
+msgstr "请检查脚趾、骨盆、颈根和头部标记的上下顺序"
+
+
+msgid "Adjacent joint markers must be separated"
+msgstr "相邻关节标记不能重叠"
+
+
 msgid "Mesh Mirror Axis"
 msgstr "模型镜像轴"
+
+
+msgid "Show Skeleton"
+msgstr "显示骨架"
+
+
+msgid "Mesh Bindings"
+msgstr "网格绑定"
+
+
+msgid "Add Armature to Selected Meshes"
+msgstr "为选中网格添加骨架修改器"
+
+
+msgid "Select Bound Meshes"
+msgstr "全选绑定网格"
+
+
+msgid "Remove XBone Modifiers"
+msgstr "清除当前 XBone 修改器"
+
+
+msgid "Remove modifiers targeting {rig} from {count} scene meshes?"
+msgstr "清除当前场景中 {count} 个网格上指向 {rig} 的骨架修改器？"
+
+
+msgid "Select an XBone to manage mesh bindings"
+msgstr "选择 XBone 以管理绑定网格"
+
+
+msgid "No bound meshes"
+msgstr "没有绑定的网格"
+
+
+msgid "Import Layers"
+msgstr "导入层"
+
+
+msgid "Export Layers"
+msgstr "导出层"
+
+
+msgid "Import Skin Layers"
+msgstr "导入蒙皮权重层"
+
+
+msgid "Export Skin Layers"
+msgstr "导出蒙皮权重层"
+
+
+msgid "Vertex Matching"
+msgstr "顶点匹配方式"
+
+
+msgid "Closest Surface Point"
+msgstr "最近表面点"
+
+
+msgid "UV Space"
+msgstr "UV 空间"
+
+
+msgid "Vertex ID"
+msgstr "顶点编号"
+
+
+msgid "Source UV Mesh"
+msgstr "源 UV 网格"
 
 
 msgid "Local mesh axis used to pair symmetric faces"
@@ -168202,3 +168466,19 @@ msgstr "距地平面距离"
 msgctxt "Operator"
 msgid "Restore Defaults"
 msgstr "恢复默认"
+
+msgctxt "Operator"
+msgid "Apply Guide and Rebuild"
+msgstr "应用 Guide 并重建"
+
+
+msgid "Mirror Left to Right"
+msgstr "从左侧镜像到右侧"
+
+
+msgid "Cancel Landmark Editing"
+msgstr "取消编辑标记"
+
+
+msgid "Guide updated. Use Apply Guide and Rebuild to update the rig."
+msgstr "Guide 已更新。要更新 Rig，请点击“应用 Guide 并重建”。"

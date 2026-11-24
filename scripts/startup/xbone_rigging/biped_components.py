@@ -227,7 +227,8 @@ def connect(rig, guide):
         for index, reference in enumerate(refs):
             con = pose[base].constraints.new('CHILD_OF')
             con.target, con.subtarget = rig, reference
-            con.owner_space = con.target_space = 'POSE'
+            # Child Of returns a world matrix, including for a pose-space owner.
+            con.owner_space, con.target_space = 'POSE', 'WORLD'
             con.inverse_matrix = arm.bones[reference].matrix_local.inverted_safe()
             driver = con.driver_add("influence").driver
             var = driver.variables.new()

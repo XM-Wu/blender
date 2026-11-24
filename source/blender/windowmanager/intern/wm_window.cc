@@ -153,6 +153,9 @@ static struct wmInitStruct {
   GHOST_TWindowState windowstate = GHOST_WINDOW_STATE_DEFAULT;
   eWinOverrideFlag override_flag;
 
+#ifdef _WIN32
+  bool opened_main_window = false;
+#endif
   bool window_frame = true;
   bool window_focus = true;
   bool native_pixels = true;
@@ -1130,6 +1133,11 @@ static void wm_window_ghostwindow_ensure(wmWindowManager *wm, wmWindow *win, boo
 
   if (win->runtime->ghostwin == nullptr) {
     new_window = true;
+#ifdef _WIN32
+    const bool first_main = !wm_init_state.opened_main_window && !is_dialog && !win->parent &&
+                            !WM_window_is_temp_screen(win);
+    const bool restore_monitor = first_main && !(wm_init_state.override_flag & WIN_OVERRIDE_GEOM);
+#endif
     if ((win->sizex == 0) || (wm_init_state.override_flag & WIN_OVERRIDE_GEOM)) {
       win->posx = wm_init_state.start[0];
       win->posy = wm_init_state.start[1];
@@ -1150,6 +1158,12 @@ static void wm_window_ghostwindow_ensure(wmWindowManager *wm, wmWindow *win, boo
       wm_init_state.override_flag &= ~WIN_OVERRIDE_WINSTATE;
     }
 
+#ifdef _WIN32
+    if (restore_monitor) {
+      wm_window_monitor_restore(*win);
+    }
+#endif
+
     /* Without this, cursor restore may fail, see: #45456. */
     if (win->cursor == 0) {
       win->cursor = WM_CURSOR_DEFAULT;
@@ -1167,6 +1181,11 @@ static void wm_window_ghostwindow_ensure(wmWindowManager *wm, wmWindow *win, boo
     wm_window_title_text(wm, win, window_filepath_fn, win_title);
     win_title.push_back('\0');
     wm_window_ghostwindow_add(wm, win_title.data(), win, is_dialog);
+#ifdef _WIN32
+    if (first_main && win->runtime->ghostwin) {
+      wm_init_state.opened_main_window = true;
+    }
+#endif
   }
 
   if (win->runtime->ghostwin != nullptr) {
@@ -1274,7 +1293,7 @@ static bool wm_window_update_size_position(wmWindow *win)
     int2 scr_size;
     if (wm_get_desktopsize(scr_size)) {
       posx = client_rect.l_;
-      posy = scr_size[1] - client_rect.t_ - win->sizey;
+      posy = scr_size[1] - client_rect.t_ - sizey;
     }
   }
 

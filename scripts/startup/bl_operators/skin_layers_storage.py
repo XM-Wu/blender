@@ -71,6 +71,9 @@ def unique_storage(obj):
                 write_values(mesh, state.prefix + key[len(old):], read_values(mesh, key))
     if "_skin_source" in obj:
         obj["_skin_source"] = state.prefix
+        preview = obj.get("_skin_preview", "")
+        if preview.startswith(old + "_"):
+            obj["_skin_preview"] = state.prefix + preview[len(old):]
 
 
 def copy_marker(mesh, source, destination):
@@ -85,9 +88,9 @@ def topology_error(obj):
     mesh = obj.data
     marker = mesh.attributes.get(state.prefix)
     if marker is None or len(mesh.vertices) != state.vertex_count:
-        return "Mesh topology changed; restore the source topology before painting or baking"
+        return "Mesh topology changed; restore it or use Import Layers to transfer weights onto this mesh"
     if not original_vertex_order(marker, state.vertex_count):
-        return "Vertex order changed; restore the source topology before painting or baking"
+        return "Vertex order changed; restore it or use Import Layers to transfer weights onto this mesh"
     return None
 
 

@@ -66,6 +66,10 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+        self.node_operator(layout, "ShaderNodeShaderInfo", poll=object_eevee_shader_nodes_poll(context))
+        self.node_operator(layout, "ShaderNodeNPRLightInfo", poll=object_eevee_shader_nodes_poll(context))
+        self.node_operator(layout, "ShaderNodeScreenspaceInfo", poll=object_eevee_shader_nodes_poll(context))
+        self.node_operator(layout, "ShaderNodeNPRRim", poll=object_eevee_shader_nodes_poll(context))
 
         self.draw_menu(layout, "Input/Constant")
         layout.separator()
@@ -184,6 +188,7 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+        self.node_operator(layout, "ShaderNodeOutlineControl", poll=object_eevee_shader_nodes_poll(context))
 
         self.node_operator(
             layout,
@@ -388,6 +393,7 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
 
     def draw(self, _context):
         layout = self.layout
+        self.node_operator(layout, "ShaderNodeImageToClosure", poll=object_eevee_shader_nodes_poll(context))
 
         self.node_operator(layout, "ShaderNodeTexBrick")
         self.node_operator(layout, "ShaderNodeTexChecker")
@@ -518,6 +524,9 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+        self.node_operator(layout, "ShaderNodeGLSLFunction", poll=object_eevee_shader_nodes_poll(context))
+        self.node_operator(layout, "ShaderNodePortalIn", poll=object_eevee_shader_nodes_poll(context))
+        self.node_operator(layout, "ShaderNodePortalOut", poll=object_eevee_shader_nodes_poll(context))
 
         self.draw_menu(layout, "Utilities/Math")
         self.draw_menu(layout, "Utilities/Text")

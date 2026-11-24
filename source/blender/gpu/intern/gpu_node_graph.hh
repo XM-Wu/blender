@@ -78,7 +78,9 @@ ENUM_OPERATORS(GPUNodeTag)
 struct GPUNode {
   GPUNode *next, *prev;
 
-  const char *name;
+  char name[128];
+  char dependency_name[128];
+  eGPUCustomNodeDependencyFlag dependency_flags;
 
   /* Internal flag to mark nodes during pruning */
   GPUNodeTag tag;

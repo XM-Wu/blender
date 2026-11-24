@@ -787,6 +787,7 @@ class RENDER_PT_eevee_film(RenderButtonsPanel, Panel):
 
         col = layout.column()
         col.prop(rd, "filter_size")
+        col.prop(props, "use_outline", text="NPR Outlines")
         col.prop(rd, "film_transparent", text="Transparent")
 
         col = layout.column(align=False, heading="Overscan")

@@ -404,7 +404,8 @@ float node_attribute_light_cutoff_distance_impl([[resource_table]] KernelGlobals
 
 void scene_time_uniforms([[resource_table]] KernelGlobals & /*kg*/,
                          float & /*seconds*/,
-                         float & /*frame*/)
+                         float & /*frame*/,
+                         float & /*timeline*/)
 {
 }
 
@@ -432,6 +433,61 @@ void node_light_accumulation_impl([[resource_table]] KernelGlobals & /*kg*/,
                                   float3 /*transmission_color*/,
                                   float /*weight*/,
                                   Closure & /*result*/)
+{
+}
+
+void screenspace_info_impl([[resource_table]] KernelGlobals &kg, const ShadingData &sd,
+                           float3 position, float explicit_position,
+                           float4 &color, float &depth)
+{
+  color = float4(0);
+  depth = 0.0f;
+}
+
+void npr_rim_impl(float4 color, float strength, float3 normal,
+                  float angle, float arc_length, float arc_falloff,
+                  float thickness, float thickness_falloff,
+                  float width_px, float threshold, float softness, float samples,
+                  float light_bias, float light_factor, float mask, float alpha,
+                  float mode, float supported,
+                  [[resource_table]] KernelGlobals &kg, const ShadingData &sd,
+                  float4 &result, float &factor)
+{
+  result = float4(0);
+  factor = 0.0f;
+}
+
+void npr_shader_info_impl(float3 position, float3 normal, float exponent, float light_group,
+                          [[resource_table]] KernelGlobals &kg, const ShadingData &sd,
+                          float4 &diffuse, float &shadow, float4 &ambient,
+                          float &half_lambert, float &blinn_phong, float &self_shadow, float &cast_shadow)
+{
+  diffuse = float4(0, 0, 0, 1);
+  ambient = float4(0);
+  shadow = self_shadow = cast_shadow = 1.0f;
+  half_lambert = blinn_phong = 0.0f;
+}
+
+void npr_outline_write(
+    float4 line_color,
+    float line_alpha,
+    float line_width,
+    float depth_threshold,
+    float depth_threshold_range,
+    float depth_edge_width,
+    float normal_threshold,
+    float normal_threshold_range,
+    float normal_edge_width,
+    int outline_id,
+    bool id_edge,
+    float id_edge_width,
+    bool freestyle_edge,
+    float expansion_mask,
+    float id_combine,
+    float edge_priority,
+    [[resource_table]] KernelGlobals &kg,
+    ShadingData &sd,
+    Closure &dummy)
 {
 }
 

@@ -32,6 +32,15 @@ set(SRC
   nodes/node_shader_bsdf_hair_principled.cc
   nodes/node_shader_bsdf_metallic.cc
   nodes/node_shader_bsdf_principled.cc
+  nodes/node_shader_portal_in.cc
+  nodes/node_shader_portal_out.cc
+  nodes/node_shader_screenspace_info.cc
+  nodes/node_shader_npr_rim.cc
+  nodes/node_shader_npr_light_info.cc
+  nodes/node_shader_shader_info.cc
+  nodes/node_shader_image_to_closure.cc
+  nodes/node_shader_glsl_function.cc
+  nodes/node_shader_outline_control.cc
   nodes/node_shader_bsdf_ray_portal.cc
   nodes/node_shader_bsdf_refraction.cc
   nodes/node_shader_bsdf_sheen.cc

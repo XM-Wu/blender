@@ -64,6 +64,8 @@ struct GPUSkyBuilder {
 };
 
 struct GPUMaterial {
+  Vector<GPUMaterialGeneratedSource> generated_sources;
+
   /* Contains #gpu::Shader and source code for deferred compilation.
    * Can be shared between materials sharing same node-tree topology. */
   GPUPass *pass = nullptr;
@@ -394,6 +396,51 @@ eGPUMaterialFlag GPU_material_flag(const GPUMaterial *mat)
 {
   return mat->flag;
 }
+
+void GPU_material_generated_source_add(GPUMaterial *material,
+                                       StringRefNull filename,
+                                       Span<StringRefNull> dependencies,
+                                       StringRefNull content)
+{
+  if (material == nullptr || filename.is_empty() || content.is_empty()) {
+    return;
+  }
+
+  GPUMaterialGeneratedSource generated_source;
+  generated_source.filename = filename;
+  generated_source.content = content;
+  generated_source.dependencies.reserve(dependencies.size());
+  for (const StringRefNull dependency : dependencies) {
+    if (!dependency.is_empty()) {
+      generated_source.dependencies.append(dependency);
+    }
+  }
+
+  for (GPUMaterialGeneratedSource &existing_source : material->generated_sources) {
+    if (existing_source.filename == generated_source.filename) {
+      existing_source.dependencies = std::move(generated_source.dependencies);
+      existing_source.content = std::move(generated_source.content);
+      return;
+    }
+  }
+
+  material->generated_sources.append(generated_source);
+}
+
+int GPU_material_generated_source_count(const GPUMaterial *material)
+{
+  return (material != nullptr) ? material->generated_sources.size() : 0;
+}
+
+const GPUMaterialGeneratedSource *GPU_material_generated_source_get(const GPUMaterial *material,
+                                                                    int index)
+{
+  if (material == nullptr || index < 0 || index >= material->generated_sources.size()) {
+    return nullptr;
+  }
+  return &material->generated_sources[index];
+}
+
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag)
 {

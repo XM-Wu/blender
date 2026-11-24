@@ -2695,6 +2695,9 @@ enum FastGI_Method : char {
 };
 
 struct SceneEEVEE {
+  char use_outline = false;
+  char _pad_npr_outline[7] = {};
+
   DNA_DEFINE_CXX_METHODS(SceneEEVEE)
 
   eSceneEEVEE_Flag flag = SCE_EEVEE_TAA_REPROJECTION | SCE_EEVEE_SHADOW_ENABLED;

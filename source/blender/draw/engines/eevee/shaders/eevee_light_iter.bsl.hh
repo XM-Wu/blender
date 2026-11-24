@@ -174,6 +174,11 @@ struct VisibleLightIterator {
     return false;
   }
 
+  int light_index()
+  {
+    return index;
+  }
+
   bool is_directional()
   {
     return phase == 1;

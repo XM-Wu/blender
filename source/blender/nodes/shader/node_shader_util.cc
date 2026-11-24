@@ -6,6 +6,8 @@
  * \ingroup nodes
  */
 
+#include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
 #include <optional>
 
 #include "DNA_node_types.h"
@@ -395,6 +397,53 @@ void node_data_from_gpu_stack(bNodeStack *ns, GPUNodeStack *gs)
   ns->sockettype = gs->sockettype;
 }
 
+const bNodeSocket *node_shader_portal_out_source_socket(const bNode &portal_out)
+{
+  if (portal_out.type_legacy != SH_NODE_PORTAL_OUT) {
+    return nullptr;
+  }
+  const bNodeTree *tree = portal_out.runtime->owner_tree;
+  if (tree == nullptr) {
+    return nullptr;
+  }
+  tree->ensure_topology_cache();
+  return bke::node_tree_runtime::find_shader_portal_source_socket(*tree, portal_out);
+}
+
+void node_shader_gpu_stack_from_portal_out(const bNode &portal_out,
+                                           bNodeStack *stack,
+                                           GPUNodeStack *out)
+{
+  int output_index = 0;
+  const bNodeSocket *available_output = nullptr;
+  for (const bNodeSocket &socket : portal_out.outputs) {
+    node_gpu_stack_from_data(&out[output_index], const_cast<bNodeSocket *>(&socket), nullptr);
+    if (socket.is_available() && available_output == nullptr) {
+      available_output = &socket;
+    }
+    output_index++;
+  }
+  out[output_index].end = true;
+
+  if (available_output == nullptr) {
+    return;
+  }
+
+  const bNodeSocket *source_socket = node_shader_portal_out_source_socket(portal_out);
+  if (source_socket == nullptr) {
+    return;
+  }
+
+  const bNodeStack *source_stack = node_get_socket_stack(stack, const_cast<bNodeSocket *>(source_socket));
+  if (source_stack == nullptr) {
+    return;
+  }
+
+  const int available_index = available_output->index();
+  node_gpu_stack_from_data(
+      &out[available_index], const_cast<bNodeSocket *>(available_output), const_cast<bNodeStack *>(source_stack));
+}
+
 static void gpu_stack_from_data_list(GPUNodeStack *gs,
                                      ListBaseT<bNodeSocket> *sockets,
                                      bNodeStack **ns)
@@ -548,6 +597,9 @@ void ntreeExecGPUNodes(bNodeTreeExec *exec,
         node_get_stack(node, stack, nsin, nsout);
         gpu_stack_from_data_list(gpuin, &node->inputs, nsin);
         gpu_stack_from_data_list(gpuout, &node->outputs, nsout);
+        if (node->type_legacy == SH_NODE_PORTAL_OUT) {
+          nodeexec->data.data = stack;
+        }
         if (node->typeinfo->gpu_fn(mat, node, &nodeexec->data, gpuin, gpuout)) {
           data_from_gpu_stack_list(&node->outputs, nsout, gpuout);
         }

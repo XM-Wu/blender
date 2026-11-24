@@ -12,6 +12,7 @@
 
 #include "NOD_geometry_nodes_srna.hh"
 
+#include "DNA_genfile.h"
 #include "DNA_ID.h"
 #include "DNA_brush_types.h"
 #include "DNA_camera_types.h"
@@ -544,8 +545,64 @@ static void version_solid_color_width_height_defaults(Main &bmain)
   }
 }
 
-void blo_do_versions_502(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
+/* The NPR fork used the Light Info idname before upstream allocated it to a different
+ * node. Restrict migration to files carrying the fork's SDNA, including unused groups. */
+static void version_npr_material_nodes(Main &bmain)
 {
+  FOREACH_NODETREE_BEGIN (&bmain, tree, owner_id) {
+    if (tree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : tree->nodes) {
+      if (STREQ(node.idname, "ShaderNodeLightInfo")) {
+        STRNCPY(node.idname, "ShaderNodeNPRLightInfo");
+        node.type_legacy = SH_NODE_NPR_LIGHT_INFO;
+      }
+      else if (STREQ(node.idname, "Undefined[ShaderNodeScreenspaceInfo]") ||
+               STREQ(node.idname, "ShaderNodeScreenspaceInfo"))
+      {
+        STRNCPY(node.idname, "ShaderNodeScreenspaceInfo");
+        node.type_legacy = SH_NODE_SCREENSPACE_INFO;
+      }
+      else if (STREQ(node.idname, "Undefined[ShaderNodeShaderInfo]") ||
+               STREQ(node.idname, "ShaderNodeShaderInfo"))
+      {
+        STRNCPY(node.idname, "ShaderNodeShaderInfo");
+        node.type_legacy = SH_NODE_SHADER_INFO;
+        if (!node.storage) {
+          node.storage = MEM_new<NodeShaderShaderInfo>(__func__);
+          node.custom1 = 1;
+          node.custom2 = 8;
+        }
+        for (bNodeSocket &socket : node.inputs) {
+          if (STREQ(socket.identifier, "WorldPosition")) {
+            version_node_socket_identifier_set(socket, "World Position");
+          }
+        }
+        for (bNodeSocket &socket : node.outputs) {
+          if (STREQ(socket.identifier, "Cast Shadows")) {
+            version_node_socket_identifier_set(socket, "Cast Shadow");
+          }
+          else if (STREQ(socket.identifier, "Self Shadows")) {
+            version_node_socket_identifier_set(socket, "Self Shadow");
+          }
+          else if (STREQ(socket.identifier, "Half-lambert factor")) {
+            version_node_socket_identifier_set(socket, "Half-Lambert Factor");
+          }
+        }
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
+void blo_do_versions_502(FileData *fd, Library * /*lib*/, Main *bmain)
+{
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 503, 0) &&
+      DNA_struct_exists_with_alias(fd->filesdna.get(), "NodeShaderPortal"))
+  {
+    version_npr_material_nodes(*bmain);
+  }
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 1)) {
     for (Scene &scene : bmain->scenes) {
       scene.r.mode |= R_SAVE_OUTPUT;

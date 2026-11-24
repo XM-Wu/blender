@@ -956,7 +956,8 @@ static void ntree_shader_pruned_unused(bNodeTree *ntree, bNode *output_node)
   }
 
   for (bNode &node : ntree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV ||
+        (node.type_legacy == SH_NODE_OUTLINE_CONTROL && !node.is_muted())) {
       node.runtime->tmp_flag = 1;
       bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
     }
@@ -1073,6 +1074,7 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   bNodeTreeExec *exec;
 
   ntree_shader_unlink_script_nodes(localtree);
+  bke::node_tree_runtime::materialize_shader_portals(*localtree);
   bNode *output = ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
 
   /* Tree is valid if it contains no undefined implicit socket type cast. */
@@ -1098,14 +1100,16 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
   for (bNode &node : localtree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV ||
+        (node.type_legacy == SH_NODE_OUTLINE_CONTROL && !node.is_muted())) {
       iter_shader_to_rgba_depth_count(localtree, &node, max_depth);
     }
   }
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
     for (bNode &node : localtree->nodes) {
-      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+      if (node.type_legacy == SH_NODE_OUTPUT_AOV ||
+        (node.type_legacy == SH_NODE_OUTLINE_CONTROL && !node.is_muted())) {
         ntreeExecGPUNodes(exec, mat, &node, &depth);
       }
     }

@@ -18,6 +18,9 @@ struct PipelineConstants {
   [[compilation_constant]] bool use_lighting_nodes;
   [[compilation_constant]] bool use_ambient_occlusion;
   [[compilation_constant]] bool use_velocity;
+  [[compilation_constant]] bool use_npr_outline;
+  [[compilation_constant]] bool use_screenspace_info;
+  [[compilation_constant]] bool use_previous_layer;
   [[compilation_constant]] bool use_transparency;
   [[compilation_constant]] bool use_clip_plane;
   [[compilation_constant]] bool use_diffuse;

@@ -287,6 +287,7 @@ class SocketUsageInferencerImpl {
         this->usage_task__input__warning_node(socket);
         break;
       }
+      case SH_NODE_OUTLINE_CONTROL:
       case SH_NODE_OUTPUT_AOV:
       case SH_NODE_OUTPUT_LIGHT:
       case SH_NODE_OUTPUT_WORLD:

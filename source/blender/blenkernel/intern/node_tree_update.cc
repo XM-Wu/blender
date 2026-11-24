@@ -667,6 +667,9 @@ class NodeTreeMainUpdater {
 
     this->update_socket_link_and_use(ntree);
     this->update_individual_nodes(ntree);
+    if (ntree.type == NTREE_SHADER) {
+      bke::node_tree_runtime::sync_shader_portal_output_types(ntree);
+    }
     this->update_internal_links(ntree);
     this->update_generic_callback(ntree);
     this->make_node_previews_dirty(ntree);
@@ -706,6 +709,9 @@ class NodeTreeMainUpdater {
 
     this->update_socket_link_and_use(ntree);
     this->update_link_validation(ntree);
+    if (ntree.type == NTREE_SHADER) {
+      bke::node_tree_runtime::update_shader_portal_validation(ntree);
+    }
 
     if (this->update_nested_node_refs(ntree)) {
       result.interface_changed = true;
@@ -1009,7 +1015,7 @@ class NodeTreeMainUpdater {
       for (const UString idname : {"ShaderNodeOutputMaterial"_ustr,
                                    "ShaderNodeOutputLight"_ustr,
                                    "ShaderNodeOutputWorld"_ustr,
-                                   "ShaderNodeOutputAOV"_ustr})
+                                   "ShaderNodeOutputAOV"_ustr, "ShaderNodeOutlineControl"_ustr})
       {
         const Span<const bNode *> nodes = ntree.nodes_by_type(idname);
         if (!nodes.is_empty()) {
@@ -1965,7 +1971,21 @@ class NodeTreeMainUpdater {
         if (!all_available_inputs_computed) {
           continue;
         }
-        if (node.is_reroute()) {
+        if (node.type_legacy == SH_NODE_PORTAL_OUT) {
+          const bNodeSocket *origin_socket =
+              bke::node_tree_runtime::find_shader_portal_origin_socket(tree, node);
+          if (origin_socket == nullptr) {
+            socket_hash = get_socket_ptr_hash(socket);
+          }
+          else if (!hash_by_socket_id[origin_socket->index_in_tree()].has_value()) {
+            sockets_to_check.push(origin_socket);
+            continue;
+          }
+          else {
+            socket_hash = *hash_by_socket_id[origin_socket->index_in_tree()];
+          }
+        }
+        else if (node.is_reroute()) {
           socket_hash = *hash_by_socket_id[node.input_socket(0).index_in_tree()];
         }
         else if (node.is_muted()) {
@@ -2058,6 +2078,17 @@ class NodeTreeMainUpdater {
         }
       }
       else {
+        if (node.type_legacy == SH_NODE_PORTAL_OUT) {
+          if (const bNodeSocket *origin_socket =
+                  bke::node_tree_runtime::find_shader_portal_origin_socket(tree, node))
+          {
+            bool &pushed = pushed_by_socket_id[origin_socket->index_in_tree()];
+            if (!pushed) {
+              sockets_to_check.push(origin_socket);
+              pushed = true;
+            }
+          }
+        }
         for (const bNodeSocket *input_socket : node.input_sockets()) {
           if (input_socket->is_available()) {
             bool &pushed = pushed_by_socket_id[input_socket->index_in_tree()];

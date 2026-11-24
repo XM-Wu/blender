@@ -422,6 +422,10 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_resources(inst_.volume.result);
       opaque_ps_.bind_resources(inst_.sampling);
       opaque_ps_.bind_resources(inst_.hiz_buffer.front);
+      opaque_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.npr_outline_color_tx);
+      opaque_ps_.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.npr_outline_info_tx);
+      opaque_ps_.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
+      opaque_ps_.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
       opaque_ps_.bind_resources(inst_.volume_probes);
       opaque_ps_.bind_resources(inst_.sphere_probes);
       opaque_ps_.bind_resources(inst_.planar_probes);
@@ -464,6 +468,8 @@ void ForwardPipeline::sync()
     sub.bind_resources(inst_.volume.result);
     sub.bind_resources(inst_.sampling);
     sub.bind_resources(inst_.hiz_buffer.front);
+    sub.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.npr_outline_color_tx);
+    sub.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.npr_outline_info_tx);
     sub.bind_resources(inst_.volume_probes);
     sub.bind_resources(inst_.sphere_probes);
     sub.bind_resources(inst_.planar_probes);
@@ -550,7 +556,8 @@ void ForwardPipeline::transparent_add(const Object *ob,
 
   /* Must match the `use_forward_lighting && use_transparency` condition on previous_layer_hiz /
    * previous_layer_radiance. */
-  const bool bind_previous_layer = GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT);
+  const bool bind_previous_layer = GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) ||
+                                   GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO);
 
   /* Transparent needs to use one sub pass per object to support reordering.
    * NOTE: Pre-pass needs to be created first in order to be sorted first. */
@@ -729,6 +736,8 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_resources(inst.uniform_data);
   gbuffer_ps_.bind_resources(inst.sampling);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
+  gbuffer_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.npr_outline_color_tx);
+  gbuffer_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.npr_outline_info_tx);
   gbuffer_ps_.bind_resources(inst.cryptomatte);
 
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_WRITE_STENCIL |

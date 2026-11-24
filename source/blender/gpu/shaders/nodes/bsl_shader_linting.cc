@@ -92,6 +92,11 @@
 #include "gpu_shader_material_light_accumulation.bsl.hh"       /* IWYU pragma: export */
 #include "gpu_shader_material_light_evaluation.bsl.hh"         /* IWYU pragma: export */
 #include "gpu_shader_material_light_falloff.bsl.hh"            /* IWYU pragma: export */
+#include "gpu_shader_material_screenspace_info.bsl.hh"  /* IWYU pragma: export */
+#include "gpu_shader_material_npr_rim.bsl.hh"  /* IWYU pragma: export */
+#include "gpu_shader_material_npr_light_info.bsl.hh"  /* IWYU pragma: export */
+#include "gpu_shader_material_npr_shader_info.bsl.hh"  /* IWYU pragma: export */
+#include "gpu_shader_material_outline_control.bsl.hh"  /* IWYU pragma: export */
 #include "gpu_shader_material_light_info.bsl.hh"               /* IWYU pragma: export */
 #include "gpu_shader_material_light_iter_internal.bsl.hh"      /* IWYU pragma: export */
 #include "gpu_shader_material_light_path.bsl.hh"               /* IWYU pragma: export */

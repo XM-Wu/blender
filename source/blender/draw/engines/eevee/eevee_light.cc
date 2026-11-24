@@ -381,6 +381,7 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
   Light &light = light_map_.lookup_or_add_default(key);
   light.used = true;
   light.resource_id = 0;
+  light.npr_lightgroup_id = -1; /* World sun is excluded from NPR light groups. */
   light.sync(inst_.shadows,
              float4x4::identity(),
              visibility_flag,
@@ -447,6 +448,7 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
   ResourceHandleRange handle = inst_.manager->unique_handle(ob_ref);
   inst_.manager->extract_all_object_attributes(handle, ob_ref);
   light.resource_id = handle.index();
+  light.npr_lightgroup_id = la.lightgroup_id;
   if (inst_.get_recalc_flags(ob_ref) != 0 || !light.initialized) {
     light.initialized = true;
     light.sync(inst_.shadows,

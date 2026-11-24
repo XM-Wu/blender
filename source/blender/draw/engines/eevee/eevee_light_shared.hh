@@ -216,6 +216,8 @@ struct [[host_shared]] LightData {
   /* Shadow Map resolution maximum resolution. */
   float lod_min;
   uint2 light_set_membership;
+  int npr_lightgroup_id;
+  int _pad_npr0, _pad_npr1, _pad_npr2;
 
   union {
     LightLocalData local;

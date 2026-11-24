@@ -374,6 +374,16 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_tile_classify";
     case DEFERRED_TILE_CLASSIFY_FALLBACK:
       return "eevee_deferred_tile_classify_fallback";
+    case OUTLINE_DETECT:
+      return "eevee_outline_detect";
+    case OUTLINE_JFA_INIT:
+      return "eevee_outline_jfa_init";
+    case OUTLINE_FACTOR_BLUR:
+      return "eevee_outline_factor_blur";
+    case OUTLINE_JFA_STEP:
+      return "eevee_outline_jfa_step";
+    case OUTLINE_RESOLVE:
+      return "eevee_outline_resolve";
     case HIZ_DEBUG:
       return "eevee_hiz_debug";
     case HIZ_UPDATE:
@@ -720,6 +730,75 @@ class SlotAllocator {
     available_vertex_id_ &= ~bit;
   }
 };
+
+static const GPUMaterialGeneratedSource *material_generated_source_find(
+    const GPUMaterial *gpumat, const StringRefNull filename)
+{
+  for (int i = 0; i < GPU_material_generated_source_count(gpumat); i++) {
+    const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(gpumat,
+                                                                                           i);
+    if (generated_source != nullptr && generated_source->filename == filename) {
+      return generated_source;
+    }
+  }
+  return nullptr;
+}
+
+static void material_generated_dependency_append(const GPUMaterial *gpumat,
+                                                 const StringRefNull dependency_name,
+                                                 VectorSet<StringRefNull> &r_static_dependencies,
+                                                 Set<StringRefNull> &r_emitted_generated_sources,
+                                                 std::stringstream &r_generated_source_block)
+{
+  if (dependency_name.is_empty()) {
+    return;
+  }
+
+  const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
+      gpumat, dependency_name);
+  if (generated_source == nullptr) {
+    r_static_dependencies.add(dependency_name);
+    return;
+  }
+
+  if (!r_emitted_generated_sources.add(dependency_name)) {
+    return;
+  }
+
+  for (const std::string &generated_dependency : generated_source->dependencies) {
+    material_generated_dependency_append(gpumat,
+                                         StringRefNull(generated_dependency.c_str()),
+                                         r_static_dependencies,
+                                         r_emitted_generated_sources,
+                                         r_generated_source_block);
+  }
+
+  r_generated_source_block << generated_source->content;
+  if (!generated_source->content.empty() && generated_source->content.back() != '\n') {
+    r_generated_source_block << "\n";
+  }
+  r_generated_source_block << "\n";
+}
+
+static void append_material_stage(gpu::shader::ShaderCreateInfo &info,
+                                  GPUMaterial *material,
+                                  const char *filename,
+                                  const Vector<StringRefNull> &dependencies,
+                                  const std::stringstream &body)
+{
+  if (GPU_material_generated_source_count(material) == 0) {
+    info.generated_sources.append({filename, dependencies, body.str()});
+    return;
+  }
+  Set<StringRefNull> emitted;
+  VectorSet<StringRefNull> static_set;
+  std::stringstream source;
+  for (StringRefNull dependency : dependencies) {
+    material_generated_dependency_append(material, dependency, static_set, emitted, source);
+  }
+  source << body.str();
+  info.generated_sources.append({filename, Vector<StringRefNull>(static_set.as_span()), source.str()});
+}
 
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
                                               eMaterialPipeline pipeline_type,
@@ -1069,7 +1148,22 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       pipeline_type = MAT_PIPE_PREPASS_FORWARD;
     }
   }
+  info.compilation_constant(gpu::shader::Type::bool_t, "use_npr_outline",
+                            ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+                            GPU_max_images() > OUTLINE_INFO_SLOT &&
+                            GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_OUTLINE));
   info.compilation_constant(gpu::shader::Type::bool_t, "use_transparency", use_transparency);
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "use_screenspace_info",
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+          GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO));
+  const bool previous_layer = (pipeline_type == MAT_PIPE_FORWARD ||
+                               (pipeline_type == MAT_PIPE_DEFERRED && use_shader_to_rgba)) &&
+                              use_transparency;
+  info.compilation_constant(
+      gpu::shader::Type::bool_t, "use_previous_layer",
+      previous_layer || (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+                         GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)));
 
   const bool use_raycast = (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
                             ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD));
@@ -1402,8 +1496,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       dependencies.extend(codegen.displacement.dependencies);
     }
 
-    info.generated_sources.append(
-        {"eevee_nodetree_vert_lib.bsl.hh", dependencies, vert_gen.str()});
+    append_material_stage(info, gpumat, "eevee_nodetree_vert_lib.bsl.hh", dependencies, vert_gen);
   }
 
   if (pipeline_type != MAT_PIPE_VOLUME_OCCUPANCY) {
@@ -1479,8 +1572,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     dependencies.extend(codegen.volume.dependencies);
     frag_gen << "}\n\n";
 
-    info.generated_sources.append(
-        {"eevee_nodetree_frag_lib.bsl.hh", dependencies, frag_gen.str()});
+    append_material_stage(info, gpumat, "eevee_nodetree_frag_lib.bsl.hh", dependencies, frag_gen);
   }
 
   const char *material_name = (info.name_.c_str() + 2);

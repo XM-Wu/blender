@@ -2778,6 +2778,100 @@ struct NodeShaderPrincipled {
   char _pad[3] = {};
 };
 
+struct NodeShaderPortal {
+  DNA_DEFINE_CXX_METHODS(NodeShaderPortal)
+
+  char name[/*MAX_NAME*/ 64] = "";
+  int data_type = SOCK_FLOAT;
+};
+
+struct NodeShaderShaderInfo {
+  DNA_DEFINE_CXX_METHODS(NodeShaderShaderInfo)
+
+  int lightgroup_id = 0;
+  int _pad = 0;
+};
+
+enum NodeGLSLFunctionSourceMode {
+  SHD_GLSL_FUNCTION_SOURCE_INTERNAL = 0,
+  SHD_GLSL_FUNCTION_SOURCE_EXTERNAL = 1,
+};
+
+enum NodeGLSLFunctionParseStatus {
+  SHD_GLSL_FUNCTION_PARSE_DIRTY = 0,
+  SHD_GLSL_FUNCTION_PARSE_READY = 1,
+  SHD_GLSL_FUNCTION_PARSE_ERROR = 2,
+};
+
+enum NodeGLSLFunctionFlag {
+  SHD_GLSL_FUNCTION_CODE_MODE = 1 << 0,
+  SHD_GLSL_FUNCTION_EDIT_FUNCTION = 1 << 1,
+};
+
+enum NodeGLSLFunctionDefineType {
+  SHD_GLSL_FUNCTION_DEFINE_BOOL = 0,
+  SHD_GLSL_FUNCTION_DEFINE_INT = 1,
+};
+
+/* Image to Closure texture interpretation. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_CUBE_STRIP = 2,
+};
+
+/* Image to Closure 3D LUT strip size mode. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO = 0,
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL = 1,
+};
+
+struct NodeShaderImageToClosure {
+  DNA_DEFINE_CXX_METHODS(NodeShaderImageToClosure)
+
+  int texture_type = IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+  int texture_size_mode = IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+  int interpolation = SHD_INTERP_LINEAR;
+  int extension = SHD_IMAGE_EXTENSION_REPEAT;
+  int texture_width = 16;
+  int texture_height = 16;
+  int texture_depth = 16;
+  char _pad[4] = {};
+};
+
+struct NodeShaderGLSLDefineValue {
+  DNA_DEFINE_CXX_METHODS(NodeShaderGLSLDefineValue)
+
+  char name[64] = "";
+  /** #NodeGLSLFunctionDefineType. */
+  int type = SHD_GLSL_FUNCTION_DEFINE_BOOL;
+  int value = 0;
+};
+
+struct NodeShaderGLSLFunction {
+  DNA_DEFINE_CXX_METHODS(NodeShaderGLSLFunction)
+
+  int source_mode = SHD_GLSL_FUNCTION_SOURCE_INTERNAL;
+  int parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+  int flags = 0;
+  int signature_hash = 0;
+  int meta_hash = 0;
+  int sampler_interpolation = SHD_INTERP_LINEAR;
+  int sampler_extension = SHD_IMAGE_EXTENSION_REPEAT;
+
+  char function_name[64] = "";
+  char edit_function_name[64] = "";
+  char filepath[/*FILE_MAX*/ 1024] = "";
+  int define_values_num = 0;
+  unsigned int edit_source_session_uid = 0;
+  int _pad = 0;
+  uint64_t edit_source_hash = 0;
+  char *packed_source = nullptr;
+  char *edit_source = nullptr;
+  NodeShaderGLSLDefineValue *define_values = nullptr;
+  void *_pad2 = nullptr;
+};
+
 struct NodeShaderHairPrincipled {
   DNA_DEFINE_CXX_METHODS(NodeShaderHairPrincipled)
 

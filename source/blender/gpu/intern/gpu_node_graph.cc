@@ -161,7 +161,7 @@ static GPUNode *gpu_node_create(const char *name)
 {
   GPUNode *node = MEM_new_zeroed<GPUNode>("GPUNode");
 
-  node->name = name;
+  STRNCPY(node->name, name);
   node->zone_index = -1;
   node->is_zone_end = false;
 
@@ -1075,6 +1075,50 @@ bool GPU_stack_link(GPUMaterial *material,
   va_end(params);
 
   return valid;
+}
+
+bool GPU_stack_link_custom(GPUMaterial *material,
+                           const bNode *bnode,
+                           StringRefNull name,
+                           StringRefNull dependency_name,
+                           eGPUCustomNodeDependencyFlag dependency_flags,
+                           GPUNodeStack *in,
+                           GPUNodeStack *out)
+{
+  if (material == nullptr || name.is_empty()) {
+    return false;
+  }
+
+  GPUNodeGraph *graph = gpu_material_node_graph(material);
+  GPUNode *node = gpu_node_create(name.c_str());
+  if (!dependency_name.is_empty()) {
+    BLI_strncpy(node->dependency_name, dependency_name.c_str(), sizeof(node->dependency_name));
+  }
+  node->dependency_flags = dependency_flags;
+
+  if (in) {
+    for (int i = 0; !in[i].end; i++) {
+      if (in[i].type != GPU_NONE) {
+        gpu_node_input_socket(material, bnode, node, &in[i], i);
+      }
+    }
+  }
+
+  if (dependency_flags & GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT) {
+    gpu_node_input_link(node, GPU_kernel_globals(), GPU_KERNEL_GLOBALS);
+    gpu_node_input_link(node, GPU_shading_data(), GPU_SHADING_DATA);
+  }
+
+  if (out) {
+    for (int i = 0; !out[i].end; i++) {
+      if (out[i].type != GPU_NONE) {
+        gpu_node_output(node, out[i].type, &out[i].link);
+      }
+    }
+  }
+
+  BLI_addtail(&graph->nodes, node);
+  return true;
 }
 
 bool GPU_stack_link_zone(GPUMaterial *material,

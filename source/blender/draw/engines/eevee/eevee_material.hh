@@ -386,6 +386,7 @@ class MaterialModule {
   MaterialModule(Instance &inst);
   ~MaterialModule();
 
+  bool has_visible_outline_materials() const;
   void begin_sync();
 
   /**

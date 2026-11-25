@@ -76,7 +76,17 @@ def smooth_shell(vertices, faces):
     return stencil, refined
 
 
-def simulation_mesh(obj, rest, cfg):
+def pin_weights(obj, cfg):
+    if not cfg.pin_group:
+        return None
+    group = obj.vertex_groups.get(cfg.pin_group)
+    if group is None:
+        raise ValueError("The pin group is missing")
+    return np.array([next((g.weight for g in v.groups if g.group == group.index), 0.)
+                     for v in obj.data.vertices])
+
+
+def simulation_mesh(obj, rest, cfg, pinning):
     mesh = obj.data
     mesh.calc_loop_triangles()
     faces = np.array([face.vertices[:] for face in mesh.loop_triangles], dtype=np.int32)
@@ -126,13 +136,8 @@ def simulation_mesh(obj, rest, cfg):
     layers = 2
     nodes = np.concatenate([np.zeros((1, 3))] + [shell * (i / layers) for i in range(1, layers + 1)])
     pinned = np.zeros(len(nodes), dtype=bool)
-    if cfg.pin_group:
-        group = obj.vertex_groups.get(cfg.pin_group)
-        if not group:
-            raise ValueError("The pin group is missing")
-        weights = np.array([next((g.weight for g in v.groups if g.group == group.index), 0.)
-                            for v in mesh.vertices])
-        pinned[-len(shell):] = (weights[skin_triangles] * skin_weights).sum(axis=1) > .5
+    if pinning is not None:
+        pinned[-len(shell):] = (pinning[skin_triangles] * skin_weights).sum(axis=1) > .5
     unit = offsets / np.linalg.norm(offsets, axis=1, keepdims=True)
     stencil, refined = smooth_shell(shell, shell_faces)
     _, attach, blend = ray_samples(stencil @ shell, refined, np.zeros(3), unit)
@@ -158,6 +163,8 @@ class GelSettings(bpy.types.PropertyGroup):
     floor: FloatProperty(name="Ground Height", description="World-space Z of the contact plane",
                          default=0, subtype='DISTANCE')
     pin_group: StringProperty(name="Pin Group", description="Fix surface nodes with interpolated weight above 0.5")
+    pin_target: PointerProperty(name="Pin Target", type=bpy.types.Object,
+                                description="Move the pin group relative to this object at the start of the bake")
     collider: PointerProperty(name="Capsule Collider", type=bpy.types.Object)
     start: FloatVectorProperty(name="Capsule Start", description="First endpoint in collider local coordinates",
                                subtype='TRANSLATION', default=(0, 0, 0))
@@ -177,7 +184,14 @@ def input_samples(context, obj, cfg):
         if cfg.collider == obj:
             raise ValueError("Choose a separate collider object")
         ends = transform(np.array((cfg.start[:], cfg.end[:])), cfg.collider.evaluated_get(graph).matrix_world)
-    return matrix, ends
+    pin_matrix = None
+    if cfg.pin_target:
+        if obj == cfg.pin_target:
+            raise ValueError("Choose a separate pin target")
+        pin_matrix = cfg.pin_target.evaluated_get(graph).matrix_world.copy()
+        if abs(pin_matrix.to_3x3().determinant()) < 1e-12:
+            raise ValueError("The pin target has a singular transform")
+    return matrix, ends, pin_matrix
 
 
 def solve(context, obj, cfg):
@@ -187,7 +201,7 @@ def solve(context, obj, cfg):
     if count == 0 or (end - start + 1) * count >= 2 ** 31:
         raise ValueError("Unsupported gel mesh or bake range")
     scene.frame_set(start)
-    matrix, previous = input_samples(context, obj, cfg)
+    matrix, previous, pin_matrix = input_samples(context, obj, cfg)
     source = np.empty(3 * count, dtype=np.float32)
     obj.data.vertices.foreach_get("co", source)
     source = source.reshape(-1, 3).astype(float)
@@ -201,7 +215,15 @@ def solve(context, obj, cfg):
         previous = previous * meters
     if len(world) and world[:, 2].min() < floor - 1e-5 * meters:
         raise ValueError("Start with the gel above the ground or lower Ground Height")
-    nodes, tets, pinned, attach, weights, surface, stencil = simulation_mesh(obj, world, cfg)
+    pinning = pin_weights(obj, cfg)
+    nodes, tets, pinned, attach, weights, surface, stencil = simulation_mesh(obj, world, cfg, pinning)
+    if pin_matrix is not None:
+        if not np.any(pinned):
+            raise ValueError("The pin target needs a pin group covering at least one simulation node")
+        inv_target = pin_matrix.inverted()
+        pin_local = transform(nodes[pinned] / meters, inv_target)
+        skin_mask = pinning > 0
+        skin_local = transform(world[skin_mask] / meters, inv_target)
     gel = Gel(nodes, tets, pinned, cfg.density, cfg.shear, cfg.bulk, cfg.damping, cfg.friction, surface)
     gravity = np.array(scene.gravity) * meters if scene.use_gravity else np.zeros(3)
     seconds = scene.render.fps_base / scene.render.fps
@@ -209,12 +231,22 @@ def solve(context, obj, cfg):
     samples[0].fill(0)
     for frame in range(start + 1, end + 1):
         scene.frame_set(frame)
-        matrix, current = input_samples(context, obj, cfg)
+        matrix, current, pin_matrix = input_samples(context, obj, cfg)
         if current is not None:
             current = current * meters
-        gel.advance(seconds, gravity, floor, previous, current, radius)
+        targets = None
+        if pin_matrix is not None:
+            targets = transform(pin_local, pin_matrix) * meters
+            if targets[:, 2].min() < floor - 1e-5 * meters:
+                raise ValueError("The animated pins move below the ground")
+        gel.advance(seconds, gravity, floor, previous, current, radius, targets)
         shell = (gel.x - gel.rest)[-stencil.shape[1]:]
         positions = world + np.einsum("ij,ijk->ik", weights, (stencil @ shell)[attach])
+        if pin_matrix is not None:
+            # Subdivision smooths the cage displacement; keep the detailed grip
+            # attached exactly at weight one and blend its feathered border.
+            goal = transform(skin_local, pin_matrix) * meters
+            positions[skin_mask] += pinning[skin_mask, None] * (goal - positions[skin_mask])
         # Resolve remaining contact between simulation nodes on the detailed skin.
         if current is not None:
             _, n, d = contact(positions, *current)
@@ -420,6 +452,7 @@ class GEL_PT_physics(bpy.types.Panel):
         for prop in ('resolution', 'settle_frames', 'density', 'shear', 'bulk', 'damping', 'friction', 'floor'):
             layout.prop(cfg, prop)
         layout.prop_search(cfg, "pin_group", obj, "vertex_groups")
+        layout.prop(cfg, "pin_target")
         layout.prop(cfg, "collider")
         if cfg.collider:
             for prop in ('start', 'end', 'radius'):

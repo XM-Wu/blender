@@ -210,12 +210,19 @@ class Gel:
             np.add.at(adjustment, ids.ravel(), (weighted_grad * scale[:, None, None]).reshape(-1, 3))
             field += adjustment / count
 
-    def advance(self, seconds, gravity, floor, previous, current, radius):
+    def advance(self, seconds, gravity, floor, previous, current, radius, pin_positions=None):
         dt_limit = self.stable_dt
         if current is not None:
             travel = np.linalg.norm(current - previous, axis=1).max()
             if travel > 0:
                 dt_limit = min(dt_limit, seconds * .35 * min(self.min_altitude, radius) / travel)
+        if pin_positions is not None:
+            pin_start = self.x[self.pinned].copy()
+            pin_motion = pin_positions - pin_start
+            pin_velocity = pin_motion / seconds
+            pin_travel = np.linalg.norm(pin_motion, axis=1).max()
+            if pin_travel > 0:
+                dt_limit = min(dt_limit, seconds * .35 * self.min_altitude / pin_travel)
         steps = max(1, math.ceil(seconds / dt_limit))
         if steps > 4096:
             raise ValueError("Simulation needs too many substeps: check scale, stiffness and collider motion")
@@ -227,6 +234,10 @@ class Gel:
             self.v += dt * (self.elastic_forces() / self.mass[:, None] + gravity)
             self.v *= drag
             self.x += dt * self.v
+            if pin_positions is not None:
+                # Prescribe both position and velocity before strain/contact projection.
+                self.x[self.pinned] = pin_start + pin_motion * ((i + 1) / steps)
+                self.v[self.pinned] = pin_velocity
             self._limit_compression()
             if current is not None:
                 ends = previous + (current - previous) * ((i + 1) / steps)
@@ -240,8 +251,9 @@ class Gel:
             if hit.any():
                 self.x[hit, 2] = floor
                 self._impulse(hit, np.array((0., 0., 1.)), 0.)
-            self.x[self.pinned] = self.rest[self.pinned]
-            self.v[self.pinned] = 0.
+            if pin_positions is None:
+                self.x[self.pinned] = self.rest[self.pinned]
+                self.v[self.pinned] = 0.
             if not np.isfinite(self.x).all():
                 raise ValueError("Gel simulation diverged: check the mesh and collider motion")
         q = self.x[self.tets]

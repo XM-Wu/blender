@@ -127,8 +127,59 @@ def bake_test():
         assert op(action='REMOVE') == {'FINISHED'} and not obj.volumetric_gel.enabled
 
 
+def animated_pin_test():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    scene.frame_end = 20
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=.4, location=(.1, -.2, .42))
+    obj = bpy.context.object
+    rest = coordinates(obj)
+    grip = obj.vertex_groups.new(name="Grip")
+    selected = np.flatnonzero(rest[:, 2] > .25)
+    grip.add(selected.tolist(), 1., 'REPLACE')
+    target = bpy.data.objects.new("Handle", None)
+    scene.collection.objects.link(target)
+    target.location = (.2, -.15, .8)
+    target.rotation_euler.y = -.3
+    target.keyframe_insert(data_path="location", frame=1)
+    target.keyframe_insert(data_path="rotation_euler", frame=1)
+    scene.frame_set(1)
+    local = gel_ui.transform(gel_ui.transform(rest[selected], obj.matrix_world), target.matrix_world.inverted())
+    target.location.x += .3
+    target.location.z += .6
+    target.rotation_euler.y += .45
+    target.keyframe_insert(data_path="location", frame=18)
+    target.keyframe_insert(data_path="rotation_euler", frame=18)
+
+    op = bpy.ops.object.volumetric_gel_edit
+    assert op(action='ADD') == {'FINISHED'}
+    cfg = obj.volumetric_gel
+    cfg.pin_group, cfg.pin_target = grip.name, target
+    scene.frame_set(10, subframe=.25)
+    assert op(action='BAKE') == {'FINISHED'}
+    assert scene.frame_current == 10 and scene.frame_subframe == .25
+    for frame in (1, 9, 18, 20):
+        scene.frame_set(frame)
+        world = gel_ui.transform(coordinates(obj), obj.matrix_world)
+        expected = gel_ui.transform(local, target.matrix_world)
+        np.testing.assert_allclose(world[selected], expected, atol=2e-6)
+    # The free underside lifted off the ground and lagged behind the driven patch.
+    base = gel_ui.transform(rest, obj.matrix_world)
+    delta = world - base
+    assert world[:, 2].min() > .15
+    assert abs(delta[rest[:, 2] < -.2, 0].mean() - delta[selected, 0].mean()) > .02
+    cache = gel_ui.cache_modifier(obj).node_group
+    cfg.pin_group = obj.vertex_groups.new(name="Empty grip").name
+    try:
+        op(action='BAKE')
+    except RuntimeError:
+        pass
+    assert gel_ui.cache_modifier(obj).node_group == cache
+
+
 if __name__ == "__main__":
     material_test()
     triangle_contact_test()
     bake_test()
+    animated_pin_test()
     print("PASS volumetric gel material, contact, interpolation, rebake and reload")

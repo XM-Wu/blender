@@ -168776,3 +168776,11 @@ msgstr "碰撞体局部坐标中的第二个端点"
 
 msgid "World-space radius of the collision capsule"
 msgstr "碰撞胶囊在世界空间中的半径"
+
+
+msgid "Pin Target"
+msgstr "固定点目标"
+
+
+msgid "Move the pin group relative to this object at the start of the bake"
+msgstr "让固定顶点组跟随此物体相对于烘焙起始帧的变换"

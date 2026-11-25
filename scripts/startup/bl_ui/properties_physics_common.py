@@ -75,6 +75,12 @@ class PHYSICS_PT_add(PhysicButtonsPanel, Panel):
         else:
             col.operator("object.forcefield_toggle", text="Force Field", icon='X')
 
+        if obj.type == 'ARMATURE' and obj.data.is_xbone and hasattr(obj, "xbone_dynamics"):
+            enabled = obj.xbone_dynamics.enabled
+            op = col.operator("xbone.dynamics_edit", text="XBone Dynamics", text_ctxt=i18n_contexts.default,
+                              icon='X' if enabled else 'PHYSICS')
+            op.action = 'DISABLE' if enabled else 'ENABLE'
+
         if obj.type == 'MESH':
             row = physics_add(col, context.collision, "Collision", 'COLLISION', 'MOD_PHYSICS', False)
             if row and obj.collision:

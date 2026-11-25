@@ -168482,3 +168482,165 @@ msgstr "取消编辑标记"
 
 msgid "Guide updated. Use Apply Guide and Rebuild to update the rig."
 msgstr "Guide 已更新。要更新 Rig，请点击“应用 Guide 并重建”。"
+
+msgid "Root Bone"
+msgstr "根骨骼"
+
+
+msgid "Tip Bone"
+msgstr "末端骨骼"
+
+
+msgid "Pose Stiffness"
+msgstr "姿态回复刚度"
+
+
+msgid "Root Swing Limit"
+msgstr "根部摆角上限"
+
+
+msgid "Tip Swing Limit"
+msgstr "梢部摆角上限"
+
+
+msgid "Tip Stiffness Factor"
+msgstr "梢部刚度系数"
+
+
+msgid "Bone Radius"
+msgstr "骨段半径"
+
+
+msgid "Attachment Bone"
+msgstr "绑定骨骼"
+
+
+msgid "End Bone"
+msgstr "终点骨骼"
+
+
+msgid "Gravity Strength"
+msgstr "重力强度"
+
+
+msgid "The tip must be a descendant of the root bone"
+msgstr "末端骨骼必须是根骨骼的后代"
+
+
+msgid "Add a bone chain before starting the simulation"
+msgstr "请先添加一条骨链，再开始模拟"
+
+
+msgid "Bone chains cannot share bones"
+msgstr "动骨链不能共用骨骼"
+
+
+msgid "A chain anchor cannot be driven by another dynamic chain"
+msgstr "骨链锚点不能由另一条动骨链驱动"
+
+
+msgid "Choose a collider bone outside the simulated chain"
+msgstr "请选择模拟骨链以外的碰撞骨骼"
+
+
+msgid "The armature is no longer available for preview"
+msgstr "骨架已退出预览"
+
+
+msgid "XBone Dynamics Preview"
+msgstr "XBone 动骨预览"
+
+
+msgid "XBone Dynamics"
+msgstr "XBone 动骨"
+
+
+msgid "Stop Simulation"
+msgstr "停止模拟"
+
+
+msgid "Bone Chains"
+msgstr "骨链"
+
+
+msgid "Colliders"
+msgstr "碰撞体"
+
+
+msgid "Chain {index}"
+msgstr "骨链 {index}"
+
+
+msgid "Collider {index}"
+msgstr "碰撞体 {index}"
+
+
+msgid "Stop the live simulation and restore the current animated pose"
+msgstr "停止实时模拟并恢复当前动画姿势"
+
+
+msgid "Add XBone Dynamics"
+msgstr "添加 XBone 动骨"
+
+
+msgid "Remove XBone Dynamics"
+msgstr "移除 XBone 动骨"
+
+
+msgid "Add Bone Chain"
+msgstr "添加骨链"
+
+
+msgid "Remove Bone Chain"
+msgstr "移除骨链"
+
+
+msgid "Add Collider"
+msgstr "添加碰撞体"
+
+
+msgid "Remove Collider"
+msgstr "移除碰撞体"
+
+
+msgid "XBone Ponytail Preview"
+msgstr "XBone 马尾预览"
+
+
+msgid "Ponytail Skin"
+msgstr "马尾蒙皮"
+
+
+msgid "Neck"
+msgstr "颈部"
+
+
+msgid "Upper Body"
+msgstr "上身"
+
+
+msgid "Shoulders"
+msgstr "肩部"
+
+
+msgctxt "Operator"
+msgid "Start Live Simulation"
+msgstr "开始实时模拟"
+
+
+msgctxt "Operator"
+msgid "Stop Simulation"
+msgstr "停止模拟"
+
+
+msgctxt "Operator"
+msgid "Edit XBone Dynamics"
+msgstr "编辑 XBone 动骨"
+
+
+msgid "Bend Stiffness"
+msgstr "弯曲刚度"
+
+
+msgid "Resistance to changes in the angle between adjacent segments"
+msgstr "抵抗相邻骨段偏离原始夹角的强度"

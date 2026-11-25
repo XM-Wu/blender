@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 import bpy
+from bpy.app.translations import pgettext_data as data_
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "startup"))
@@ -34,7 +35,8 @@ def make_demo():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.object.xbone_add(enter_editmode=True)
     rig = bpy.context.edit_object
-    rig.name = "XBone · 马尾预览"
+    rig.name = data_("XBone Ponytail Preview")
+    rig.show_in_front = True
     edits = rig.data.edit_bones
     edits.active.name = "Head"
     pivot = edits.active.head.copy()
@@ -67,15 +69,15 @@ def make_demo():
                 a, b = (i-1)*12+k, (i-1)*12+(k+1)%12
                 faces.append((a, b, b+12, a+12))
     faces.extend((tuple(reversed(range(12))), tuple(range(len(verts)-12, len(verts)))))
-    hair = mesh_object("马尾 · 蒙皮", verts, faces, (0.58, 0.2, 0.055))
+    hair = mesh_object(data_("Ponytail Skin"), verts, faces, (0.58, 0.2, 0.055))
     hair.parent = rig
     for i, name in enumerate(names):
         hair.vertex_groups.new(name=name).add(list(range(i*12, i*12+12)), 1, 'REPLACE')
     hair.modifiers.new("XBone", 'ARMATURE').object = rig
-    for label, center, scale in (("头部", pivot, (.31, .27, .34)),
-                                 ("颈部", pivot + Vector((0.03, 0, -0.29)), (.15, .16, .22)),
-                                 ("上身", pivot + Vector((0.12, 0, -0.55)), (.45, .40, .24)),
-                                 ("肩部", shoulder, (.16, .43, .16))):
+    for label, center, scale in ((data_("Head"), pivot, (.31, .27, .34)),
+                                 (data_("Neck"), pivot + Vector((0.03, 0, -0.29)), (.15, .16, .22)),
+                                 (data_("Upper Body"), pivot + Vector((0.12, 0, -0.55)), (.45, .40, .24)),
+                                 (data_("Shoulders"), shoulder, (.16, .43, .16))):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, location=center)
         obj = bpy.context.object
         obj.name, obj.scale, obj.color = label, scale, (0.21, 0.42, 0.49, 1)
@@ -104,11 +106,46 @@ def make_demo():
             space = area.spaces.active
             space.shading.color_type = 'OBJECT'
             space.overlay.show_floor = space.overlay.show_cursor = False
-            space.overlay.show_extras = space.overlay.show_bones = False
+            space.overlay.show_extras = False
+            space.overlay.show_bones = True
             space.region_3d.view_location = pivot + Vector((0.47, 0, -0.12))
             space.region_3d.view_rotation = Vector((0, 1, -0.14)).to_track_quat('-Z', 'Y')
             space.region_3d.view_distance = 3.4
     return rig, hair
+
+
+def verify_chain_stability(cfg):
+    # Same reach, motion, material and timestep. Only the subdivision count changes.
+    gravity = Vector((0, 0, -9.81))
+    for segments in (6, 12, 24, 48):
+        rest = [Vector((1.2 * i / segments, 0, 0)) for i in range(segments + 1)]
+        chain = dynamics.ChainState([])
+        chain.reset(rest)
+        for _ in range(360):
+            chain.advance(rest, cfg, gravity, [])
+        largest_turn = 0.
+        lag = 0.
+        for frame in range(240):
+            t = (frame + 1) * dynamics.STEP
+            offset = Vector((0, .25 * math.sin(math.tau * t) if frame < 120 else 0, 0))
+            pose = [p + offset for p in rest]
+            before = chain.positions[-1] - chain.positions[-2]
+            chain.advance(pose, cfg, gravity, [])
+            after = chain.positions[-1] - chain.positions[-2]
+            if frame < 120:
+                lag = max(lag, abs(chain.positions[-1].y - offset.y))
+            if frame >= 180:
+                largest_turn = max(largest_turn, math.atan2(before.cross(after).length, before.dot(after)))
+        assert lag > .01, ("no delayed motion", segments)
+        assert math.degrees(largest_turn) < 3, (segments, math.degrees(largest_turn))
+        assert max(abs((b - a).length - 1.2 / segments)
+                   for a, b in zip(chain.positions, chain.positions[1:])) < 1e-5
+    # A curved input with uneven spacing must remain at rest with no external force.
+    pose = [Vector(p) for p in ((0, 0, 0), (.2, 0, 0), (.31, .09, 0), (.31, .09, .08))]
+    chain.reset(pose)
+    for _ in range(60):
+        chain.advance(pose, cfg, Vector((0, 0, 0)), [])
+    assert max((a-b).length for a, b in zip(pose, chain.positions)) < 2e-5
 
 
 def verify(rig, hair):
@@ -123,6 +160,7 @@ def verify(rig, hair):
         skinned = hair.evaluated_get(layer.depsgraph)
         return out.pose.bones[tip].head.copy(), skinned.data.vertices[-1].co.copy()
 
+    verify_chain_stability(rig.xbone_dynamics.chains[0])
     initial = sample()
     assert bpy.ops.xbone.dynamics_start() == {'FINISHED'}
     preview = dynamics._session
@@ -145,6 +183,7 @@ def verify(rig, hair):
     assert bpy.ops.xbone.dynamics_stop() == {'FINISHED'}
     assert scene.frame_current == frame
     assert all((a-b).length < 1e-5 for a, b in zip(initial, sample()))
+    assert rig.animation_data is None
     assert not any(o.get(dynamics.TARGET_TAG) for o in bpy.data.objects)
     assert not bpy.app.timers.is_registered(dynamics.advance_timer)
     # Isolate an interior contact with both endpoints outside the sphere.
@@ -189,8 +228,50 @@ def verify(rig, hair):
         assert restored.xbone_dynamics.enabled and len(restored.xbone_dynamics.chains) == 1
         assert not any(o.get(dynamics.TARGET_TAG) for o in bpy.data.objects)
         assert not any(b.constraints for b in restored.pose.bones)
-        assert restored.animation_data.action is not None
+        assert restored.animation_data.action is not None and not restored.animation_data.drivers
+    verify_parameter_undo(restored)
     print("PASS: XBone paused preview, skinned tip, segment lengths, capsule clearance, anchor and stop")
+
+
+def verify_parameter_undo(rig):
+    uid = rig.session_uid
+    layer = bpy.context.view_layer
+    rig_name = rig.name
+    initial_gravity = rig.xbone_dynamics.gravity
+    initial_damping = rig.xbone_dynamics.chains[0].damping
+    bpy.ops.ed.undo_push(message="Before tuning")
+    assert bpy.ops.xbone.dynamics_start() == {'FINISHED'}
+    rig.xbone_dynamics.gravity = 3.5
+    bpy.ops.ed.undo_push(message="Change gravity")
+    rig.xbone_dynamics.chains[0].damping = 13
+    bpy.ops.ed.undo_push(message="Change damping")
+    # Picking a mesh while testing should not change which armature resumes.
+    layer.objects.active = next(o for o in layer.objects if o.type == 'MESH')
+    for op, gravity, damping in ((bpy.ops.ed.undo, 3.5, initial_damping),
+                                 (bpy.ops.ed.undo, initial_gravity, initial_damping),
+                                 (bpy.ops.ed.redo, 3.5, initial_damping),
+                                 (bpy.ops.ed.redo, 3.5, 13)):
+        for _ in range(4):
+            dynamics._session.tick(1)
+        tip = dynamics._session.chains[0].positions[-1].copy()
+        assert op() == {'FINISHED'}
+        preview = dynamics._session
+        assert preview and preview.rig.session_uid == uid
+        assert preview.rig.xbone_dynamics.gravity == gravity
+        assert preview.rig.xbone_dynamics.chains[0].damping == damping
+        assert (preview.chains[0].positions[-1] - tip).length < 1e-5
+        assert bpy.app.timers.is_registered(dynamics.advance_timer)
+        moving = preview.chains[0].names[:-1]
+        assert len(preview.rig.animation_data.drivers) == len(moving)
+        assert sum(bool(o.get(dynamics.TARGET_TAG)) for o in bpy.data.objects) == len(moving) + 1
+        assert all(len(preview.rig.pose.bones[n].constraints) == 1 for n in moving)
+    assert bpy.ops.xbone.dynamics_stop() == {'FINISHED'}
+    bpy.ops.ed.undo()
+    assert dynamics._session is None
+    assert not bpy.app.timers.is_registered(dynamics.advance_timer)
+    assert not bpy.data.objects[rig_name].animation_data.drivers
+    assert not any(o.get(dynamics.TARGET_TAG) for o in bpy.data.objects)
+    print("PASS: live undo/redo of preview parameters, particle continuity and stopped-session cleanup")
 
 
 def window_test(rig):
@@ -231,9 +312,73 @@ def window_test(rig):
     bpy.app.timers.register(check, first_interval=0.25)
 
 
+def move_gizmo_test():
+    """Run in the interactive sample with --enable-event-simulate -- --gizmo-test."""
+    from bpy_extras.view3d_utils import location_3d_to_region_2d
+    win = bpy.context.window_manager.windows[0]
+    area = next(a for a in win.screen.areas if a.type == 'VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    space = area.spaces.active
+    rig = win.view_layer.objects.active
+    assert rig.xbone_dynamics.enabled
+
+    def event(kind, value, x, y):
+        win.event_simulate(type=kind, value=value, x=x, y=y)
+
+    def drag():
+        with bpy.context.temp_override(window=win, area=area, region=region):
+            bpy.ops.wm.tool_set_by_id(name='builtin.move')
+        space.show_gizmo = space.show_gizmo_object_translate = True
+        view = space.region_3d
+        view.view_perspective = 'ORTHO'
+        view.view_rotation = Vector((0, 1, -.22)).to_track_quat('-Z', 'Y')
+        view.view_location = rig.matrix_world.translation
+        view.view_distance = 4
+        yield
+        for simulate in (False, True):
+            if simulate:
+                assert bpy.ops.xbone.dynamics_start() == {'FINISHED'}
+                yield
+            origin = rig.location.copy()
+            xy = location_3d_to_region_2d(region, view, rig.matrix_world.translation)
+            x = round(region.x + xy.x + bpy.context.preferences.view.gizmo_size * .7 *
+                      bpy.context.preferences.system.ui_scale)
+            y = round(region.y + xy.y)
+            for kind, value, dx in (('MOUSEMOVE', 'NOTHING', 0), ('LEFTMOUSE', 'PRESS', 0),
+                                    ('MOUSEMOVE', 'NOTHING', 15), ('MOUSEMOVE', 'NOTHING', 70)):
+                event(kind, value, x + dx, y)
+                yield
+            delta = rig.location - origin
+            assert delta.x > .01 and abs(delta.y) + abs(delta.z) < .0001, (simulate, delta)
+            if simulate:
+                assert (delta - baseline).length < .001, (delta, baseline)
+            else:
+                baseline = delta.copy()
+            event('LEFTMOUSE', 'RELEASE', x + 70, y)
+            yield
+        assert bpy.ops.xbone.dynamics_stop() == {'FINISHED'}
+        print("PASS: move gizmo drags match with and without the live preview", flush=True)
+
+    events = drag()
+    def step():
+        try:
+            next(events)
+            return .2
+        except StopIteration:
+            pass
+        except Exception:
+            traceback.print_exc()
+        bpy.ops.wm.quit_blender()
+        return None
+    bpy.app.timers.register(step, first_interval=.6)
+
+
 if __name__ == "__main__":
-    rig, hair = make_demo()
-    if "--window-test" in sys.argv:
-        window_test(rig)
-    elif "--demo" not in sys.argv:
-        verify(rig, hair)
+    if "--gizmo-test" in sys.argv:
+        move_gizmo_test()
+    else:
+        rig, hair = make_demo()
+        if "--window-test" in sys.argv:
+            window_test(rig)
+        elif "--demo" not in sys.argv:
+            verify(rig, hair)

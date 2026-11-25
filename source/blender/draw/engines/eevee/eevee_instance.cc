@@ -502,6 +502,7 @@ void Instance::end_sync()
   film.end_sync();
   cryptomatte.end_sync();
   pipelines.end_sync();
+  npr_outline.sync();
   light_probes.end_sync();
   sphere_probes.end_sync();
   planar_probes.end_sync();

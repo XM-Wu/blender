@@ -107,10 +107,41 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_SCENE_TIME = (1 << 25),
 
   /* Tells the render engine the material was just compiled or updated. */
+  GPU_MATFLAG_NPR_OUTLINE = (1 << 27),
+  GPU_MATFLAG_SCREENSPACE_INFO = (1 << 28),
+
   GPU_MATFLAG_UPDATED = (1 << 29),
 };
 ENUM_OPERATORS(eGPUMaterialFlag);
 
+enum eGPUCustomNodeDependencyFlag {
+  GPU_CUSTOM_NODE_DEPENDENCY_NONE = 0,
+  GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS = (1 << 0),
+  GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS = (1 << 1),
+  GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS = (1 << 2),
+  GPU_CUSTOM_NODE_DEPENDENCY_SHADING_CONTEXT = (1 << 3),
+};
+ENUM_OPERATORS(eGPUCustomNodeDependencyFlag);
+
+inline constexpr const char *GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME =
+    "__glsl_function_geometry_helpers.glsl";
+inline constexpr const char *GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME =
+    "__glsl_function_lightprobe_helpers.glsl";
+inline constexpr const char *GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME =
+    "__glsl_function_matrix_helpers.glsl";
+
+struct GPUMaterialGeneratedSource {
+  std::string filename;
+  Vector<std::string> dependencies;
+  std::string content;
+};
+
+void GPU_material_generated_source_add(GPUMaterial *material,
+                                       StringRefNull filename,
+                                       Span<StringRefNull> dependencies,
+                                       StringRefNull content);
+int GPU_material_generated_source_count(const GPUMaterial *material);
+const GPUMaterialGeneratedSource *GPU_material_generated_source_get(const GPUMaterial *material, int index);
 using GPUCodegenCallbackFn = void (*)(void *thunk,
                                       GPUMaterial *mat,
                                       struct GPUCodegenOutput *codegen);
@@ -677,6 +708,14 @@ bool GPU_stack_link(GPUMaterial *mat,
                     GPUNodeStack *in,
                     GPUNodeStack *out,
                     ...);
+
+bool GPU_stack_link_custom(GPUMaterial *material,
+                           const bNode *bnode,
+                           StringRefNull name,
+                           StringRefNull dependency_name,
+                           eGPUCustomNodeDependencyFlag dependency_flags,
+                           GPUNodeStack *in,
+                           GPUNodeStack *out);
 
 bool GPU_stack_link_zone(GPUMaterial *material,
                          const bNode *bnode,

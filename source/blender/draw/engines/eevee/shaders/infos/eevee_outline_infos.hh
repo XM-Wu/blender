@@ -1,0 +1,94 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+#ifdef GPU_SHADER
+#  pragma once
+#  include "gpu_shader_compat.hh"
+
+#  include "draw_view_infos.hh"
+#  include "eevee_fullscreen_infos.hh"
+#endif
+
+#include "eevee_defines.hh"
+#include "gpu_shader_create_info.hh"
+
+GPU_SHADER_CREATE_INFO(eevee_outline_detect_common)
+FRAGMENT_OUT(0, float4, out_outline_seed)
+SAMPLER(OUTLINE_DEPTH_TEX_SLOT, sampler2DDepth, depth_tx)
+SAMPLER(PREPASS_NORMAL_TEX_SLOT, sampler2D, prepass_normal_tx)
+SAMPLER(OUTLINE_COLOR_TEX_SLOT, sampler2D, outline_color_tx)
+SAMPLER(OUTLINE_INFO_TEX_SLOT, usampler2DArray, outline_info_tx)
+ADDITIONAL_INFO(gbuffer_Reader)
+ADDITIONAL_INFO(eevee_fullscreen)
+ADDITIONAL_INFO(draw_view)
+TYPEDEF_SOURCE("eevee_defines.hh")
+FRAGMENT_SOURCE("eevee_outline_detect_frag.glsl")
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_detect)
+DO_STATIC_COMPILATION()
+ADDITIONAL_INFO(eevee_outline_detect_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_factor_blur_common)
+FRAGMENT_OUT(0, float4, out_outline_seed)
+SAMPLER(OUTLINE_SEED_TEX_SLOT, sampler2D, outline_seed_tx)
+SAMPLER(OUTLINE_INFO_TEX_SLOT, usampler2DArray, outline_info_tx)
+ADDITIONAL_INFO(eevee_fullscreen)
+TYPEDEF_SOURCE("eevee_defines.hh")
+FRAGMENT_SOURCE("eevee_outline_factor_blur_frag.glsl")
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_factor_blur)
+DO_STATIC_COMPILATION()
+ADDITIONAL_INFO(eevee_outline_factor_blur_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_jfa_init_common)
+SAMPLER(OUTLINE_SEED_TEX_SLOT, sampler2D, outline_seed_tx)
+ADDITIONAL_INFO(eevee_fullscreen)
+TYPEDEF_SOURCE("eevee_defines.hh")
+FRAGMENT_SOURCE("eevee_outline_jfa_init_frag.glsl")
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_jfa_init)
+DO_STATIC_COMPILATION()
+FRAGMENT_OUT(0, float2, out_jfa_coord)
+ADDITIONAL_INFO(eevee_outline_jfa_init_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_jfa_step_common)
+LOCAL_GROUP_SIZE(OUTLINE_JFA_STEP_GROUP_SIZE, OUTLINE_JFA_STEP_GROUP_SIZE, 1)
+PUSH_CONSTANT(int, jfa_step_size)
+TYPEDEF_SOURCE("eevee_defines.hh")
+COMPUTE_SOURCE("eevee_outline_jfa_step_comp.glsl")
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_jfa_step)
+DO_STATIC_COMPILATION()
+IMAGE(OUTLINE_JFA_IN_IMG_SLOT, SFLOAT_32_32, read, image2D, jfa_in_img)
+IMAGE(OUTLINE_JFA_OUT_IMG_SLOT, SFLOAT_32_32, write, image2D, jfa_out_img)
+SAMPLER(OUTLINE_SEED_TEX_SLOT, sampler2D, outline_seed_tx)
+ADDITIONAL_INFO(eevee_outline_jfa_step_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_resolve_common)
+FRAGMENT_OUT(0, float4, out_outline_color)
+SAMPLER(OUTLINE_DEPTH_TEX_SLOT, sampler2DDepth, depth_tx)
+SAMPLER(OUTLINE_OCCLUSION_DEPTH_TEX_SLOT, sampler2DDepth, outline_occlusion_depth_tx)
+SAMPLER(OUTLINE_SEED_TEX_SLOT, sampler2D, outline_seed_tx)
+SAMPLER(OUTLINE_COLOR_TEX_SLOT, sampler2D, outline_color_tx)
+SAMPLER(OUTLINE_INFO_TEX_SLOT, usampler2DArray, outline_info_tx)
+PUSH_CONSTANT(int, use_outline_occlusion_depth)
+ADDITIONAL_INFO(eevee_fullscreen)
+ADDITIONAL_INFO(draw_view)
+TYPEDEF_SOURCE("eevee_defines.hh")
+FRAGMENT_SOURCE("eevee_outline_resolve_frag.glsl")
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_outline_resolve)
+DO_STATIC_COMPILATION()
+SAMPLER(OUTLINE_JFA_TEX_SLOT, sampler2D, jfa_tx)
+ADDITIONAL_INFO(eevee_outline_resolve_common)
+GPU_SHADER_CREATE_END()

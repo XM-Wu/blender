@@ -100,6 +100,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.cc
   engines/eevee/eevee_depth_of_field.cc
   engines/eevee/eevee_engine.cc
+  engines/eevee/eevee_outline.cc
   engines/eevee/eevee_film.cc
   engines/eevee/eevee_hizbuffer.cc
   engines/eevee/eevee_instance.cc
@@ -198,6 +199,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.hh
   engines/eevee/eevee_depth_of_field.hh
   engines/eevee/eevee_engine.h
+  engines/eevee/eevee_outline.hh
   engines/eevee/eevee_film.hh
   engines/eevee/eevee_gbuffer.hh
   engines/eevee/eevee_hizbuffer.hh
@@ -413,6 +415,16 @@ set(SHADER_SRC_EEVEE
   engines/eevee/shaders/eevee_depth_of_field_setup.bsl.hh
   engines/eevee/shaders/eevee_depth_of_field_tiles.bsl.hh
   engines/eevee/shaders/eevee_fast_gi.bsl.hh
+  engines/eevee/shaders/eevee_outline_parameters.bsl.hh
+  engines/eevee/shaders/infos/eevee_outline_infos.hh
+  engines/eevee/shaders/infos/eevee_fullscreen_infos.hh
+  engines/eevee/shaders/eevee_fullscreen_vert.glsl
+  engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
+  engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
+  engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
+  engines/eevee/shaders/eevee_outline_resolve_frag.glsl
+  engines/eevee/shaders/eevee_outline_lib.glsl
   engines/eevee/shaders/eevee_film.bsl.hh
   engines/eevee/shaders/eevee_filter.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.bsl.hh
@@ -755,6 +767,7 @@ if(WITH_GTESTS)
 endif()
 
 set(GLSL_INC
+  engines/eevee/shaders/infos
   ../gpu
   ../gpu/intern
   ../gpu/shaders

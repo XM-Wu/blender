@@ -65,6 +65,13 @@ void RenderBuffers::init()
 
 void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 {
+  const int2 outline_extent = inst_.npr_outline.enabled() ? extent : int2(1);
+  const eGPUTextureUsage outline_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  npr_outline_color_tx.acquire_2d(outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
+  npr_outline_info_tx.acquire_2d_array(outline_extent, 2, gpu::TextureFormat::UINT_32_32_32_32, outline_usage);
+  npr_outline_color_tx.clear(float4(0));
+  npr_outline_info_tx.clear(uint4(0));
+
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.enabled_passes_get();
 
   extent_ = extent;
@@ -127,6 +134,8 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
 
 void RenderBuffers::release()
 {
+  npr_outline_color_tx.release();
+  npr_outline_info_tx.release();
   depth_tx.release();
   combined_tx.release();
 

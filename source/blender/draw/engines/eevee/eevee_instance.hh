@@ -33,6 +33,7 @@
 #include "eevee_cryptomatte.hh"
 #include "eevee_debug_shared.hh"
 #include "eevee_depth_of_field.hh"
+#include "eevee_outline.hh"
 #include "eevee_film.hh"
 #include "eevee_gbuffer.hh"
 #include "eevee_hizbuffer.hh"
@@ -112,6 +113,7 @@ class Instance : public DrawEngine {
   ShaderModule &shaders;
   SyncModule sync;
   UniformDataModule uniform_data;
+  OutlineModule npr_outline{*this};
   MaterialModule materials;
   SubsurfaceModule subsurface;
   PipelineModule pipelines;

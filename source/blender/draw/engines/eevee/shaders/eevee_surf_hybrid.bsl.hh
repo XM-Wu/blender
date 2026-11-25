@@ -36,18 +36,22 @@ float4 closure_to_rgba_hybrid(KernelGlobals &kg, ShadingData &sd, Closure /*cl*/
     closure_weights_reset(kg, sd, closure_rand);
 
     if (kg.pipe.use_forward_lighting && kg.pipe.use_transparency) [[static_branch]] {
+      if (kg.pipe.use_previous_layer) [[static_branch]] {
+      [[resource_table]] eevee::PreviousLayerHiZ &prev_hiz = kg.previous_layer_hiz;
+      [[resource_table]] eevee::PreviousLayerRadiance &prev_radiance = kg.previous_layer_radiance;
       float3 V = -kg.view.get(0).world_incident_vector(sd.P);
       eevee::LightProbeSample samp = kg.lightprobes.load(frag_co, sd.P, sd.N, V);
       float3 radiance_behind = kg.lightprobes.spheres.spherical_sample_normalized_with_parallax(
           samp, sd.P, V, 0.0);
 
       int2 texel = int2(frag_co);
-      if (texelFetchExtend(kg.previous_layer_hiz.hiz_prev_tx, texel, 0).x != 1.0f) {
+      if (texelFetchExtend(prev_hiz.hiz_prev_tx, texel, 0).x != 1.0f) {
         radiance_behind =
-            texelFetch(kg.previous_layer_radiance.previous_layer_radiance_tx, texel, 0).xyz;
+            texelFetch(prev_radiance.previous_layer_radiance_tx, texel, 0).xyz;
       }
 
       radiance += radiance_behind * saturate(transmittance);
+      }
     }
 
     return float4(radiance, saturate(1.0f - average(transmittance)));

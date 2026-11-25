@@ -32,6 +32,15 @@ void register_shader_nodes()
   register_node_type_sh_bsdf_hair();
   register_node_type_sh_bsdf_metallic();
   register_node_type_sh_bsdf_principled();
+  register_node_type_sh_portal_in();
+  register_node_type_sh_portal_out();
+  register_node_type_sh_screenspace_info();
+  register_node_type_sh_npr_rim();
+  register_node_type_sh_npr_light_info();
+  register_node_type_sh_shader_info();
+  register_node_type_sh_image_to_closure();
+  register_node_type_sh_glsl_function();
+  register_node_type_sh_outline_control();
   register_node_type_sh_bsdf_ray_portal();
   register_node_type_sh_bsdf_refraction();
   register_node_type_sh_bsdf_toon();

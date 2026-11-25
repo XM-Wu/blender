@@ -110,6 +110,16 @@ MaterialModule::~MaterialModule()
   BKE_id_free(nullptr, error_mat_);
 }
 
+bool MaterialModule::has_visible_outline_materials() const
+{
+  for (const Material &material : material_map_.values()) {
+    if (material.shading.gpumat && GPU_material_flag_get(material.shading.gpumat, GPU_MATFLAG_NPR_OUTLINE)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void MaterialModule::begin_sync()
 {
   float frame = BKE_scene_frame_get(inst_.scene);
@@ -122,6 +132,9 @@ void MaterialModule::begin_sync()
 
   inst_.uniform_data.data.scene.time = material_time;
   inst_.uniform_data.data.scene.frame = material_frame;
+  const float frame_range = float(inst_.scene->r.efra) - float(inst_.scene->r.sfra);
+  inst_.uniform_data.data.scene.timeline = frame_range != 0.0f ?
+      std::clamp((material_frame - inst_.scene->r.sfra) / frame_range, 0.0f, 1.0f) : 0.0f;
 
   queued_shaders_count = 0;
   queued_textures_count = 0;

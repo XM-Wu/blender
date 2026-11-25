@@ -156,7 +156,9 @@ void ShadingView::render()
 
   inst_.pipelines.background.render(render_view_, combined_fb_);
 
-  inst_.gbuffer.release();
+  if (!inst_.npr_outline.enabled()) {
+    inst_.gbuffer.release();
+  }
 
   inst_.volume.draw_compute(main_view_, extent_);
 
@@ -166,6 +168,11 @@ void ShadingView::render()
 
   inst_.pipelines.forward.render(
       render_view_, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent_);
+
+  if (inst_.npr_outline.enabled()) {
+    inst_.npr_outline.render(render_view_, combined_fb_, extent_);
+    inst_.gbuffer.release();
+  }
 
   inst_.lights.shape_display_draw(render_view_, combined_fb_);
 

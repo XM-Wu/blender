@@ -16,6 +16,7 @@
 #include "eevee_hiz.bsl.hh"
 #include "eevee_light_data.bsl.hh"
 #include "eevee_light_eval.bsl.hh"
+#include "eevee_outline_parameters.bsl.hh"
 #include "eevee_light_iter.bsl.hh"
 #include "eevee_lightprobe.bsl.hh"
 #include "eevee_lightprobe_plane.bsl.hh"
@@ -138,7 +139,13 @@ struct ShadingData {
   }
 };
 
+struct NPROutlineOutput {
+  [[image(OUTLINE_COLOR_SLOT, write, SFLOAT_16_16_16_16)]] image2D npr_outline_color_img;
+  [[image(OUTLINE_INFO_SLOT, write, UINT_32_32_32_32)]] uimage2DArray npr_outline_info_img;
+};
+
 struct KernelGlobals {
+  [[resource_table]] [[condition(use_npr_outline)]] NPROutlineOutput outline;
   [[resource_table]] NodeTreeRes nt;
 
   [[resource_table]] draw::View view;
@@ -167,9 +174,9 @@ struct KernelGlobals {
   [[resource_table]] [[condition(use_forward_lighting)]]
   eevee::LightprobePlaneRenderData lightprobe_planes;
 
-  [[resource_table]] [[condition(use_forward_lighting && use_transparency)]]
+  [[resource_table]] [[condition(use_previous_layer)]]
   eevee::PreviousLayerHiZ previous_layer_hiz;
-  [[resource_table]] [[condition(use_forward_lighting && use_transparency)]]
+  [[resource_table]] [[condition(use_previous_layer)]]
   eevee::PreviousLayerRadiance previous_layer_radiance;
 
   [[resource_table]] [[condition(use_lighting_nodes)]] eevee::LightRenderData lrd;
@@ -1044,12 +1051,13 @@ float4 node_attribute_layer_impl(KernelGlobals &kg, const uint attr_hash)
   return vl_attributes.get(attr_hash);
 }
 
-void scene_time_uniforms(KernelGlobals &kg, float &seconds, float &frame)
+void scene_time_uniforms(KernelGlobals &kg, float &seconds, float &frame, float &timeline)
 {
   const eevee::Uniform &uni = kg.uniforms;
 
   seconds = uni.uniform_buf.scene.time;
   frame = uni.uniform_buf.scene.frame;
+  timeline = uni.uniform_buf.scene.timeline;
 }
 
 void light_iter_init(KernelGlobals &kg,
@@ -1116,6 +1124,269 @@ bool light_iter_should_skip(KernelGlobals &kg, eevee::light::VisibleLightIterato
 #define LIGHT_ITER_END() \
   } \
   }
+
+float3 npr_v2_safe_normalize(float3 value, float3 fallback)
+{
+  float length_squared = dot(value, value);
+  return length_squared > 1e-20f ? value * inversesqrt(length_squared) : fallback;
+}
+
+float npr_v2_rim_shape(KernelGlobals &kg, const ShadingData &sd, float3 N, float3 V, float4 shape, float falloff)
+{
+  float3 camera_x = float3(1.0f, 0.0f, 0.0f);
+  float3 camera_y = float3(0.0f, 1.0f, 0.0f);
+#if defined(GPU_FRAGMENT_SHADER)
+  camera_x = npr_v2_safe_normalize(kg.view_matrices_get(sd).viewinv[0].xyz, camera_x);
+  camera_y = npr_v2_safe_normalize(kg.view_matrices_get(sd).viewinv[1].xyz, camera_y);
+#endif
+  float2 projected = float2(dot(N, camera_x), dot(N, camera_y));
+  float len = length(projected);
+  if (len <= 1e-6f || shape.y <= 1e-6f || shape.w <= 1e-6f) {
+    return 0.0f;
+  }
+  projected /= len;
+  float turns = atan(projected.y, projected.x) / (2.0f * M_PI);
+  float centered = abs(fract(turns - shape.x / 360.0f + 0.5f) - 0.5f);
+  float half_length = saturate(shape.y) * 0.5f;
+  float arc_width = max(shape.z, 0.0f) * 0.5f;
+  float arc = arc_width <= 1e-6f ? 1.0f - step(half_length, centered) :
+      1.0f - smoothstep(max(half_length - arc_width, 0.0f), half_length, centered);
+  float facing = saturate(1.0f - dot(N, V));
+  float edge = 1.0f - saturate(shape.w);
+  float width = max(falloff, 0.0f);
+  return arc * (width <= 1e-6f ? step(edge, facing) :
+                 smoothstep(edge - 0.5f * width, edge + 0.5f * width, facing));
+}
+
+float npr_v2_depth_rim(KernelGlobals &kg, const ShadingData &sd, float width_px,
+                       float depth_threshold,
+                       float softness,
+                       float angle_degrees,
+                       float arc_length,
+                       float arc_softness,
+                       float samples)
+{
+#if defined(GPU_FRAGMENT_SHADER)
+  if (!kg.pipe.use_ambient_occlusion) [[static_branch]] {
+    return 0.0f;
+  }
+  [[resource_table]] eevee::HiZ &hiz = kg.hiz;
+  /* Hardware depth is affine across a projected triangle, including perspective.
+   * Use the receiver's slope, not depth derivatives from neighboring objects. */
+  /* EEVEE raster depth is reverse-Z, while HiZ is already converted back. */
+  float receiver_depth = 1.0f - sd.frag_co.z;
+  float2 depth_gradient = float2(gpu_dfdx(receiver_depth), gpu_dfdy(receiver_depth));
+  if (!(width_px > 0.0f) || !(arc_length > 0.0f)) {
+    return 0.0f;
+  }
+  int2 depth_extent = textureSize(hiz.hiz_tx, 0);
+  int2 view_extent = int2(kg.uniforms.uniform_buf.film.render_extent);
+  int2 center_pixel = int2(sd.frag_co.xy);
+  if (any(lessThan(center_pixel, int2(0))) ||
+      any(greaterThanEqual(center_pixel, view_extent)) ||
+      any(greaterThan(view_extent, depth_extent)))
+  {
+    return 0.0f;
+  }
+  float center_depth = texelFetch(hiz.hiz_tx, center_pixel, 0).r;
+  if (!(center_depth >= 0.0f && center_depth < 1.0f)) {
+    return 0.0f;
+  }
+
+  int n_samples = clamp(int(samples), 1, 64);
+  float half_arc = saturate(arc_length) * 0.5f;
+  float arc_transition = min(saturate(arc_softness) * 0.5f, half_arc);
+  float angle_turns = angle_degrees / 360.0f;
+  float rotation = kg.sampling.rng_1D_get(SAMPLING_TRANSPARENCY);
+  float rim = 0.0f;
+  for (int axis = 0; axis < 8; axis++) {
+    float turns = (float(axis) + rotation) * 0.125f;
+    float arc_weight = 1.0f;
+    if (arc_length < 1.0f) {
+      float distance = abs(fract(turns - angle_turns + 0.5f) - 0.5f);
+      arc_weight = arc_transition > 0.0f ?
+                       1.0f - smoothstep(half_arc - arc_transition, half_arc, distance) :
+                       1.0f - step(half_arc, distance);
+    }
+    if (arc_weight <= 0.0f) {
+      continue;
+    }
+    float radians = turns * (2.0f * M_PI);
+    float2 direction = float2(cos(radians), sin(radians));
+    int2 tap_step = int2(round(direction * max(1.0f, width_px / float(n_samples))));
+    for (int i = 1; i <= n_samples; i++) {
+      float reach = float(i) / float(n_samples);
+      int2 pixel = int2(floor(sd.frag_co.xy + direction * (width_px * reach)));
+      /* Off-screen and padded HiZ texels are not background geometry. */
+      if (any(lessThan(pixel, int2(0))) || any(greaterThanEqual(pixel, view_extent))) {
+        continue;
+      }
+      float sample_depth = texelFetch(hiz.hiz_tx, pixel, 0).r;
+      bool background = sample_depth >= 1.0f;
+      float predicted_depth = center_depth + dot(depth_gradient, float2(pixel - center_pixel));
+      bool edge = background;
+      if (!background && predicted_depth >= 0.0f && predicted_depth < 1.0f) {
+        float predicted_z = kg.view_matrices_get(sd).depth_screen_to_view(predicted_depth);
+        float sample_z = kg.view_matrices_get(sd).depth_screen_to_view(sample_depth);
+        float tolerance = max(1e-5f, abs(predicted_z) * 1e-5f);
+        float gap = predicted_z - sample_z;
+        /* A tangent prediction over the whole radius also responds to smooth
+         * curvature. Require a local break in the depth slope at the tap,
+         * using two equally spaced preceding texels along this direction. */
+        int2 prior = pixel - tap_step;
+        int2 prior2 = prior - tap_step;
+        if (all(greaterThanEqual(prior2, int2(0))) &&
+            all(lessThan(prior2, view_extent)) &&
+            all(greaterThanEqual(prior, int2(0))) && all(lessThan(prior, view_extent)))
+        {
+          float d1 = texelFetch(hiz.hiz_tx, prior, 0).r;
+          float d2 = texelFetch(hiz.hiz_tx, prior2, 0).r;
+          float local_prediction = 2.0f * d1 - d2;
+          if (d1 < 1.0f && d2 < 1.0f && local_prediction >= 0.0f &&
+              local_prediction < 1.0f)
+          {
+            gap = min(gap, kg.view_matrices_get(sd).depth_screen_to_view(local_prediction) - sample_z);
+            /* A smooth curved surface changes slope gradually. A finite
+             * discontinuity must exceed that local depth trend as well. */
+            float trend = abs(kg.view_matrices_get(sd).depth_screen_to_view(d1) - kg.view_matrices_get(sd).depth_screen_to_view(d2));
+            if (gap <= 2.0f * trend) {
+              gap = 0.0f;
+            }
+          }
+          else {
+            gap = 0.0f;
+          }
+        }
+        else {
+          gap = 0.0f;
+        }
+        edge = gap > max(depth_threshold, 0.0f) + tolerance;
+      }
+      if (edge) {
+        /* Softness tapers the spatial band. Raising the depth threshold can
+         * only remove candidates, never introduce a different bright edge. */
+        /* Estimate the crossing halfway through the tap interval, so Samples=1
+         * still has a nonzero soft response instead of only sampling its zero. */
+        float crossing = max(0.0f, reach - 0.5f / float(n_samples));
+        float band = softness > 0.0f ?
+                         1.0f - smoothstep(1.0f - saturate(softness), 1.0f, crossing) :
+                         1.0f;
+        rim = max(rim, arc_weight * band);
+      }
+    }
+  }
+  return rim;
+#else
+  return 0.0f;
+#endif
+}
+
+void npr_rim_impl(float4 color, float strength, float3 normal,
+                  float angle, float arc_length, float arc_falloff,
+                  float thickness, float thickness_falloff,
+                  float width_px, float threshold, float softness, float samples,
+                  float light_bias, float light_factor, float mask, float alpha,
+                  float mode, float supported,
+                  KernelGlobals &kg, const ShadingData &sd,
+                  float4 &result, float &factor)
+{
+  float shape = 0.0f;
+  if (mode < 0.5f) {
+    float3 N = npr_v2_safe_normalize(normal, sd.N);
+    float3 V = npr_v2_safe_normalize(coordinate_impl(kg, sd, sd.P, sd.N).incoming, N);
+    shape = npr_v2_rim_shape(kg, sd, N, V, float4(angle, arc_length, arc_falloff, thickness),
+                             thickness_falloff);
+  }
+  else if (supported > 0.5f && alpha >= 1.0f) {
+    shape = npr_v2_depth_rim(kg, sd, width_px, threshold, softness, angle,
+                            arc_length, arc_falloff, samples);
+  }
+  float bias = clamp(light_bias, -1.0f, 1.0f);
+  float lighting = saturate(light_factor);
+  factor = shape * saturate(mask) * (bias >= 0.0f ? mix(1.0f, lighting, bias) :
+                                                     mix(1.0f, 1.0f - lighting, -bias));
+  result = float4(max(color.rgb, float3(0.0f)) * max(strength, 0.0f) * factor, 1.0f);
+}
+
+void npr_outline_write(
+    float4 line_color,
+    float line_alpha,
+    float line_width,
+    float depth_threshold,
+    float depth_threshold_range,
+    float depth_edge_width,
+    float normal_threshold,
+    float normal_threshold_range,
+    float normal_edge_width,
+    int outline_id,
+    bool id_edge,
+    float id_edge_width,
+    bool freestyle_edge,
+    float expansion_mask,
+    float id_combine,
+    float edge_priority,
+    KernelGlobals &kg,
+    ShadingData &sd,
+    Closure &dummy)
+{
+  if (kg.pipe.use_npr_outline) [[static_branch]] {
+    int2 pixel = int2(sd.frag_co.xy);
+    int2 extent = imageSize(kg.outline.npr_outline_color_img);
+    if (any(greaterThanEqual(pixel, extent)) || extent.x <= 1 ||
+        flag_test(kg.object_infos_get(sd).flag, OBJECT_HOLDOUT)) {
+      return;
+    }
+    line_color.a = saturate(line_color.a) * saturate(line_alpha);
+    bool contributes = line_width > 0.0f && line_color.a > 0.0f;
+    uint id = outline_id > 0 ? uint(outline_id) : min(kg.resource_id_get(sd) + 1u, OUTLINE_ID_VALUE_MASK);
+    uint4 info = contributes ? uint4(
+        outline_info_r_pack(line_width, depth_threshold_range, depth_edge_width),
+        outline_info_g_pack(depth_threshold, normal_threshold_range, normal_edge_width),
+        outline_info_b_pack(normal_threshold, id_edge_width, freestyle_edge),
+        outline_id_pack(id, id_edge)) : uint4(0);
+    info.b |= uint(clamp(id_combine, 0.0f, 3.0f)) << 16u;
+    info.b |= uint(clamp(edge_priority, 0.0f, 3.0f)) << 18u;
+    info.a |= outline_expansion_block_pack(1.0f - saturate(expansion_mask));
+    imageStore(kg.outline.npr_outline_color_img, pixel, contributes ? line_color : float4(0));
+    imageStore(kg.outline.npr_outline_info_img, int3(pixel, 0), info);
+    imageStore(kg.outline.npr_outline_info_img, int3(pixel, 1), floatBitsToUint(float4(sd.frag_co.z, sd.N)));
+  }
+}
+
+void screenspace_info_impl(KernelGlobals &kg, const ShadingData &sd,
+                           float3 position, float explicit_position,
+                           float4 &color, float &depth)
+{
+  color = float4(0);
+  depth = 0.0f;
+  if (kg.pipe.use_previous_layer) [[static_branch]] {
+    const ViewMatrices view = kg.view_matrices_get(sd);
+    float3 sample_position = explicit_position > 0.5f ? position : view.point_world_to_view(sd.P);
+    float2 uv = view.point_view_to_screen(sample_position).xy;
+    if (any(lessThan(uv, float2(0))) || any(greaterThan(uv, float2(1)))) {
+      return;
+    }
+    [[resource_table]] eevee::PreviousLayerRadiance &radiance = kg.previous_layer_radiance;
+    [[resource_table]] eevee::PreviousLayerHiZ &prev_hiz = kg.previous_layer_hiz;
+    int2 extent = textureSize(radiance.previous_layer_radiance_tx, 0);
+    int2 pixel = clamp(int2(uv * float2(extent)), int2(0), extent - int2(1));
+    float z = texelFetch(prev_hiz.hiz_prev_tx, pixel, 0).r;
+    color = texelFetch(radiance.previous_layer_radiance_tx, pixel, 0);
+    color.a = saturate(1.0f - color.a);
+    if (z != 1.0f) {
+      depth = -view.depth_screen_to_view(z);
+    }
+    else if (all(lessThanEqual(abs(color.rgb), float3(1e-6f)))) {
+      if (kg.pipe.use_forward_lighting) [[static_branch]] {
+        [[resource_table]] eevee::LightprobeRenderData &probes = kg.lightprobes;
+        [[resource_table]] eevee::LightprobeSphereRenderData &spheres = probes.spheres;
+        float3 direction = safe_normalize(-view.world_incident_vector(view.point_view_to_world(sample_position)));
+        eevee::LightProbeSample probe_sample = probes.load(sd.frag_co.xy, sd.P, sd.Ng, view.world_incident_vector(sd.P));
+        color = float4(spheres.spherical_sample_normalized_with_parallax(probe_sample, sd.P, direction, 0.0f), 1.0f);
+      }
+    }
+  }
+}
 
 void node_light_info_impl(
     KernelGlobals &kg, const int light_index, float4 &color, float &power, float3 &position)
@@ -1270,6 +1541,72 @@ bool node_attribute_light_is_point_impl(KernelGlobals &kg, const int light_index
     return is_point_light(light.type) && !is_spot_light(light.type);
   }
   return false;
+}
+
+void npr_shader_info_impl(float3 position, float3 normal, float exponent, float light_group,
+                          KernelGlobals &kg, const ShadingData &sd,
+                          float4 &diffuse, float &shadow, float4 &ambient,
+                          float &half_lambert, float &blinn_phong, float &self_shadow, float &cast_shadow)
+{
+  diffuse = float4(0, 0, 0, 1);
+  ambient = float4(0);
+  shadow = self_shadow = cast_shadow = 1.0f;
+  half_lambert = blinn_phong = 0.0f;
+
+#if defined(GPU_FRAGMENT_SHADER) || defined(GLSL_CPP_STUBS)
+  if (kg.pipe.use_lighting_nodes) [[static_branch]] {
+    float3 N = safe_normalize(normal);
+    const ViewMatrices view = kg.view_matrices_get(sd);
+    float3 V = view.world_incident_vector(position);
+    float sum = 0.0f, weight = 0.0f;
+    eevee::light::VisibleLightIterator iter;
+    light_iter_init(kg, sd, iter);
+    while (light_iter_next(kg, iter)) {
+      if (light_iter_should_skip(kg, iter, position)) {
+        continue;
+      }
+      int index = iter.light_index();
+      LightData light = kg.lrd.light_buf[index];
+      if (light.npr_lightgroup_id != int(light_group)) {
+        continue;
+      }
+      bool sun = is_sun_light(light.type);
+      LightVector lv = LightVector::get(light, sun, position);
+      float att = light_attenuation_surface(light, sun, lv);
+      if (att < LIGHT_ATTENUATION_THRESHOLD) {
+        continue;
+      }
+      float diffuse_power = eevee::light::power_get(light, LIGHT_DIFFUSE);
+      if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD) {
+        float factor = 0.0f;
+        if (!kg.pipe.is_occupancy_pipe) [[static_branch]] {
+          LightShape shape = LightShape::get(light, lv);
+          eevee::LTCData ltc = eevee::LTCData::identity(N, V);
+          factor = eevee::ltc::evaluate(kg.util_tx.utility_tx, light, shape, lv, ltc);
+        }
+        diffuse.rgb += float3(light.color) * (diffuse_power * factor * att);
+        half_lambert += saturate(dot(N, lv.L) * 0.5f + 0.5f) * att;
+        float4 visibility = float4(1);
+        node_shadow_raycast_impl(kg, sd, index, position, 1.0f, visibility);
+        float w = diffuse_power * max(light.color.x, max(light.color.y, light.color.z));
+        sum += visibility.r * w;
+        weight += w;
+      }
+      if (eevee::light::power_get(light, LIGHT_SPECULAR) >= LIGHT_ATTENUATION_THRESHOLD) {
+        float nh = saturate(dot(N, safe_normalize(lv.L + V)));
+        blinn_phong += pow(nh, max(exponent, 1.0f)) * att;
+      }
+    }
+    half_lambert = saturate(half_lambert);
+    blinn_phong = saturate(blinn_phong);
+    shadow = weight > 1e-8f ? saturate(sum / weight) : 1.0f;
+    if (kg.pipe.use_forward_lighting) [[static_branch]] {
+      eevee::LightProbeSample probe = kg.lightprobes.load(sd.frag_co.xy, position, sd.Ni, V);
+      probe.volume_irradiance = spherical_harmonics::clamp_energy(probe.volume_irradiance, kg.uniforms.uniform_buf.clamp.surface_indirect);
+      ambient = float4(max(probe.volume_irradiance.evaluate_lambert(N).rgb, float3(0)), 1.0f);
+    }
+  }
+#endif
 }
 
 bool node_attribute_light_is_spot_impl(KernelGlobals &kg, const int light_index)

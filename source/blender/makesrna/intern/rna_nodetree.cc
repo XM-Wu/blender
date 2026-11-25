@@ -2785,6 +2785,34 @@ void rna_Node_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
   BKE_main_ensure_invariants(*bmain, ntree->id);
 }
 
+static void rna_ShaderNodePortalIn_paired_name_set(PointerRNA *ptr, const char *name)
+{
+  auto &tree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  auto &node = *ptr->data_as<bNode>();
+  bke::node_tree_runtime::rename_shader_portal_input(tree, node, name);
+}
+
+static void rna_ShaderNodePortalIn_portal_color_get(PointerRNA *ptr, float *color)
+{
+  const auto &tree = *reinterpret_cast<const bNodeTree *>(ptr->owner_id);
+  const auto &node = *ptr->data_as<bNode>();
+  const float3 value = bke::node_tree_runtime::shader_portal_color(tree, node);
+  copy_v3_v3(color, value);
+}
+
+static void rna_ShaderNodePortalIn_portal_color_set(PointerRNA *ptr, const float *color)
+{
+  auto &node = *ptr->data_as<bNode>();
+  copy_v3_v3(node.color, color);
+  node.flag |= NODE_CUSTOM_COLOR;
+}
+
+static bool rna_NPRLight_object_poll(PointerRNA * /*ptr*/, PointerRNA value)
+{
+  const Object *object = value.data_as<Object>();
+  return object && object->type == OB_LAMP;
+}
+
 void rna_Node_update_relations(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   rna_Node_update(bmain, scene, ptr);
@@ -5991,6 +6019,184 @@ static void def_sh_tex_gradient(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_enum_items(prop, prop_gradient_type);
   RNA_def_property_ui_text(prop, "Gradient Type", "Style of the color blending");
   RNA_def_property_update(prop, 0, "rna_Node_update");
+}
+
+static const EnumPropertyItem shader_portal_data_type_items[] = {
+    {SOCK_FLOAT, "FLOAT", ICON_NODE_SOCKET_FLOAT, "Float", "Transmit a floating-point value"},
+    {SOCK_VECTOR, "VECTOR", ICON_NODE_SOCKET_VECTOR, "Vector", "Transmit a vector value"},
+    {SOCK_RGBA, "RGBA", ICON_NODE_SOCKET_RGBA, "Color", "Transmit a color value"},
+    {SOCK_SHADER, "SHADER", ICON_NODE_SOCKET_SHADER, "Shader", "Transmit a shader closure"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static void def_sh_portal_in(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderPortal", "storage");
+
+  prop = RNA_def_property(srna, "portal_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_ui_text(prop, "Name", "Portal identifier used to match portal outputs");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "paired_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_string_funcs(
+      prop, nullptr, nullptr, "rna_ShaderNodePortalIn_paired_name_set");
+  RNA_def_property_ui_text(
+      prop, "Name", "Set a unique, non-empty name and rename the paired Portal Out nodes");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "data_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "data_type");
+  RNA_def_property_enum_items(prop, shader_portal_data_type_items);
+  RNA_def_property_ui_text(prop, "Type", "Data type carried by this portal");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+  prop = RNA_def_property(srna, "portal_color", PROP_FLOAT, PROP_COLOR_GAMMA);
+  RNA_def_property_float_sdna(prop, nullptr, "color");
+  RNA_def_property_float_funcs(prop,
+                              "rna_ShaderNodePortalIn_portal_color_get",
+                              "rna_ShaderNodePortalIn_portal_color_set",
+                              nullptr);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Portal Color", "Header color shared with paired Portal Out nodes");
+  RNA_def_property_update(prop, NC_NODE | ND_DISPLAY, nullptr);
+}
+
+static void def_sh_portal_out(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderPortal", "storage");
+
+  prop = RNA_def_property(srna, "portal_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_ui_text(prop, "Name", "Portal identifier used to resolve the source input");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "data_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "data_type");
+  RNA_def_property_enum_items(prop, shader_portal_data_type_items);
+  RNA_def_property_ui_text(prop, "Type", "Data type inherited from the matching Portal In");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
+static void def_sh_npr_rim(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem modes[] = {
+      {0, "FRESNEL", 0, "Fresnel", "Normal and view-angle rim"},
+      {1, "DEPTH", 0, "Depth", "Screen-space depth discontinuity rim"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, modes);
+  RNA_def_property_ui_text(prop, "Mode", "Rim calculation method");
+  RNA_def_property_translation_context(prop, "NPR");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+}
+
+static void def_sh_npr_light_info(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop = RNA_def_property(srna, "light_object", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Object");
+  RNA_def_property_pointer_funcs(prop, nullptr, nullptr, nullptr, "rna_NPRLight_object_poll");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(prop, "Light", "Light object to read color, power, transform, and size from");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+
+}
+
+static void def_sh_npr_shader_info(BlenderRNA *, StructRNA *srna)
+{
+  RNA_def_struct_sdna_from(srna, "NodeShaderShaderInfo", "storage");
+  PropertyRNA *prop = RNA_def_property(srna, "lightgroup_id", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_range(prop, 0, INT_MAX);
+  RNA_def_property_ui_text(prop, "Light Group", "Receive lights with this NPR group identifier");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
+static void def_sh_image_to_closure(BlenderRNA *, StructRNA *srna)
+{
+  PropertyRNA *prop = RNA_def_property(srna, "image", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Image");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+}
+
+static void def_sh_glsl_function(BlenderRNA *, StructRNA *srna)
+{
+  static const EnumPropertyItem modes[] = {
+      {0, "INTERNAL", 0, "Internal", "Read a Text data-block"},
+      {1, "EXTERNAL", 0, "External", "Read a GLSL file"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "script", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Text");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+  RNA_def_struct_sdna_from(srna, "NodeShaderGLSLFunction", "storage");
+  prop = RNA_def_property(srna, "source_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, modes);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+  prop = RNA_def_property(srna, "filepath", PROP_STRING, PROP_FILEPATH);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+  prop = RNA_def_property(srna, "function_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
+static void def_sh_outline_control(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem combine_items[] = {
+      {0, "LEGACY", 0, "Original", "Keep the original ID boundary detection"},
+      {1, "DEPTH", 0, "ID and Depth", "Keep ID boundaries only where depth also detects an edge"},
+      {2,
+       "NORMAL",
+       0,
+       "ID and Normal",
+       "Keep ID boundaries only where normals also detect an edge"},
+      {3,
+       "DEPTH_OR_NORMAL",
+       0,
+       "ID and (Depth or Normal)",
+       "Keep ID boundaries where depth or normals detect an edge"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem priority_items[] = {
+      {0, "LEGACY", 0, "Original", "Keep the original edge width selection"},
+      {1, "ID", 0, "Prefer ID", "Use the ID width when that edge contributes"},
+      {2, "DEPTH", 0, "Prefer Depth", "Use the depth width when that edge contributes"},
+      {3, "NORMAL", 0, "Prefer Normal", "Use the normal width when that edge contributes"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "id_combine", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, combine_items);
+  RNA_def_property_ui_text(prop,
+                           "ID Combine",
+                           "Conditions required for an ID boundary; independent depth and normal "
+                           "widths remain available");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  prop = RNA_def_property(srna, "edge_priority", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
+  RNA_def_property_enum_items(prop, priority_items);
+  RNA_def_property_ui_text(
+      prop,
+      "Edge Priority",
+      "Preferred width at a detected pixel; does not change neighboring line expansion");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
 static void def_sh_tex_noise(BlenderRNA *brna, StructRNA *srna)
@@ -10940,6 +11146,15 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeBsdfHairPrincipled", def_hair_principled);
   define("ShaderNode", "ShaderNodeBsdfMetallic", def_metallic);
   define("ShaderNode", "ShaderNodeBsdfPrincipled", def_principled);
+  define("ShaderNode", "ShaderNodePortalIn", def_sh_portal_in);
+  define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
+  define("ShaderNode", "ShaderNodeScreenspaceInfo");
+  define("ShaderNode", "ShaderNodeNPRRim", def_sh_npr_rim);
+  define("ShaderNode", "ShaderNodeNPRLightInfo", def_sh_npr_light_info);
+  define("ShaderNode", "ShaderNodeShaderInfo", def_sh_npr_shader_info);
+  define("ShaderNode", "ShaderNodeImageToClosure", def_sh_image_to_closure);
+  define("ShaderNode", "ShaderNodeGLSLFunction", def_sh_glsl_function);
+  define("ShaderNode", "ShaderNodeOutlineControl", def_sh_outline_control);
   define("ShaderNode", "ShaderNodeBsdfRayPortal");
   define("ShaderNode", "ShaderNodeBsdfRefraction", def_refraction);
   define("ShaderNode", "ShaderNodeBsdfSheen", def_sheen);

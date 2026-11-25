@@ -82,6 +82,12 @@ class PHYSICS_PT_add(PhysicButtonsPanel, Panel):
             op.action = 'DISABLE' if enabled else 'ENABLE'
 
         if obj.type == 'MESH':
+            if hasattr(obj, "volumetric_gel"):
+                enabled = obj.volumetric_gel.enabled
+                op = col.operator("object.volumetric_gel_edit", text="Volumetric Gel",
+                                  icon='X' if enabled else 'MOD_SOFT')
+                op.action = 'REMOVE' if enabled else 'ADD'
+
             row = physics_add(col, context.collision, "Collision", 'COLLISION', 'MOD_PHYSICS', False)
             if row and obj.collision:
                 row.prop(obj.collision, "use", text="", icon='HIDE_OFF' if obj.collision.use else 'HIDE_ON')

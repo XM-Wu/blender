@@ -118,3 +118,7 @@ scripts/modules/_bpy_internal/assets/remote_library/*_openapi.py linguist-genera
 /release/datafiles/startup.blend -filter -diff -merge -text
 /scripts/presets/workspaces/sdf_paint.blend -filter -diff -merge -text
 /scripts/presets/workspaces/rigging.blend -filter -diff -merge -text
+
+# Ship the portable soft-body examples directly in this fork.
+/examples/soft_body/**/*.blend -filter -diff -merge -text
+/examples/soft_body/*.blend -filter -diff -merge -text

@@ -168644,3 +168644,135 @@ msgstr "弯曲刚度"
 
 msgid "Resistance to changes in the angle between adjacent segments"
 msgstr "抵抗相邻骨段偏离原始夹角的强度"
+
+
+msgid "Volumetric Gel"
+msgstr "体积凝胶"
+
+
+msgctxt "Operator"
+msgid "Volumetric Gel"
+msgstr "体积凝胶"
+
+
+msgid "Edit Volumetric Gel"
+msgstr "编辑体积凝胶"
+
+
+msgctxt "Operator"
+msgid "Edit Volumetric Gel"
+msgstr "编辑体积凝胶"
+
+
+msgid "Simulation Mesh"
+msgstr "模拟网格"
+
+
+msgid "Settle Frames"
+msgstr "预沉降帧数"
+
+
+msgid "Shear Modulus"
+msgstr "剪切模量"
+
+
+msgid "Bulk Modulus"
+msgstr "体积模量"
+
+
+msgid "Velocity Damping"
+msgstr "速度阻尼"
+
+
+msgid "Contact Friction"
+msgstr "接触摩擦"
+
+
+msgid "Ground Height"
+msgstr "地面高度"
+
+
+msgid "Capsule Collider"
+msgstr "胶囊碰撞体"
+
+
+msgid "Capsule Start"
+msgstr "胶囊起点"
+
+
+msgid "Capsule End"
+msgstr "胶囊终点"
+
+
+msgid "Capsule Radius"
+msgstr "胶囊半径"
+
+
+msgid "Bake Gel"
+msgstr "烘焙凝胶"
+
+
+msgctxt "Operator"
+msgid "Bake Gel"
+msgstr "烘焙凝胶"
+
+
+msgid "Clear Bake"
+msgstr "清除烘焙"
+
+
+msgctxt "Operator"
+msgid "Clear Bake"
+msgstr "清除烘焙"
+
+
+msgid "Simulate a closed, star-shaped mesh using tetrahedral finite elements"
+msgstr "使用四面体有限元模拟封闭的星形网格"
+
+
+msgid "Resistance to a change in shape, in Pa"
+msgstr "抵抗形状变化的能力，单位为帕斯卡"
+
+
+msgid "Resistance to a change in volume, in Pa"
+msgstr "抵抗体积变化的能力，单位为帕斯卡"
+
+
+msgid "Mass per unit volume in kg/m³"
+msgstr "单位体积的质量，单位为千克每立方米"
+
+
+msgid "Fix surface nodes with interpolated weight above 0.5"
+msgstr "固定插值权重大于 0.5 的表面节点"
+
+
+msgid "Simulate this many frames before playback begins"
+msgstr "在播放起始帧之前额外计算的帧数"
+
+
+msgid "85 nodes, 320 tetrahedra"
+msgstr "85 个节点，320 个四面体"
+
+
+msgid "325 nodes, 1280 tetrahedra"
+msgstr "325 个节点，1280 个四面体"
+
+
+msgid "Velocity decay per second"
+msgstr "每秒的速度衰减率"
+
+
+msgid "World-space Z of the contact plane"
+msgstr "接触平面在世界空间中的 Z 坐标"
+
+
+msgid "First endpoint in collider local coordinates"
+msgstr "碰撞体局部坐标中的第一个端点"
+
+
+msgid "Second endpoint in collider local coordinates"
+msgstr "碰撞体局部坐标中的第二个端点"
+
+
+msgid "World-space radius of the collision capsule"
+msgstr "碰撞胶囊在世界空间中的半径"

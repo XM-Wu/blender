@@ -210,7 +210,7 @@ class Gel:
             np.add.at(adjustment, ids.ravel(), (weighted_grad * scale[:, None, None]).reshape(-1, 3))
             field += adjustment / count
 
-    def advance(self, seconds, gravity, floor, previous, current, radius, pin_positions=None):
+    def advance(self, seconds, gravity, floor, previous, current, radius, pin_positions=None, incline=None):
         dt_limit = self.stable_dt
         if current is not None:
             travel = np.linalg.norm(current - previous, axis=1).max()
@@ -251,6 +251,13 @@ class Gel:
             if hit.any():
                 self.x[hit, 2] = floor
                 self._impulse(hit, np.array((0., 0., 1.)), 0.)
+            if incline is not None:
+                normal, offset = incline
+                depth = offset - self.x @ normal
+                hit = (depth > 0) & ~self.pinned
+                if hit.any():
+                    self.x[hit] += depth[hit, None] * normal
+                    self._impulse(hit, normal, 0.)
             if pin_positions is None:
                 self.x[self.pinned] = self.rest[self.pinned]
                 self.v[self.pinned] = 0.

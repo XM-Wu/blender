@@ -168784,3 +168784,11 @@ msgstr "固定点目标"
 
 msgid "Move the pin group relative to this object at the start of the bake"
 msgstr "让固定顶点组跟随此物体相对于烘焙起始帧的变换"
+
+
+msgid "Inclined Plane"
+msgstr "斜面碰撞体"
+
+
+msgid "Stationary contact plane through this object's origin with local +Z facing up"
+msgstr "静态接触平面经过此物体的原点，局部 +Z 为朝上的法线"

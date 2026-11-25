@@ -177,9 +177,44 @@ def animated_pin_test():
     assert gel_ui.cache_modifier(obj).node_group == cache
 
 
+def inclined_plane_test():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    scene.frame_end = 28
+    ramp = bpy.data.objects.new("Ramp", None)
+    scene.collection.objects.link(ramp)
+    ramp.location.z = .3
+    ramp.rotation_euler = (0., -math.pi / 4, .3)
+    ramp.scale = (1.4, .9, .7)
+    bpy.context.view_layer.update()
+    normal = np.array(ramp.matrix_world.to_3x3().inverted().transposed().col[2].normalized())
+    origin = np.array(ramp.location)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=.4, location=origin + normal * .55)
+    body = bpy.context.object
+    op = bpy.ops.object.volumetric_gel_edit
+    assert op(action='ADD') == {'FINISHED'}
+    cfg = body.volumetric_gel
+    cfg.floor, cfg.incline, cfg.friction = -3., ramp, .20
+    assert op(action='BAKE') == {'FINISHED'}
+    centroids = []
+    contact_frames = 0
+    for frame in range(1, scene.frame_end + 1):
+        scene.frame_set(frame)
+        world = gel_ui.transform(coordinates(body), body.matrix_world)
+        distance = (world - origin) @ normal
+        assert distance.min() >= -1e-6
+        if np.count_nonzero(distance < .001) >= 3:
+            contact_frames += 1
+        centroids.append(world.mean(axis=0))
+    down = np.array((0., 0., -1.))
+    downhill = down - normal * (down @ normal)
+    assert contact_frames >= 5 and (centroids[-1] - centroids[0]) @ downhill > .10
+
+
 if __name__ == "__main__":
     material_test()
     triangle_contact_test()
     bake_test()
+    inclined_plane_test()
     animated_pin_test()
     print("PASS volumetric gel material, contact, interpolation, rebake and reload")

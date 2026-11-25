@@ -162,6 +162,8 @@ class GelSettings(bpy.types.PropertyGroup):
     friction: FloatProperty(name="Contact Friction", default=.55, min=0, soft_max=1)
     floor: FloatProperty(name="Ground Height", description="World-space Z of the contact plane",
                          default=0, subtype='DISTANCE')
+    incline: PointerProperty(name="Inclined Plane", type=bpy.types.Object,
+                            description="Stationary contact plane through this object's origin with local +Z facing up")
     pin_group: StringProperty(name="Pin Group", description="Fix surface nodes with interpolated weight above 0.5")
     pin_target: PointerProperty(name="Pin Target", type=bpy.types.Object,
                                 description="Move the pin group relative to this object at the start of the bake")
@@ -215,6 +217,21 @@ def solve(context, obj, cfg):
         previous = previous * meters
     if len(world) and world[:, 2].min() < floor - 1e-5 * meters:
         raise ValueError("Start with the gel above the ground or lower Ground Height")
+    incline = None
+    if cfg.incline:
+        if cfg.incline == obj:
+            raise ValueError("Choose a separate object for the inclined plane")
+        plane_matrix = cfg.incline.evaluated_get(context.evaluated_depsgraph_get()).matrix_world
+        # Transform the plane normal as a covector (also handles sheared parent transforms).
+        basis = np.asarray(plane_matrix.to_3x3())
+        normal = np.linalg.solve(basis.T, (0., 0., 1.))
+        normal /= np.linalg.norm(normal)
+        if normal[2] <= 0:
+            raise ValueError("The inclined plane's local +Z must face upward")
+        offset = normal @ np.asarray(plane_matrix.translation) * meters
+        if np.min(world @ normal) < offset - 1e-5 * meters:
+            raise ValueError("Start with the gel above the inclined plane")
+        incline = normal, offset
     pinning = pin_weights(obj, cfg)
     nodes, tets, pinned, attach, weights, surface, stencil = simulation_mesh(obj, world, cfg, pinning)
     if pin_matrix is not None:
@@ -239,7 +256,9 @@ def solve(context, obj, cfg):
             targets = transform(pin_local, pin_matrix) * meters
             if targets[:, 2].min() < floor - 1e-5 * meters:
                 raise ValueError("The animated pins move below the ground")
-        gel.advance(seconds, gravity, floor, previous, current, radius, targets)
+            if incline is not None and np.min(targets @ normal) < offset - 1e-5 * meters:
+                raise ValueError("The animated pins move below the inclined plane")
+        gel.advance(seconds, gravity, floor, previous, current, radius, targets, incline)
         shell = (gel.x - gel.rest)[-stencil.shape[1]:]
         positions = world + np.einsum("ij,ijk->ik", weights, (stencil @ shell)[attach])
         if pin_matrix is not None:
@@ -252,6 +271,8 @@ def solve(context, obj, cfg):
             _, n, d = contact(positions, *current)
             positions += np.maximum(radius - d, 0)[:, None] * n
         positions[:, 2] = np.maximum(positions[:, 2], floor)
+        if incline is not None:
+            positions += np.maximum(offset - positions @ normal, 0)[:, None] * normal
         samples[frame - start] = transform(positions / meters, matrix.inverted()) - source
         context.window_manager.progress_update(frame - start)
         previous = current
@@ -449,7 +470,7 @@ class GEL_PT_physics(bpy.types.Panel):
         layout.use_property_decorate = False
         obj = context.object
         cfg = obj.volumetric_gel
-        for prop in ('resolution', 'settle_frames', 'density', 'shear', 'bulk', 'damping', 'friction', 'floor'):
+        for prop in ('resolution', 'settle_frames', 'density', 'shear', 'bulk', 'damping', 'friction', 'floor', 'incline'):
             layout.prop(cfg, prop)
         layout.prop_search(cfg, "pin_group", obj, "vertex_groups")
         layout.prop(cfg, "pin_target")

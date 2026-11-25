@@ -2,7 +2,7 @@
 
 Open a top-level scene in xBlender and press Space to play its baked timeline.
 
-- **Slime-Corner-Lift.blend** lifts an off-center patch and sways it from side to side. Animate the grip handle, then use Bake Gel to update the result.
+- **Slime-Corner-Lift.blend** lifts an off-center patch, sways it, then picks it up again to press it onto a 45-degree ramp (frames 210–337). Animate the grip handle, then use Bake Gel to update the result.
 - **Slime-Volumetric-Gel.blend** compares four tetrahedral FEM materials in the same side strike and overhead press. Open a material scene to adjust shear and bulk modulus in Physics Properties → Volumetric Gel.
 - **Slime-Water-Balloon.blend** and **Slime-Full-Water-Balloon.blend** demonstrate Cloth pressure and gravity on a closed membrane.
 - **Slime-Retention-Quartet.blend** calibrates four settings against the full water balloon at frame 114.

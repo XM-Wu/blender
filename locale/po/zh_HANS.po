@@ -168792,3 +168792,176 @@ msgstr "斜面碰撞体"
 
 msgid "Stationary contact plane through this object's origin with local +Z facing up"
 msgstr "静态接触平面经过此物体的原点，局部 +Z 为朝上的法线"
+
+
+msgid "Live Gel Simulation"
+msgstr "凝胶实时模拟"
+
+
+msgctxt "Operator"
+msgid "Live Gel Simulation"
+msgstr "凝胶实时模拟"
+
+
+msgid "Start Live Simulation"
+msgstr "开始实时模拟"
+
+
+msgid "Stop Gel Preview"
+msgstr "停止凝胶预览"
+
+
+msgctxt "Operator"
+msgid "Stop Gel Preview"
+msgstr "停止凝胶预览"
+
+
+msgid "Gel Material Preset"
+msgstr "凝胶材质预设"
+
+
+msgctxt "Operator"
+msgid "Gel Material Preset"
+msgstr "凝胶材质预设"
+
+
+msgid "Custom Material"
+msgstr "自定义材质"
+
+
+msgctxt "Operator"
+msgid "Custom Material"
+msgstr "自定义材质"
+
+
+msgid "Firm Slime"
+msgstr "史莱姆 · 紧实"
+
+
+msgctxt "Operator"
+msgid "Firm Slime"
+msgstr "史莱姆 · 紧实"
+
+
+msgid "Medium Slime"
+msgstr "史莱姆 · 中等"
+
+
+msgctxt "Operator"
+msgid "Medium Slime"
+msgstr "史莱姆 · 中等"
+
+
+msgid "Soft Slime"
+msgstr "史莱姆 · 柔软"
+
+
+msgctxt "Operator"
+msgid "Soft Slime"
+msgstr "史莱姆 · 柔软"
+
+
+msgid "Extra Soft Slime"
+msgstr "史莱姆 · 极软"
+
+
+msgctxt "Operator"
+msgid "Extra Soft Slime"
+msgstr "史莱姆 · 极软"
+
+
+msgid "Lift and Sway Slime"
+msgstr "史莱姆 · 提角摇摆"
+
+
+msgctxt "Operator"
+msgid "Lift and Sway Slime"
+msgstr "史莱姆 · 提角摇摆"
+
+
+msgid "Mouse Grab"
+msgstr "鼠标抓取"
+
+
+msgid "Grab Radius"
+msgstr "抓取半径"
+
+
+msgid "Grab Gel"
+msgstr "抓取凝胶"
+
+
+msgctxt "Operator"
+msgid "Grab Gel"
+msgstr "抓取凝胶"
+
+
+msgid "Drag the gel with the left mouse button"
+msgstr "按住鼠标左键拖动凝胶"
+
+
+msgid "Balloon"
+msgstr "气球"
+
+
+msgctxt "Operator"
+msgid "Balloon"
+msgstr "气球"
+
+
+msgid "Skin Smoothing"
+msgstr "表皮平滑"
+
+
+msgid "Soften fine folds while preserving the overall deformation"
+msgstr "平滑细小褶皱，同时保留整体形变"
+
+
+msgid "Simulation Mode"
+msgstr "模拟模式"
+
+
+msgid "Real Time"
+msgstr "实时"
+
+
+msgid "Ground Plane"
+msgstr "地平面"
+
+
+msgid "Advance on the preview clock with the timeline paused"
+msgstr "暂停时间轴并按预览时钟模拟"
+
+
+msgid "Simulate at the scene frame rate"
+msgstr "按场景帧率随时间轴模拟"
+
+
+msgid "Use Ground Height only when no scene mesh has Collision enabled"
+msgstr "仅当场景中没有启用碰撞的网格时使用地面高度"
+
+
+msgid "Only collide with configured objects"
+msgstr "仅与已设置的碰撞物体发生碰撞"
+
+
+msgid "Use Ground Height together with collision objects"
+msgstr "同时使用地面高度和碰撞物体"
+
+
+msgid "Start Timeline Preview"
+msgstr "开始时间轴预览"
+
+
+msgid "Baked Timeline"
+msgstr "时间轴已烘焙"
+
+
+msgctxt "Operator"
+msgid "Start Timeline Preview"
+msgstr "开始时间轴预览"
+
+
+msgctxt "Operator"
+msgid "Baked Timeline"
+msgstr "时间轴已烘焙"

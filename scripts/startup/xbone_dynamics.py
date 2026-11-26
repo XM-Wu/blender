@@ -2,7 +2,6 @@
 """Real-time secondary motion preview for XBone joint chains."""
 
 import math
-import time
 import traceback
 
 import bpy
@@ -13,6 +12,8 @@ from bpy.app.translations import pgettext_data as data_, pgettext_iface as iface
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from mathutils import Quaternion, Vector
 from gpu_extras.batch import batch_for_shader
+
+from _xblender_live import PreviewClock, publish_sample, redraw_preview_controls
 
 
 STEP = 1.0 / 60.0
@@ -262,8 +263,7 @@ class Preview:
         self.had_animation_data = rig.animation_data is not None
         self.layer = layer
         self.scene = scene
-        self.clock = time.monotonic()
-        self.remainder = 0
+        self.clock = PreviewClock(STEP, 4)
         self.frame = self.scene.frame_current
         cfg = rig.xbone_dynamics
         if not cfg.chains:
@@ -313,8 +313,7 @@ class Preview:
         if rig.mode == 'EDIT' or self.layer.objects.get(rig.name) != rig:
             raise ValueError("The armature is no longer available for preview")
         self.state["enabled"] = 0.0
-        self.state.update_tag()
-        self.layer.update()
+        publish_sample(self.state, self.layer, redraw=False)
         evaluated = rig.evaluated_get(self.layer.depsgraph)
         world = evaluated.matrix_world.copy()
         inverse = world.to_3x3().inverted_safe()
@@ -342,8 +341,7 @@ class Preview:
                     orient = src.rotation_difference(dst) @ orient
                 self.state[slot] = list(orient)
         self.state["enabled"] = 1.0
-        self.state.update_tag()
-        self.layer.update()
+        publish_sample(self.state, self.layer)
 
     def close(self):
         for fc in self.influence_drivers:
@@ -375,29 +373,17 @@ class Preview:
             pass  # The view layer may have been removed while previewing.
 
 
-def redraw():
-    for window in bpy.context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type in {'VIEW_3D', 'PROPERTIES'}:
-                area.tag_redraw()
-
-
 def advance_timer():
     if _session is None:
         return None
     try:
-        now = time.monotonic()
-        elapsed = now - _session.clock
-        _session.clock = now
-        if elapsed > 0.5:
+        elapsed, steps, delay = _session.clock.poll()
+        if elapsed > .5:
             for chain in _session.chains:
                 chain.positions.clear()
-        _session.remainder += min(elapsed, 4 * STEP)
-        steps = int(_session.remainder / STEP)
         if steps:
-            _session.remainder -= steps * STEP
             _session.tick(steps)
-        return max(0.001, STEP - _session.remainder)
+        return delay
     except Exception:
         traceback.print_exc()
         stop_preview(from_timer=True)
@@ -413,7 +399,7 @@ def stop_preview(*, from_timer=False):
         try:
             preview.close()
         finally:
-            redraw()
+            redraw_preview_controls()
 
 
 def start_preview(preview):
@@ -426,7 +412,7 @@ def start_preview(preview):
     except Exception:
         stop_preview()
         raise
-    redraw()
+    redraw_preview_controls()
 
 
 @persistent

@@ -38,3 +38,15 @@ set(LIB
 
 
 blender_add_lib(bf_simulation "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+
+if(WITH_PYTHON)
+  add_library(xblender_gel_kernels SHARED intern/gel_kernels.cc)
+  target_link_libraries(xblender_gel_kernels PRIVATE bf::dependencies::eigen)
+  set_target_properties(xblender_gel_kernels PROPERTIES PREFIX "")
+  if(APPLE)
+    set_target_properties(xblender_gel_kernels PROPERTIES
+      XCODE_ATTRIBUTE_SKIP_INSTALL "YES"
+      XCODE_ATTRIBUTE_INSTALL_PATH ""
+    )
+  endif()
+endif()

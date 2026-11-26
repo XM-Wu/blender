@@ -168909,6 +168909,15 @@ msgid "Balloon"
 msgstr "气球"
 
 
+msgid "Hard Rubber"
+msgstr "硬橡胶"
+
+
+msgctxt "Operator"
+msgid "Hard Rubber"
+msgstr "硬橡胶"
+
+
 msgid "Skin Smoothing"
 msgstr "表皮平滑"
 

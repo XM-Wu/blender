@@ -351,6 +351,36 @@ def live_test():
         np.testing.assert_allclose(coordinates(bpy.data.objects[name]), baked, atol=1e-6)
 
 
+def hard_rubber_lift_test():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=.25, location=(0., 0., .26))
+    obj = bpy.context.object
+    bpy.ops.object.volumetric_gel_edit(action='ADD')
+    bpy.ops.object.volumetric_gel_preset(material='HARD_RUBBER')
+    obj.volumetric_gel.grab_radius = .07
+    assert bpy.ops.object.volumetric_gel_live(running=True) == {'FINISHED'}
+    try:
+        session = gel_ui._live
+        gel = session.sim.gel
+        for _ in range(70):
+            session.step(bpy.context, 1 / 60)
+        hit = gel.x[gel.surface[np.argmax(gel.x[gel.surface, 2])]].copy()
+        assert session.grab_at(hit / session.sim.meters)
+        for i in range(150):
+            session.pointer[2] = hit[2] + .5 * min((i + 1) / 60., 1.)
+            session.step(bpy.context, 1 / 60)
+        assert gel.x[:, 2].min() > .4
+        ids, offsets, weights = session.grip
+        anchor = np.average(gel.x[ids] - offsets, axis=0, weights=weights)
+        assert np.linalg.norm(session.pointer - anchor) < .03
+        session.grip = None
+        for _ in range(60):
+            session.step(bpy.context, 1 / 60)
+        assert gel.x[:, 2].min() < .15 and gel._volume_ratios().min() > 0.
+    finally:
+        gel_ui.stop_live()
+
+
 def aggressive_grab_test():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -516,6 +546,7 @@ if __name__ == "__main__":
     animated_pin_test()
     balloon_skin_test()
     live_test()
+    hard_rubber_lift_test()
     aggressive_grab_test()
     fast_collider_test()
     print("PASS volumetric gel material, contact, bake, live clock, grab, presets and reload")

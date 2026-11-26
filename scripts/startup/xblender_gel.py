@@ -34,6 +34,7 @@ MATERIALS = {
     'EXTRA_SOFT': ("Extra Soft Slime", (1000., 2300., 30000., 2.6, .55, 0.)),
     'GRIP': ("Lift and Sway Slime", (950., 13500., 80000., 1.65, .54, 0.)),
     'BALLOON': ("Balloon", (80., 3200., 22000., 7.5, .38, .82)),
+    'HARD_RUBBER': ("Hard Rubber", (1050., 120000., 650000., 2.6, .65, .2)),
 }
 SOLVER_FIELDS = ('density', 'shear', 'bulk', 'damping', 'friction')
 MATERIAL_FIELDS = (*SOLVER_FIELDS, 'surface_smoothing')

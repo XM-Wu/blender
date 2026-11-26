@@ -403,6 +403,17 @@ class Gel:
         dt = seconds / steps
         drag = math.exp(-self.damping * dt)
         tool_v = (current - previous) / seconds if current is not None else None
+        if grab is not None:
+            indices, goals, weight = grab
+            # A small patch may support the entire body. Size the spring for that load
+            # so even a single picked node can hold it with little static handle lag.
+            patch_mass = self.mass[indices] @ weight
+            extent = np.ptp(self.rest, axis=0).max()
+            response = max(100., np.linalg.norm(gravity) / (.025 * extent))
+            stiffness = max(42. ** 2, response * self.mass.sum() / patch_mass)
+            omega_dt = dt * np.sqrt(stiffness * weight[:, None])
+            spring_gain = omega_dt ** 2 / dt
+            spring_denom = (1. + omega_dt) ** 2
         for i in range(steps):
             if interactive or meshes:
                 start = self.x.copy()
@@ -412,10 +423,7 @@ class Gel:
             if grab is not None:
                 # Implicit damped spring on free surface nodes. Releasing the
                 # handle removes this force while preserving their velocities.
-                indices, goals, weight = grab
-                omega_dt = 42. * dt * np.sqrt(weight[:, None])
-                self.v[indices] = (self.v[indices] + (omega_dt ** 2 / dt) *
-                                   (goals - self.x[indices])) / (1. + omega_dt) ** 2
+                self.v[indices] = (self.v[indices] + spring_gain * (goals - self.x[indices])) / spring_denom
             self.x += dt * self.v
             if pin_positions is not None:
                 # Prescribe both position and velocity before strain/contact projection.

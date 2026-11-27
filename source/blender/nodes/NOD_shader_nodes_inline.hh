@@ -22,6 +22,7 @@ struct bNode;
 namespace nodes {
 
 struct InlineShaderNodeTreeParams {
+  bool infer_toon_textures = false;
   /**
    * Disable loop unrolling and keep Repeat Zone nodes in the tree.
    * (For engines with native support for Repeat Zones)

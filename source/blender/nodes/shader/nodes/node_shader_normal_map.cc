@@ -17,6 +17,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "ED_node.hh"
+#include "IMB_colormanagement.hh"
 
 #include "RNA_access.hh"
 
@@ -96,6 +97,10 @@ static int gpu_shader_normal_map(GPUMaterial *mat,
     newnormal = GPU_uniform(in[1]);
   }
 
+  if (node->custom1) {
+    GPU_link(mat, "normal_map_restore_srgb", newnormal,
+             GPU_constant(&colorspace::scene_linear_to_rec709[0][0]), &newnormal);
+  }
   const char *color_to_normal_fnc_name = "color_to_normal_new_shading";
   if (ELEM(nm->space, SHD_SPACE_BLENDER_OBJECT, SHD_SPACE_BLENDER_WORLD)) {
     color_to_normal_fnc_name = "color_to_blender_normal_new_shading";

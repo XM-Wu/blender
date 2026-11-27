@@ -29,6 +29,8 @@
 #include "NOD_node_in_compute_context.hh"
 #include "NOD_shader_nodes_inline.hh"
 #include "NOD_shader_nodes_multi_function.hh"
+#include "DNA_image_types.h"
+#include "IMB_colormanagement.hh"
 
 namespace blender::nodes {
 static bNodeSocket *add_shader_portal_conversion(bNodeTree &tree,
@@ -520,6 +522,80 @@ class ShaderNodesInliner {
            !this->socket_is_ignored(*link.fromsock);
   }
 
+  /* Keep guesses local to the preview compiler. Prefer authored links, and use an
+   * unconnected texture only when a single image identifies the requested channel. */
+  bool infer_toon_texture(const SocketInContext &socket, const bNodeLink *link)
+  {
+    const bNode &shader = socket->owner_node();
+    if (!ELEM(shader.type_legacy, SH_NODE_BSDF_PRINCIPLED, SH_NODE_BSDF_DIFFUSE)) {
+      return false;
+    }
+    const bool normal = STREQ(socket->identifier, "Normal");
+    if (!normal && !STR_ELEM(socket->identifier, "Color", "Base Color")) {
+      return false;
+    }
+    const bNodeSocket *source = nullptr;
+    if (link) {
+      if (!normal || link->fromnode->type_legacy != SH_NODE_TEX_IMAGE ||
+          link->fromsock->typeinfo->type != SOCK_RGBA) {
+        return false;
+      }
+      source = link->fromsock;
+    }
+    else {
+      const bNodeTree &tree = shader.owner_tree();
+      for (const bNode *node : tree.nodes_by_type("ShaderNodeTexImage"_ustr)) {
+        const bNodeSocket &color = node->output_socket(0);
+        if (!node->id || node->is_muted() || color.is_directly_linked() ||
+            node->output_socket(1).is_directly_linked()) {
+          continue;
+        }
+        /* Do not implicitly introduce dependencies on arbitrary shader branches. */
+        const bNodeSocket &uv = node->input_socket(0);
+        if (uv.is_directly_linked() &&
+            !ELEM(uv.directly_linked_sockets().first()->owner_node().type_legacy,
+                  SH_NODE_UVMAP, SH_NODE_TEX_COORD)) {
+          continue;
+        }
+        const char *name = node->id->name + 2;
+        const bool matches = normal ?
+            (BLI_strcasestr(name, "normal") || BLI_strcasestr(name, "_nrm")) :
+            (BLI_strcasestr(name, "basecolor") || BLI_strcasestr(name, "base_color") ||
+             BLI_strcasestr(name, "base color") || BLI_strcasestr(name, "albedo") ||
+             BLI_strcasestr(name, "diffuse"));
+        if (matches) {
+          if (source) {
+            return false;
+          }
+          source = &color;
+        }
+      }
+    }
+    if (!source) {
+      return false;
+    }
+    const SocketInContext origin = {
+        link ? this->get_link_source_context(*link, socket) : socket.context, source};
+    if (const SocketValue *value = value_by_socket_.lookup_ptr(origin)) {
+      if (normal) {
+        bNode &decode = *this->add_node("ShaderNodeNormalMap"_ustr);
+        /* Reconstruct data values when the artist's image was imported as sRGB. */
+        const Image *image = id_cast<Image *>(source->owner_node().id);
+        decode.custom1 = image && IMB_colormanagement_space_name_is_srgb(image->colorspace_settings.name);
+        bNodeSocket &color = *bke::node_find_socket(decode, SOCK_IN, "Color"_ustr);
+        this->set_input_socket_value(socket.owner_node(), decode, color, *value);
+        this->store_socket_value(socket, {LinkedSocketValue{&decode, decode.outputs.first()}});
+      }
+      else {
+        this->store_socket_value(socket, *value);
+      }
+    }
+    else {
+      this->schedule_socket(origin);
+    }
+    return true;
+  }
+
   void handle_input_socket(const SocketInContext &socket)
   {
     if (socket->is_multi_input()) {
@@ -535,6 +611,9 @@ class ShaderNodesInliner {
         continue;
       }
       used_link = link;
+    }
+    if (params_.infer_toon_textures && this->infer_toon_texture(socket, used_link)) {
+      return;
     }
     if (!used_link) {
       /* If there is no link on the input, use the value of the socket directly. */

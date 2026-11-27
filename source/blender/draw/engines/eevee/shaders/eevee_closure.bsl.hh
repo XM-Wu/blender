@@ -7,6 +7,16 @@
 #include "eevee_bxdf.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
 
+/* Quantize illumination before applying the authored surface color. */
+float3 closure_toon_preview(ClosureUndetermined cl, float3 light)
+{
+  float band = smoothstep(0.45f, 0.53f, dot(light, float3(0.2126f, 0.7152f, 0.0722f)));
+  float3 tint = light / max(reduce_max(light), 1e-6f);
+  bool diffuse = cl.type == CLOSURE_BSDF_DIFFUSE_ID || cl.type == CLOSURE_BSSRDF_BURLEY_ID ||
+                 cl.type == CLOSURE_BSDF_TRANSLUCENT_ID;
+  return cl.color * mix(diffuse ? float3(0.48f, 0.42f, 0.53f) : float3(0.0f), tint, band);
+}
+
 /* Return the apparent roughness of a closure compared to a GGX reflection lobe. */
 float closure_apparent_roughness_get(ClosureUndetermined cl)
 {

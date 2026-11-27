@@ -167,6 +167,7 @@ set(SRC
   intern/draw_cache_impl.hh
   intern/draw_cache_inline.hh
   intern/draw_color_management.hh
+  intern/draw_xtoon.hh
   intern/draw_command.hh
   intern/draw_common.hh
   intern/draw_common_c.hh

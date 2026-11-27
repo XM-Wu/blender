@@ -43,6 +43,7 @@
 #include "draw_context_private.hh"
 #include "draw_debug.hh"
 #include "draw_view_data.hh"
+#include "draw_xtoon.hh"
 
 namespace blender::eevee {
 
@@ -347,6 +348,9 @@ void Instance::set_time(float time)
 
 void Instance::update_eval_members()
 {
+  gf_toon_preview = v3d && draw::xtoon::active(*v3d);
+  uniform_data.data.scene.gf_toon_preview = gf_toon_preview;
+  gf_toon_light_gain = gf_toon_preview ? draw::xtoon::light_gain(*v3d) : 1.0f;
   scene = DEG_get_evaluated_scene(depsgraph);
   view_layer = DEG_get_evaluated_view_layer(depsgraph);
   camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
@@ -495,6 +499,7 @@ void Instance::end_sync()
 
   velocity.end_sync();
   volume.end_sync();  /* Needs to be before shadows. */
+  lights.sync_preview_fallback();
   shadows.end_sync(); /* Needs to be before lights. */
   lights.end_sync();
   sampling.end_sync();

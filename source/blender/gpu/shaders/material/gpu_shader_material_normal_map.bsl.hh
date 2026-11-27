@@ -5,6 +5,13 @@
 #pragma once
 
 #include "gpu_shader_material_interface.bsl.hh"
+#include "gpu_shader_colorspace.bsl.hh"
+
+[[node]]
+void normal_map_restore_srgb(float4 color, float3x3 scene_to_rec709, float4 &data)
+{
+  data = builtin::ColorSpace::scene_linear_to_rec709_srgb(scene_to_rec709, color);
+}
 
 [[node]]
 void input_normal_displaced(const ShadingData &sd, float3 &out_N)

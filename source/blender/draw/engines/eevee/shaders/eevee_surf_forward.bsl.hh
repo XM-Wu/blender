@@ -31,7 +31,7 @@ float4 closure_to_rgba_forward(KernelGlobals &kg, ShadingData &sd, Closure /*cl_
 
     float3 radiance, transmittance;
     eevee::forward_lighting_eval(
-        kg, sd, views.get(0), resource_id, sd.thickness, frag_co, radiance, transmittance);
+        kg, sd, views.get(0), resource_id, sd.thickness, frag_co, radiance, transmittance, false);
 
     /* Reset for the next closure tree. */
     float noise = util_tx.fetch(frag_co, UTIL_BLUE_NOISE_LAYER).r;
@@ -133,7 +133,7 @@ void surf_forward([[resource_table]] KernelGlobals &kg,
 
   float3 radiance, transmittance;
   eevee::forward_lighting_eval(
-      kg, sd, view, resource_id, sd.thickness, frag_co.xy, radiance, transmittance);
+      kg, sd, view, resource_id, sd.thickness, frag_co.xy, radiance, transmittance, true);
 
   if (pipe.use_lighting_nodes) [[static_branch]] {
     radiance += sd.light_accum.diffuse_light;

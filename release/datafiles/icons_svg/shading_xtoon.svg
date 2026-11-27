@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600" viewBox="0 0 16 16">
+  <!-- A cel-shaded sphere with a stepped terminator and an open shadow. -->
+  <path fill="#fff" fill-rule="evenodd" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 1.25a5.75 5.75 0 1 1 0 11.5 5.75 5.75 0 0 1 0-11.5Z"/>
+  <path fill="#fff" d="M8 1.8c1.65 0 3.14.63 4.25 1.67L10 6.7H7.6L6.1 9.4H3.8l-.86 1.85A6.2 6.2 0 0 1 8 1.8Z"/>
+</svg>

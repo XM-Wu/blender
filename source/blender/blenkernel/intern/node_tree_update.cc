@@ -1826,6 +1826,20 @@ class NodeTreeMainUpdater {
   Vector<const bNodeSocket *> find_output_sockets(const bNodeTree &tree)
   {
     Vector<const bNodeSocket *> sockets;
+    /* A disconnected image can still supply an inferred color or normal in GF Toon.
+     * Track its source and UV dependencies so replacing the image updates the preview. */
+    if (tree.type == NTREE_SHADER &&
+        (!tree.nodes_by_type("ShaderNodeBsdfPrincipled"_ustr).is_empty() ||
+         !tree.nodes_by_type("ShaderNodeBsdfDiffuse"_ustr).is_empty()))
+    {
+      for (const bNode *image : tree.nodes_by_type("ShaderNodeTexImage"_ustr)) {
+        if (image->id && !image->output_socket(0).is_directly_linked() &&
+            !image->output_socket(1).is_directly_linked())
+        {
+          sockets.append(&image->output_socket(0));
+        }
+      }
+    }
     for (const bNode *node : tree.all_nodes()) {
       if (!this->is_output_node(*node)) {
         continue;

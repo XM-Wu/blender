@@ -11,6 +11,7 @@
  */
 
 #include "draw_model.bsl.hh"
+#include "eevee_closure.bsl.hh"
 #include "eevee_colorspace_lib.bsl.hh"
 #include "eevee_light_eval.bsl.hh"
 #include "eevee_lightprobe.bsl.hh"
@@ -30,7 +31,8 @@ void forward_lighting_eval(KernelGlobals &kg,
                            Thickness thickness,
                            float2 frag_co,
                            float3 &radiance,
-                           float3 &transmittance)
+                           float3 &transmittance,
+                           bool final_surface)
 {
   const eevee::PipelineConstants &pipe = kg.pipe;
   if (!pipe.is_occupancy_pipe && pipe.use_forward_lighting) [[static_branch]] {
@@ -167,8 +169,13 @@ void forward_lighting_eval(KernelGlobals &kg,
             cl.color *= cl.color;
           }
 
-          radiance_direct += direct_light * cl.color;
-          radiance_indirect += indirect_light * cl.color;
+          if (final_surface && uni.uniform_buf.scene.gf_toon_preview) {
+            radiance_direct += closure_toon_preview(cl, direct_light + indirect_light);
+          }
+          else {
+            radiance_direct += direct_light * cl.color;
+            radiance_indirect += indirect_light * cl.color;
+          }
         }
       }
     }

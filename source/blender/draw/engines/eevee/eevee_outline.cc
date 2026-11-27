@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BLI_math_base_c.hh"
+#include "draw_xtoon.hh"
 
 #include "GPU_capabilities.hh"
 
@@ -13,7 +14,9 @@ namespace blender::eevee {
 
 void OutlineModule::sync()
 {
-  const bool has_outline_materials = inst_.scene->eevee.use_outline != 0 && inst_.materials.has_visible_outline_materials();
+  const bool requested = inst_.gf_toon_preview ? draw::xtoon::use_outline(*inst_.v3d) :
+                                                inst_.scene->eevee.use_outline;
+  const bool has_outline_materials = requested && inst_.materials.has_visible_outline_materials();
   enabled_ = has_outline_materials && GPU_max_images() > OUTLINE_INFO_SLOT;
 
   if (!enabled_) {

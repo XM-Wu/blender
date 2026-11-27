@@ -10,6 +10,7 @@
 #include "DNA_material_types.h"
 
 #include "BKE_lib_id.hh"
+#include "BKE_idprop.hh"
 #include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
@@ -18,6 +19,7 @@
 
 #include "eevee_instance.hh"
 #include "eevee_material.hh"
+#include "DEG_depsgraph_query.hh"
 
 namespace blender::eevee {
 
@@ -167,7 +169,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
 
   MaterialPass matpass = MaterialPass();
   matpass.gpumat = inst_.shaders.material_shader_get(
-      blender_mat, ntree, pipeline_type, geometry_type, use_deferred_compilation, default_mat);
+      blender_mat, ntree, pipeline_type, geometry_type, use_deferred_compilation, default_mat,
+      inst_.gf_toon_preview);
 
   const bool is_forward = ELEM(pipeline_type,
                                MAT_PIPE_FORWARD,
@@ -363,6 +366,15 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
 blender::Material *MaterialModule::material_from_slot(Object *ob, int slot)
 {
   blender::Material *ma = BKE_object_material_get_eval(ob, slot + 1);
+  if (ma && inst_.gf_toon_preview) {
+    const IDProperty *profile = IDP_GetPropertyFromGroup_null(ma->id.properties, "gf_toon_preview_material");
+    if (profile && profile->type == IDP_ID) {
+      ID *id = IDP_ID_get(profile);
+      if (id && GS(id->name) == ID_MA) {
+        return DEG_get_evaluated(inst_.depsgraph, id_cast<blender::Material *>(id));
+      }
+    }
+  }
   if (ma == nullptr) {
     if (ob->type == OB_VOLUME) {
       return BKE_material_default_volume();

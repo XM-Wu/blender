@@ -290,7 +290,8 @@ class ShaderModule {
                                    eMaterialPipeline pipeline_type,
                                    eMaterialGeometry geometry_type,
                                    bool deferred_compilation,
-                                   blender::Material *default_mat);
+                                   blender::Material *default_mat,
+                                   bool infer_toon_textures = false);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

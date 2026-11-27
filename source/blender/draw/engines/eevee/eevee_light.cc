@@ -9,6 +9,8 @@
  */
 
 #include "draw_debug.hh"
+#include "BLI_math_matrix.hh"
+#include "BLI_math_rotation.hh"
 
 #include "eevee_instance.hh"
 
@@ -60,7 +62,8 @@ void Light::sync(ShadowModule &shadows,
                  const blender::Light *la,
                  uint64_t light_set_membership,
                  uint64_t shadow_set_membership,
-                 float threshold)
+                 float threshold,
+                 float power_scale)
 {
   using namespace blender::math;
 
@@ -70,7 +73,7 @@ void Light::sync(ShadowModule &shadows,
   }
 
   this->color = BKE_light_color(*la);
-  float base_power = BKE_light_power(*la);
+  float base_power = BKE_light_power(*la) * power_scale;
   if (la->mode & LA_UNNORMALIZED) {
     base_power *= BKE_light_area(*la, object_to_world);
   }
@@ -87,7 +90,7 @@ void Light::sync(ShadowModule &shadows,
   this->object_to_world = object_to_world;
 
   shape_parameters_set(
-      la, scale, object_to_world.z_axis(), threshold, shadows.get_data().use_jitter);
+      la, scale, object_to_world.z_axis(), threshold / max_ff(power_scale, 1e-8f), shadows.get_data().use_jitter);
 
   const bool diffuse_visibility = (visibility_flag & OB_HIDE_DIFFUSE) == 0;
   const bool glossy_visibility = (visibility_flag & OB_HIDE_GLOSSY) == 0;
@@ -395,6 +398,12 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
 
 void LightModule::begin_sync()
 {
+  if (assign_if_different(preview_gain_, inst_.gf_toon_light_gain)) {
+    for (Light &light : light_map_.values()) {
+      light.initialized = false;
+    }
+    inst_.sampling.reset();
+  }
   if (assign_if_different(use_scene_lights_, inst_.use_scene_lights())) {
     if (inst_.is_viewport()) {
       /* Catch lookdev viewport properties updates. */
@@ -419,7 +428,7 @@ void LightModule::begin_sync()
   sun_lights_len_ = 0;
   local_lights_len_ = 0;
 
-  if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
+  if (!inst_.gf_toon_preview && use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
     if (inst_.pipelines.world.use_lightpath_node()) {
       add_world_sun_light(world_sunlight_key_[WORLD_SUN_DIFFUSE], true, false);
       add_world_sun_light(world_sunlight_key_[WORLD_SUN_GLOSSY], false, true);
@@ -457,10 +466,37 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
                &la,
                ob_ref.get_light_set_membership(),
                ob_ref.get_shadow_set_membership(),
-               light_threshold_);
+               light_threshold_,
+               preview_gain_);
   }
   sun_lights_len_ += int(is_sun_light(light.type));
   local_lights_len_ += int(!is_sun_light(light.type));
+}
+
+void LightModule::sync_preview_fallback()
+{
+  if (!inst_.gf_toon_preview || sun_lights_len_ || local_lights_len_) {
+    return;
+  }
+  /* Match a default Sun, facing the viewer, without adding an Object to the scene. */
+  blender::Light sun = {};
+  sun.type = LA_SUN;
+  sun.energy = 1.0f;
+  Light &light = light_map_.lookup_or_add_default(ObjectKey(WORLD_SUN_MAX));
+  light.used = true;
+  light.resource_id = 0;
+  light.npr_lightgroup_id = -1;
+  const float4x4 front_key = math::from_rotation<float4x4>(
+      math::EulerXYZ(float3(-0.44f, -0.154f, 0.0f)));
+  light.sync(inst_.shadows,
+             inst_.uniform_data.data.camera.viewinv * front_key,
+             0,
+             &sun,
+             draw::LIGHT_LINK_MASK_ALL,
+             draw::LIGHT_LINK_MASK_ALL,
+             light_threshold_,
+             preview_gain_);
+  sun_lights_len_++;
 }
 
 void LightModule::end_sync()

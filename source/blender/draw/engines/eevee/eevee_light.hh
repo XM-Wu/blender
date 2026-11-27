@@ -93,7 +93,8 @@ struct Light : public LightData, NonCopyable {
             const blender::Light *la,
             uint64_t light_set_membership,
             uint64_t shadow_set_membership,
-            float threshold);
+            float threshold,
+            float power_scale = 1.0f);
 
   void shadow_ensure(ShadowModule &shadows);
   void shadow_discard_safe(ShadowModule &shadows);
@@ -147,6 +148,7 @@ class LightModule {
   float light_threshold_ = 0.01f;
   /** If false, will prevent all scene lights from being synced. */
   bool use_scene_lights_ = false;
+  float preview_gain_ = 1.0f;
   /** If false, will prevent all sun lights from being synced. */
   bool use_sun_lights_ = false;
   /** Number of sun lights synced during the last sync. Used as offset. */
@@ -191,6 +193,7 @@ class LightModule {
   ~LightModule();
 
   void begin_sync();
+  void sync_preview_fallback();
   void sync_light(const ObjectRef &ob_ref);
   void end_sync();
 

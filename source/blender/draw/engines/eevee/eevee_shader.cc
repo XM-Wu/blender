@@ -1693,13 +1693,16 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                eMaterialPipeline pipeline_type,
                                                eMaterialGeometry geometry_type,
                                                bool deferred_compilation,
-                                               blender::Material *default_mat)
+                                               blender::Material *default_mat,
+                                               bool infer_toon_textures)
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type, geometry_type, displacement_type, thickness_type, blender_mat->blend_flag);
+  /* A preview can infer links that the regular material does not have. */
+  shader_uuid |= uint64_t(infer_toon_textures) << 11;
 
   /* GSplats require transparency independent of the material type; default material must
    * be replaced for e.g. transmittance to be present. */
@@ -1718,7 +1721,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       deferred_compilation,
       codegen_callback,
       &thunk,
-      is_default_material ? nullptr : pass_replacement_cb);
+      is_default_material ? nullptr : pass_replacement_cb,
+      infer_toon_textures);
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }

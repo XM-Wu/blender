@@ -24,6 +24,7 @@
 #include "ED_node_c.hh"
 
 #include "draw_color_management.hh"
+#include "draw_xtoon.hh"
 
 namespace blender::draw::color_management {
 
@@ -31,6 +32,7 @@ enum class eDRWColorManagementType {
   ViewTransform = 0,
   ViewTransformAndLook,
   UseRenderSettings,
+  GFToonPreview,
 };
 
 static float dither_get(eDRWColorManagementType color_management_type, const Scene &scene)
@@ -47,6 +49,9 @@ static float dither_get(eDRWColorManagementType color_management_type, const Sce
 static eDRWColorManagementType drw_color_management_type_for_v3d(const Scene &scene,
                                                                  const View3D &v3d)
 {
+  if (xtoon::active(v3d)) {
+    return eDRWColorManagementType::GFToonPreview;
+  }
 
   const bool use_workbench = BKE_scene_uses_blender_workbench(&scene);
   const bool use_scene_lights = V3D_USES_SCENE_LIGHTS(&v3d);
@@ -127,6 +132,11 @@ static void viewport_settings_apply(GPUViewport &viewport,
   ColorManagedViewSettings view_settings;
 
   switch (color_management_type) {
+    case eDRWColorManagementType::GFToonPreview: {
+      BKE_color_managed_view_settings_init(&view_settings, display_settings, "Standard");
+      view_settings.exposure = -0.38f;
+      break;
+    }
     case eDRWColorManagementType::ViewTransform: {
       /* For workbench use only default view transform in configuration,
        * using no scene settings. */

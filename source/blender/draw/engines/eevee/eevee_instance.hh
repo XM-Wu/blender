@@ -351,12 +351,15 @@ class Instance : public DrawEngine {
 
   bool use_scene_lights() const
   {
-    return (!v3d) ||
+    return gf_toon_preview || (!v3d) ||
            ((v3d->shading.type == OB_MATERIAL) &&
             (v3d->shading.flag & V3D_SHADING_SCENE_LIGHTS)) ||
            ((v3d->shading.type == OB_RENDER) &&
             (v3d->shading.flag & V3D_SHADING_SCENE_LIGHTS_RENDER));
   }
+
+  bool gf_toon_preview = false;
+  float gf_toon_light_gain = 1.0f;
 
   /* Light the scene using the selected HDRI in the viewport shading pop-over. */
   bool use_studio_light() const

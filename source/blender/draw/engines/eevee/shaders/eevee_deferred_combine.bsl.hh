@@ -192,8 +192,15 @@ void combine_frag([[resource_table]] Combine &srt,
           cl.color *= cl.color;
         }
 
-        out_direct += closure_direct_light * cl.color;
-        out_indirect += closure_indirect_light * cl.color;
+        if (uni.uniform_buf.scene.gf_toon_preview) {
+          /* The G-buffer contains the evaluated color and normal from the material graph.
+           * Authored emission (including the GF Toon node) already supplies its final color. */
+          out_direct += closure_toon_preview(cl, closure_direct_light + closure_indirect_light);
+        }
+        else {
+          out_direct += closure_direct_light * cl.color;
+          out_indirect += closure_indirect_light * cl.color;
+        }
       }
     }
   }

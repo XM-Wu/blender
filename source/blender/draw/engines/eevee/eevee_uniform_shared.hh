@@ -55,7 +55,7 @@ struct [[host_shared]] SceneData {
   float time;
   float frame;
   float timeline;
-  uint _pad0;
+  bool32_t gf_toon_preview;
 };
 
 /* Light Clamping. */

@@ -180,7 +180,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb = nullptr);
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb = nullptr,
+    bool infer_toon_textures = false);
 
 /* A callback passed to GPU_material_from_callbacks to construct the material graph by adding and
  * linking the necessary GPU material nodes. */

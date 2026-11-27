@@ -26,6 +26,7 @@
 #include "BKE_main.hh"
 #include "BKE_material.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_dot_export.hh"
 
@@ -143,7 +144,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb)
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb,
+    bool infer_toon_textures)
 {
   /* Search if this material is not already compiled. */
   for (LinkData &link : *gpumaterials) {
@@ -170,8 +172,27 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   localtree->flag |= NTREE_IS_GPU_SHADER_INTERNAL;
   nodes::InlineShaderNodeTreeParams inline_params;
   inline_params.allow_preserving_repeat_zones = true;
+  inline_params.infer_toon_textures = infer_toon_textures;
   inline_params.target_engine_ = engine == GPU_MAT_EEVEE ? SHD_OUTPUT_EEVEE : SHD_OUTPUT_ALL;
   nodes::inline_shader_node_tree(*ntree, *localtree, inline_params);
+  if (infer_toon_textures && ma) {
+    localtree->ensure_topology_cache();
+    if (localtree->nodes_by_type("ShaderNodeOutlineControl"_ustr).is_empty() &&
+        (!localtree->nodes_by_type("ShaderNodeBsdfPrincipled"_ustr).is_empty() ||
+         !localtree->nodes_by_type("ShaderNodeBsdfDiffuse"_ustr).is_empty()))
+    {
+      bNode &line = *bke::node_add_static_node(nullptr, *localtree, SH_NODE_OUTLINE_CONTROL);
+      bke::node_find_socket(line, SOCK_IN, "Line Width"_ustr)
+          ->default_value_typed<bNodeSocketValueFloat>()->value = 1.5f;
+      bke::node_find_socket(line, SOCK_IN, "Normal Edge Width"_ustr)
+          ->default_value_typed<bNodeSocketValueFloat>()->value = 0.0f;
+      auto *color = bke::node_find_socket(line, SOCK_IN, "Line Color"_ustr)
+                        ->default_value_typed<bNodeSocketValueRGBA>();
+      color->value[0] = 0.025f;
+      color->value[1] = 0.018f;
+      color->value[2] = 0.03f;
+    }
+  }
 
   for (nodes::InlineShaderNodeTreeParams::ErrorMessage &error : inline_params.r_error_messages) {
     result.errors.append({error.node,

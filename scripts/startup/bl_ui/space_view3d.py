@@ -1229,7 +1229,8 @@ class VIEW3D_HT_header(Header):
         _toggle_xray_operator(row, context, text="")
 
         row = layout.row(align=True)
-        row.prop(shading, "type", text="", expand=True)
+        from gf_toon_viewport import draw_shading_modes
+        draw_shading_modes(row, shading, context, icons_only=True)
         sub = row.row(align=True)
         # TODO, currently render shading type ignores mesh two-side, until it's supported
         # show the shading popover which shows double-sided option.
@@ -6399,7 +6400,8 @@ class VIEW3D_MT_shading_pie(Menu):
 
         view = context.space_data
 
-        pie.prop(view.shading, "type", expand=True)
+        from gf_toon_viewport import draw_shading_modes
+        draw_shading_modes(pie, view.shading, context)
 
 
 class VIEW3D_MT_shading_ex_pie(Menu):
@@ -6418,8 +6420,11 @@ class VIEW3D_MT_shading_ex_pie(Menu):
 
         pie.prop(view.overlay, "show_overlays", text="Toggle Overlays", icon='OVERLAY')
 
-        pie.prop_enum(view.shading, "type", value='MATERIAL')
+        from gf_toon_viewport import draw_material_preview_button, draw_toon_button
+        draw_material_preview_button(pie, view.shading)
         pie.prop_enum(view.shading, "type", value='RENDERED')
+        if context.scene.render.engine != 'BLENDER_WORKBENCH':
+            draw_toon_button(pie, view.shading)
 
 
 class VIEW3D_MT_pivot_pie(Menu):
@@ -6905,9 +6910,19 @@ class VIEW3D_PT_shading(Panel):
         else:
             return context.scene.display.shading
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
         layout.label(text="Viewport Shading")
+        shading = self.get_shading(context)
+        if context.space_data.type == 'VIEW_3D' and context.scene.render.engine != 'BLENDER_WORKBENCH':
+            from gf_toon_viewport import draw_toon_button, toon_active
+            draw_toon_button(layout, shading)
+            if toon_active(shading):
+                layout.prop(shading, "gf_light_gain")
+                layout.prop(shading, "gf_use_outline")
+                return
+        if shading.type == 'MATERIAL' or (shading.type == 'RENDERED' and context.engine == 'BLENDER_EEVEE'):
+            layout.prop(context.scene.eevee, "use_outline", text="NPR Outlines")
 
 
 class VIEW3D_PT_shading_lighting(Panel):

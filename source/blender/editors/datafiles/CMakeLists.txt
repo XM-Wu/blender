@@ -850,6 +850,7 @@ if(WITH_BLENDER)
       shading_solid
       shading_texture
       shading_wire
+      shading_xtoon
       shapekey_data
       sharpcurve
       shortdisplay

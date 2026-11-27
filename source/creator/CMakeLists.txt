@@ -461,6 +461,12 @@ endif()
 # Install Targets (Generic, All Platforms)
 
 if(WITH_PYTHON)
+  add_dependencies(blender xblender_gel_kernels)
+  install(TARGETS xblender_gel_kernels
+    RUNTIME DESTINATION ${TARGETDIR_VER}/scripts/modules
+    LIBRARY DESTINATION ${TARGETDIR_VER}/scripts/modules
+  )
+
   # install(CODE "message(\"copying blender scripts...\")")
 
   # do not install freestyle dir if disabled

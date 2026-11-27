@@ -203,7 +203,7 @@ def verify(rig, hair):
     # Run the production timer callback with a fixed elapsed interval.
     assert bpy.ops.xbone.dynamics_start() == {'FINISHED'}
     preview = dynamics._session
-    preview.clock = time.monotonic() - 3.1 * dynamics.STEP
+    preview.clock.last_time = time.monotonic() - 3.1 * dynamics.STEP
     assert dynamics.advance_timer() > 0
     assert (sample()[0] - initial[0]).length > 0.001
     layer.objects.active = hair
@@ -335,10 +335,27 @@ def move_gizmo_test():
         view.view_location = rig.matrix_world.translation
         view.view_distance = 4
         yield
-        for simulate in (False, True):
-            if simulate:
+        import xblender_gel as gel
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=.4,
+                                              location=rig.location + Vector((.2, -.6, 0)))
+        slime = win.view_layer.objects.active
+        bpy.ops.object.volumetric_gel_edit(action='ADD')
+        slime.volumetric_gel.collider = rig
+        slime.volumetric_gel.radius = .1
+        start_location = rig.location.copy()
+        for bones_live, gel_live in ((False, False), (True, False), (False, True), (True, True)):
+            if gel_live:
+                bpy.ops.object.select_all(action='DESELECT')
+                slime.select_set(True)
+                win.view_layer.objects.active = slime
+                assert bpy.ops.object.volumetric_gel_live(running=True) == {'FINISHED'}
+            bpy.ops.object.select_all(action='DESELECT')
+            rig.select_set(True)
+            win.view_layer.objects.active = rig
+            rig.location = start_location
+            if bones_live:
                 assert bpy.ops.xbone.dynamics_start() == {'FINISHED'}
-                yield
+            yield
             origin = rig.location.copy()
             xy = location_3d_to_region_2d(region, view, rig.matrix_world.translation)
             x = round(region.x + xy.x + bpy.context.preferences.view.gizmo_size * .7 *
@@ -349,15 +366,19 @@ def move_gizmo_test():
                 event(kind, value, x + dx, y)
                 yield
             delta = rig.location - origin
-            assert delta.x > .01 and abs(delta.y) + abs(delta.z) < .0001, (simulate, delta)
-            if simulate:
-                assert (delta - baseline).length < .001, (delta, baseline)
+            assert delta.x > .01 and abs(delta.y) + abs(delta.z) < .0001, (bones_live, gel_live, delta)
+            if bones_live or gel_live:
+                assert (delta - baseline).length < .001, (bones_live, gel_live, delta, baseline)
             else:
                 baseline = delta.copy()
             event('LEFTMOUSE', 'RELEASE', x + 70, y)
             yield
-        assert bpy.ops.xbone.dynamics_stop() == {'FINISHED'}
-        print("PASS: move gizmo drags match with and without the live preview", flush=True)
+            if gel_live:
+                assert gel._live and gel._live.grip is None
+                assert bpy.ops.object.volumetric_gel_live(running=False) == {'FINISHED'}
+            if bones_live:
+                assert bpy.ops.xbone.dynamics_stop() == {'FINISHED'}
+        print("PASS: identical transform gizmo drags with bone, gel, both and neither preview", flush=True)
 
     events = drag()
     def step():

@@ -465,7 +465,9 @@ class _defs_view3d_select:
             row = layout.row()
             row.use_property_split = False
             row.prop(props, "mode", text="", expand=True, icon_only=True)
-            _defs_view3d_select.draw_select_through_settings(context, row)
+            _defs_view3d_select.draw_select_through_settings(context, row, "mesh_box_select_through")
+            if context.mode == 'EDIT_MESH' and context.tool_settings.mesh_select_mode[2]:
+                row.prop(context.tool_settings, "mesh_box_select_face_center", toggle=True)
         return dict(
             idname="builtin.select_box",
             label="Select Box",

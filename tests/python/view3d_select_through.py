@@ -24,6 +24,7 @@ def run():
         settings = bpy.context.tool_settings
         assert hasattr(settings, 'mesh_select_through'), "Build the new selection code first"
         assert not settings.mesh_circle_select_through
+        assert settings.mesh_box_select_through and settings.mesh_box_select_face_center
         assert not settings.mesh_select_through
         assert settings.mesh_select_backfacing
 
@@ -80,7 +81,8 @@ def run():
                         for through, backfacing, expected in (
                                 (False, True, per_face), (True, True, per_face * 2),
                                 (True, False, per_face)):
-                            settings.mesh_select_through = through if tool != "CIRCLE" else not through
+                            settings.mesh_box_select_through = through if tool == "BOX" else not through
+                            settings.mesh_select_through = through if tool == "LASSO" else not through
                             settings.mesh_circle_select_through = through if tool == "CIRCLE" else not through
                             settings.mesh_select_backfacing = backfacing
                             bpy.ops.mesh.select_all(action='DESELECT')
@@ -98,6 +100,26 @@ def run():
                             select(tool, 'AND')
                             assert sum(e.select for e in elements) == per_face
                         print('PASS', perspective, select_mode, tool, flush=True)
+            # A box entirely inside the surface, away from its center and every vertex.
+            from bpy_extras.view3d_utils import location_3d_to_region_2d
+            from mathutils import Vector
+            rv3d.view_perspective = 'ORTHO'
+            bpy.ops.mesh.select_mode(type='FACE')
+            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+            pos = location_3d_to_region_2d(region, rv3d, Vector((0.7, 0.1, 0)))
+            settings.mesh_select_backfacing = True
+            for through, center, expected in ((True, True, 0), (True, False, 2),
+                                              (False, False, 1), (False, True, 0)):
+                settings.mesh_box_select_through = through
+                settings.mesh_box_select_face_center = center
+                bpy.ops.mesh.select_all(action='DESELECT')
+                with bpy.context.temp_override(area=area, region=region):
+                    bpy.ops.view3d.select_box(xmin=int(pos.x)-2, xmax=int(pos.x)+2,
+                                              ymin=int(pos.y)-2, ymax=int(pos.y)+2, mode='SET')
+                count = sum(face.select for face in bm.faces)
+                assert count == expected, ('partial face', through, center, count, expected)
+            print('PASS partial face selection', flush=True)
+            settings.mesh_box_select_through = True
             # Select Through bypasses occlusion, not explicit Hide visibility.
             bpy.ops.mesh.select_mode(type='FACE')
             settings.mesh_select_through = True

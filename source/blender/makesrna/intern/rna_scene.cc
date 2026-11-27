@@ -4597,8 +4597,20 @@ static void rna_def_tool_settings(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop,
       "Select Through",
-      "Box and lasso select occluded mesh elements with temporary X-Ray display");
+      "Lasso select occluded mesh elements with temporary X-Ray display");
   RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
+  prop = RNA_def_property(srna, "mesh_box_select_through", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "mesh_select_flags", MESH_BOX_SELECT_VISIBLE_ONLY);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop, "Select Through", "Box select occluded mesh elements");
+  RNA_def_property_update(prop, NC_SCENE | ND_TOOLSETTINGS, nullptr);
+
+  prop = RNA_def_property(srna, "mesh_box_select_face_center", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "mesh_select_flags", MESH_BOX_SELECT_FACE_AREA);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop, "Face Center", "Require the face center inside the box; disable to select overlapping face areas and hide center dots");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
 
   prop = RNA_def_property(srna, "mesh_circle_select_through", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "mesh_circle_select_through", 1);

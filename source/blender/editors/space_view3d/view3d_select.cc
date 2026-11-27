@@ -54,6 +54,9 @@
 #include "BKE_main.hh"
 #include "BKE_mball.hh"
 #include "BKE_mesh.hh"
+#include "BKE_customdata.hh"
+#include "BKE_mesh_runtime.hh"
+#include "BKE_mesh_wrapper.hh"
 #include "BKE_object.hh"
 #include "BKE_paint.hh"
 #include "BKE_tracking.hh"
@@ -201,6 +204,7 @@ static bool object_deselect_all_except(const Main &bmain,
 
 struct EditSelectBuf_Cache {
   BLI_bitmap *select_bitmap;
+  uint *face_pixels;
 };
 
 static void editselect_buf_cache_init(const ViewContext *vc, short select_mode)
@@ -224,6 +228,7 @@ static void editselect_buf_cache_init(const ViewContext *vc, short select_mode)
 static void editselect_buf_cache_free(EditSelectBuf_Cache *esel)
 {
   MEM_SAFE_DELETE(esel->select_bitmap);
+  MEM_SAFE_DELETE(esel->face_pixels);
 }
 
 static void editselect_buf_cache_free_voidp(void *esel_voidp)
@@ -441,13 +446,13 @@ static void view3d_region_select_xray_properties(wmOperatorType *ot)
   RNA_def_property_flag(prop, PROP_HIDDEN | PROP_SKIP_SAVE);
 }
 
-static void view3d_region_select_xray_begin(bContext *C, wmOperator *op, bool circle)
+static void view3d_region_select_xray_begin(bContext *C, wmOperator *op, bool circle, bool box)
 {
   Object *obedit = CTX_data_edit_object(C);
   View3D *v3d = CTX_wm_view3d(C);
   const ToolSettings *ts = CTX_data_tool_settings(C);
   if (!v3d || !obedit || obedit->type != OB_MESH ||
-      !(circle ? ts->mesh_circle_select_through : ts->mesh_select_flags & MESH_SELECT_THROUGH) ||
+      !(circle ? ts->mesh_circle_select_through : (box ? !(ts->mesh_select_flags & MESH_BOX_SELECT_VISIBLE_ONLY) : ts->mesh_select_flags & MESH_SELECT_THROUGH)) ||
       RNA_boolean_get(op->ptr, "temporary_xray_active"))
   {
     return;
@@ -484,7 +489,7 @@ static wmOperatorStatus view3d_region_select_xray_invoke(bContext *C,
                                                          wmOperator *op,
                                                          const wmEvent *event)
 {
-  view3d_region_select_xray_begin(C, op, GestureFn == WM_gesture_circle_invoke);
+  view3d_region_select_xray_begin(C, op, GestureFn == WM_gesture_circle_invoke, GestureFn == WM_gesture_box_invoke);
   const wmOperatorStatus result = GestureFn(C, op, event);
   if (!(result & OPERATOR_RUNNING_MODAL)) {
     view3d_region_select_xray_end(C, op);
@@ -3871,6 +3876,9 @@ void VIEW3D_OT_select(wmOperatorType *ot)
  * \{ */
 
 struct BoxSelectUserData {
+  bool check_face_pixels = false;
+  const uint *face_pixels = nullptr;
+  uint face_offset = 0;
   bool filter_backfacing = false;
   const ViewContext *vc;
   const rcti *rect;
@@ -4229,25 +4237,135 @@ static void do_mesh_box_select__doSelectEdge_pass1(void *user_data,
     data->is_changed = true;
   }
 }
-static void do_mesh_box_select__doSelectFace(void *user_data,
-                                             BMFace *efa,
-                                             const float screen_co[2],
-                                             int /*index*/)
+static void box_select_face(BoxSelectUserData &data, BMFace *face, const bool inside)
 {
-  BoxSelectUserData *data = static_cast<BoxSelectUserData *>(user_data);
-  const bool is_select = BM_elem_flag_test(efa, BM_ELEM_SELECT);
-  const bool is_inside = mesh_region_select_face_facing(data->vc, efa, data->filter_backfacing) &&
-                         BLI_rctf_isect_pt_v(data->rect_fl, screen_co);
-  const int sel_op_result = ED_select_op_action_deselected(data->sel_op, is_select, is_inside);
-  if (sel_op_result != -1) {
-    BM_face_select_set(data->bm, efa, sel_op_result);
-    if (data->uv_selctx) {
-      data->uv_selctx->face_select_set(efa, sel_op_result);
+  const int result = ED_select_op_action_deselected(data.sel_op, BM_elem_flag_test(face, BM_ELEM_SELECT), inside);
+  if (result != -1) {
+    BM_face_select_set(data.bm, face, result);
+    if (data.uv_selctx) {
+      data.uv_selctx->face_select_set(face, result);
     }
-
-    data->is_changed = true;
+    data.is_changed = true;
   }
 }
+
+static void do_mesh_box_select__doSelectFace(void *user_data, BMFace *face,
+                                             const float screen_co[2], int index)
+{
+  auto &data = *static_cast<BoxSelectUserData *>(user_data);
+  bool inside = mesh_region_select_face_facing(data.vc, face, data.filter_backfacing) &&
+                BLI_rctf_isect_pt_v(data.rect_fl, screen_co);
+  if (inside && data.check_face_pixels) {
+    const int x = int(floorf(screen_co[0])) - data.rect->xmin;
+    const int y = int(floorf(screen_co[1])) - data.rect->ymin;
+    inside = data.face_pixels && data.face_offset && data.face_pixels[y * (BLI_rcti_size_x(data.rect) + 1) + x] == data.face_offset + index;
+  }
+  box_select_face(data, face, inside);
+}
+
+/* Clip the evaluated cage triangles to the box frustum. This also handles a box
+ * inside a large polygon, concave n-gons, and triangles crossing the near plane. */
+static bool box_triangle_overlap(const float3 &a, const float3 &b, const float3 &c,
+                                 const Span<float4> planes, const uint16_t mask)
+{
+  float3 buffers[2][16];
+  float3 *src = buffers[0], *dst = buffers[1];
+  src[0] = a;
+  src[1] = b;
+  src[2] = c;
+  int count = 3;
+  for (const int i : planes.index_range()) {
+    if (!(mask & (1 << i))) {
+      continue;
+    }
+    int out = 0;
+    float3 prev = src[count - 1];
+    float dprev = plane_point_side_v3(planes[i], prev);
+    for (int j = 0; j < count; j++) {
+      const float3 p = src[j];
+      const float d = plane_point_side_v3(planes[i], p);
+      if ((dprev < 0) != (d < 0)) {
+        dst[out++] = prev + (p - prev) * (dprev / (dprev - d));
+      }
+      if (d >= 0) {
+        dst[out++] = p;
+      }
+      prev = p;
+      dprev = d;
+    }
+    if (!out) {
+      return false;
+    }
+    std::swap(src, dst);
+    count = out;
+  }
+  return true;
+}
+
+static void mesh_box_select_face_areas(BoxSelectUserData &data)
+{
+  const ViewContext *vc = data.vc;
+  const Mesh *cage = bke::editbmesh_get_eval_cage_from_orig(
+      vc->depsgraph, vc->scene, vc->obedit, &CD_MASK_BAREMESH);
+  cage = BKE_mesh_wrapper_ensure_subdivision(cage);
+  BKE_mesh_wrapper_ensure_mdata(const_cast<Mesh *>(cage));
+  const Span<float3> verts = cage->vert_positions();
+  const Span<int> corners = cage->corner_verts();
+  const Span<int3> tris = cage->corner_tris();
+  const Span<int> owners = cage->corner_tri_faces();
+  const int *orig = static_cast<const int *>(CustomData_get_layer(&cage->face_data, CD_ORIGINDEX));
+  BM_mesh_elem_table_ensure(data.bm, BM_FACE);
+  const float xmin = 2.0f * data.rect->xmin / vc->region->winx - 1.0f;
+  const float xmax = 2.0f * data.rect->xmax / vc->region->winx - 1.0f;
+  const float ymin = 2.0f * data.rect->ymin / vc->region->winy - 1.0f;
+  const float ymax = 2.0f * data.rect->ymax / vc->region->winy - 1.0f;
+  const float4 clip[] = {{1, 0, 0, -xmin}, {-1, 0, 0, xmax}, {0, 1, 0, -ymin},
+                         {0, -1, 0, ymax}, {0, 0, 1, 1}, {0, 0, -1, 1}};
+  Vector<float4, 10> planes;
+  for (const float4 &p : clip) {
+    float4 local;
+    for (int i = 0; i < 4; i++) {
+      local[i] = dot_v4v4(vc->rv3d->persmatob[i], p);
+    }
+    planes.append(local);
+  }
+  if ((vc->rv3d->rflag & RV3D_CLIPPING) && vc->rv3d->clipbb) {
+    ED_view3d_clipping_local(vc->rv3d, vc->obedit->object_to_world().ptr());
+    for (int i = 0; i < 4; i++) {
+      planes.append(float4(vc->rv3d->clip_local[i]));
+    }
+  }
+  Array<uint16_t> outside(verts.size(), 0);
+  for (const int v : verts.index_range()) {
+    for (const int i : planes.index_range()) {
+      if (plane_point_side_v3(planes[i], verts[v]) < 0) {
+        outside[v] |= 1 << i;
+      }
+    }
+  }
+  Array<bool> hit(data.bm->totface, false);
+  for (const int i : tris.index_range()) {
+    const int face = orig ? orig[owners[i]] : owners[i];
+    if (face < 0 || face >= hit.size() || hit[face]) {
+      continue;
+    }
+    const int3 t = tris[i];
+    const int a = corners[t[0]], b = corners[t[1]], c = corners[t[2]];
+    if (outside[a] & outside[b] & outside[c]) {
+      continue;
+    }
+    hit[face] = !outside[a] || !outside[b] || !outside[c] ||
+                box_triangle_overlap(verts[a], verts[b], verts[c], planes,
+                                     outside[a] | outside[b] | outside[c]);
+  }
+  for (const int i : hit.index_range()) {
+    BMFace *face = BM_face_at_index(data.bm, i);
+    if (!BM_elem_flag_test(face, BM_ELEM_HIDDEN)) {
+      box_select_face(data, face, hit[i] && mesh_region_select_face_facing(vc, face, data.filter_backfacing));
+    }
+  }
+}
+
 static bool do_mesh_box_select(const ViewContext *vc,
                                wmGenericUserData *wm_userdata,
                                const rcti *rect,
@@ -4256,7 +4374,8 @@ static bool do_mesh_box_select(const ViewContext *vc,
   BoxSelectUserData data;
   ToolSettings *ts = vc->scene->toolsettings;
   BMesh *bm = BKE_editmesh_bmesh_get_for_write(vc->obedit);
-  const bool through = ts->mesh_select_flags & MESH_SELECT_THROUGH;
+  const bool through = !(ts->mesh_select_flags & MESH_BOX_SELECT_VISIBLE_ONLY);
+  const bool face_area = ts->mesh_select_flags & MESH_BOX_SELECT_FACE_AREA;
   data.filter_backfacing = mesh_region_select_filter_backfacing(vc, through);
   if (data.filter_backfacing) {
     BM_mesh_normals_update(bm);
@@ -4328,11 +4447,26 @@ static bool do_mesh_box_select(const ViewContext *vc,
   }
 
   if (ts->selectmode & SCE_SELECT_FACE) {
-    if (use_zbuf) {
+    if (use_zbuf && face_area) {
       data.is_changed |= edbm_backbuf_check_and_select_faces(
           esel, vc->depsgraph, vc->obedit, bm, data.uv_selctx, sel_op);
     }
+    else if (face_area) {
+      mesh_box_select_face_areas(data);
+    }
     else {
+      if (use_zbuf) {
+        if (!esel->face_pixels) {
+          rcti pixels = *rect;
+          pixels.xmax++;
+          pixels.ymax++;
+          uint len;
+          esel->face_pixels = DRW_select_buffer_read(vc->depsgraph, vc->region, vc->v3d, &pixels, &len);
+        }
+        data.check_face_pixels = true;
+        data.face_pixels = esel->face_pixels;
+        data.face_offset = DRW_select_buffer_context_offset_for_object_elem(vc->depsgraph, vc->obedit, SCE_SELECT_FACE);
+      }
       mesh_foreachScreenFace(
           vc, do_mesh_box_select__doSelectFace, &data, V3D_PROJ_TEST_CLIP_DEFAULT);
     }

@@ -2031,6 +2031,8 @@ ENUM_OPERATORS(eTool_SelectMode)
 enum eMeshSelectFlag {
   MESH_SELECT_THROUGH = 1 << 0,
   MESH_SELECT_EXCLUDE_BACKFACING = 1 << 1,
+  MESH_BOX_SELECT_VISIBLE_ONLY = 1 << 2,
+  MESH_BOX_SELECT_FACE_AREA = 1 << 3,
 };
 
 /** #MeshStatVis::type */

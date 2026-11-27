@@ -352,7 +352,7 @@ struct Instance : public DrawEngine {
         const BMesh *bm = orig_edit_mesh ? BKE_editmesh_bmesh_get(orig_edit_mesh) : nullptr;
 
         if (bm) {
-          bool draw_facedot = check_ob_drawface_dot(select_mode, v3d, eDrawType(ob->dt));
+          bool draw_facedot = !(draw_ctx->scene->toolsettings->mesh_select_flags & MESH_BOX_SELECT_FACE_AREA) && check_ob_drawface_dot(select_mode, v3d, eDrawType(ob->dt));
           return edit_mesh_sync(ob, bm, res_handle, select_mode, draw_facedot, index_start);
         }
         return mesh_sync(ob, res_handle, select_mode, index_start);
